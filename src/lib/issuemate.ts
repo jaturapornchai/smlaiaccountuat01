@@ -87,10 +87,19 @@ export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLi
   const sent = readSent();
   if (sent[key]) return { status: "duplicate", code: sent[key], message: `ปัญหาเดียวกับ ${sent[key]} ที่ส่งไปแล้ว`, at: at() };
 
-  const shot = failed.find((s) => s.evidence?.endsWith(".png"))?.evidence;
-  const png = shot && existsSync(join(outDir, shot)) ? readFileSync(join(outDir, shot)).toString("base64") : undefined;
   const line = (s: ScriptRun["steps"][number]) =>
     `- ขั้น ${s.i + 1} ${s.title} [${s.kind}]${s.detail ? ` — ${s.detail}` : ""}${s.expected !== undefined ? `\n  - คาดหวัง: \`${s.expected}\`` : ""}${s.actual !== undefined ? `\n  - ค่าจริง: \`${s.actual}\`` : ""}`;
+  // สคริปต์เดียว = issue เดียว: ขั้นแรกที่พังเปลี่ยนไปในรอบใหม่ (เช่น smoke ที่ตรวจหลายเมนู) → ต่อท้ายผลใน issue เดิมแทนการเปิดใหม่ จนกว่าสคริปต์จะผ่าน (clearSent)
+  const open = Object.entries(sent).find(([k]) => k.startsWith(`${run.scriptId}#`))?.[1];
+  if (open) {
+    // รอบตรวจซ้ำของ issue นี้ → sendToIssueMate แจ้งผลใน issue เองแล้ว ไม่ต้องซ้ำ
+    if (run.retestOf !== open) await commentIssue(open, [`รอบ \`${run.id}\` ยังไม่ผ่าน (ผ่าน ${run.passed} ไม่ผ่าน ${run.failed} ข้าม ${run.skipped})`, ...failed.map(line)].join("\n").slice(0, 20_000));
+    writeFileSync(SENT_FILE, JSON.stringify({ ...sent, [key]: open }, null, 1));
+    return { status: "duplicate", code: open, message: `สคริปต์เดิมยังไม่ผ่าน — ต่อท้ายผลรอบนี้ใน ${open}`, at: at() };
+  }
+
+  const shot = failed.find((s) => s.evidence?.endsWith(".png"))?.evidence;
+  const png = shot && existsSync(join(outDir, shot)) ? readFileSync(join(outDir, shot)).toString("base64") : undefined;
   const facts = [
     `สคริปต์: uat-scripts/${run.scriptId}.json — ${run.scriptTitle}`,
     ...(run.scriptId.startsWith("ask-") ? ["(สคริปต์นี้ AI เขียนจากคำสั่ง — ตรวจก่อนว่า SQL/ค่าคาดหวังในสคริปต์ถูกต้อง แล้วค่อยแก้ระบบ)"] : []),

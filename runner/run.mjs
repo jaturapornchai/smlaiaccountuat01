@@ -171,6 +171,7 @@ async function loadStagehand() {
 }
 const freePort = () => new Promise((ok, no) => { const srv = createServer().on("error", no).listen(0, "127.0.0.1", () => { const { port } = srv.address(); srv.close(() => ok(port)); }); });
 
+let gone = "";
 async function ensurePage() {
   if (page) return page;
   const chromium = await loadPlaywright();
@@ -191,6 +192,9 @@ async function ensurePage() {
     context = await browser.newContext({ viewport, locale: "th-TH" });
     page = await context.newPage();
   }
+  // เบราว์เซอร์ของตัวทดสอบดับ (OOM-killer / รีสตาร์ทบริการ) → ขั้นที่เหลือพังเพราะเครื่องทดสอบ ไม่ใช่ ERP
+  browser.on("disconnected", () => { gone ||= "เบราว์เซอร์ของตัวทดสอบปิดตัว (หน่วยความจำเครื่องไม่พอหรือบริการรีสตาร์ท)"; });
+  page.on("crash", () => { gone ||= "หน้าเว็บในเบราว์เซอร์ของตัวทดสอบแครช (มักเพราะหน่วยความจำไม่พอ)"; });
   page.on("dialog", (d) => { dialogs.push(`${d.type()}: ${d.message()}`); d.accept().catch(() => {}); });
   // แนบข้อความ error จากเซิร์ฟเวอร์ (ผ่าน cut = ตัดค่าลับ) ให้รู้ว่าพังเพราะอะไร · ponytail: อ่าน body แบบ async — ถ้าตอบช้ามากอาจไปนับในขั้นตรวจถัดไป
   page.on("response", async (r) => { if (r.status() >= 400 && r.url().startsWith(base.origin)) { const body = (await r.text().catch(() => "")).replace(/\s+/g, " ").trim(); issues.push(`HTTP ${r.status()} ${r.request().method()} ${new URL(r.url()).pathname}${body ? ` → ${cut(body, 160)}` : ""}`); } });
@@ -480,6 +484,11 @@ async function exec(step) {
     if (step.do.startsWith("ui.")) await live();
     return true;
   } catch (e) {
+    if (gone) {
+      counts.skipped++;
+      emit({ t: "step", i: step.i, status: "skipped", durationMs: Date.now() - t0, detail: cut(`${gone} · ${e.message}`, 500) });
+      return false;
+    }
     counts.failed++;
     const evidence = page && step.do.startsWith("ui.") ? await shot(`fail-${step.i}`) : undefined;
     emit({ t: "step", i: step.i, status: "failed", durationMs: Date.now() - t0, detail: cut(e.message, 500), expected: e.expected === undefined ? undefined : cut(e.expected), actual: e.actual === undefined ? undefined : cut(e.actual), evidence });
@@ -494,10 +503,11 @@ try {
   let stop = false;
   for (const step of main) {
     if (stop) { counts.skipped++; emit({ t: "step", i: step.i, status: "skipped" }); continue; }
-    if (!(await exec(step)) && !step.continueOnFail) stop = true;
+    if (!(await exec(step)) && (!step.continueOnFail || gone)) stop = true;
   }
   for (const step of tail) await exec(step); // cleanup always runs
-  emit({ t: "end", status: counts.failed ? "failed" : "passed", ...counts, issues: issues.length, dialogs: dialogs.length });
+  // รอบที่เครื่องทดสอบล้มกลางทาง = error (ไม่เปิด issue) ให้รันใหม่ แทนที่จะโทษ ERP
+  emit({ t: "end", status: gone ? "error" : counts.failed ? "failed" : "passed", ...counts, issues: issues.length, dialogs: dialogs.length, ...(gone && { message: `${gone} — รอบนี้ไม่สมบูรณ์ ไม่ใช่ข้อผิดพลาดของ ERP · สั่งรันใหม่ได้` }) });
 } catch (e) {
   emit({ t: "end", status: "error", message: cut(e.message, 500) });
   process.exitCode = 2;
