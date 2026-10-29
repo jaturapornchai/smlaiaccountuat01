@@ -199,7 +199,7 @@ function finish(run: ScriptRun) {
   pump();
   // ตรวจไม่ผ่าน → เปิด issue ให้หาวิธีแก้ทันที (ลุงจืดสั่ง 2026-10-29) · สคริปต์ ask-* ที่ AI เขียนเองจะมีหมายเหตุใน issue ให้ตรวจสคริปต์ก่อน
   // ยกเว้นพังเพราะตัวสคริปต์เอง (ไม่ใช่หลักฐานว่าระบบผิด) — รอบตรวจซ้ำของ issue ยังส่งเสมอ ให้คนแก้รู้ผล
-  // สคริปต์ auto-* ที่ AI เสนอเองไม่เปิด issue อัตโนมัติ (ลุงจืดสั่ง 2026-10-29: เปิด ticket ไม่จริงบ่อย) — ตรวจแล้วกด "ส่งเข้า IssueMate" เอง
+  // สคริปต์ auto-* ที่ AI เสนอเองเปิด ticket เองโดยไม่รอคน ผ่านด่าน AI เดียวกับ ask-* (ลุงจืดสั่ง 2026-10-29 รอบ 2)
   if (run.status === "failed" && getSettings().autoIssueMate) void autoIssue(run, bot);
   // รอบลองสคริปต์ที่ AI ซ่อมไม่ปิดวงจร issue เดิม: สคริปต์เปลี่ยนแล้ว ผ่านไม่ได้แปลว่าบั๊กเดิมหาย
   if (ok && run.healOf) void import("./command").then((m) => m.promoteHeal(run));
@@ -224,12 +224,11 @@ async function autoIssue(run: ScriptRun, bot: BotConfig) {
   const fault = run.retestOf ? undefined : scriptFault(run);
   let own = fault && `ขั้น ${fault.i + 1}: ${(fault.detail ?? "").slice(0, 120)}`;
   if (fault) run.noIssue = `สคริปต์พังเอง ยังไม่ได้ตรวจ ERP (${own}) — แก้สคริปต์แล้วรันใหม่`;
-  else if (!run.retestOf && run.scriptId.startsWith("auto-")) run.noIssue = "สคริปต์ที่ AI เสนอเอง — ตรวจผลก่อน ถ้าเป็นบั๊กจริงกด \"ส่งเข้า IssueMate\" ที่หน้ารอบนี้";
   else if (!run.retestOf && run.ai) {
     const why = await aiTriage(run, join(RUN_DIR, run.id), getSettings().analystModel);
     if (why) run.noIssue = `AI ตรวจแล้วเห็นว่าสคริปต์ผิดเอง: ${(own = why)} — ถ้าเป็นบั๊กจริงกด "ส่งเข้า IssueMate" ที่หน้ารอบนี้`;
   }
-  if (run.healOf && !own) void import("./command").then((m) => m.promoteHeal(run)); // ไปถึง ERP แล้ว (รวม auto-* ที่ไม่เปิดเอง)
+  if (run.healOf && !own) void import("./command").then((m) => m.promoteHeal(run)); // ไปถึง ERP แล้ว
   if (!run.noIssue) return void (await sendToIssueMate(run));
   if (run.healOf && own) run.noIssue = `สคริปต์ที่ AI ซ่อมยังพังเอง ไม่บันทึกทับ: ${run.noIssue}`;
   else if (own && run.ai && !run.healOf) {
