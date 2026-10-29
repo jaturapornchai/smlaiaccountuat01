@@ -1,5 +1,6 @@
 import { BotConfig, BotEvent, BotStatus, SwarmSettings } from "@/types/bot";
 import { DEFAULT_MODELS, MODEL_KEYS } from "./brain";
+import { isTime, loadState, saveState } from "./nightly";
 import { INITIAL_BOTS } from "./swarm-data";
 
 // สถานะอยู่ในหน่วยความจำของ Node (รีสตาร์ทเซิร์ฟเวอร์แล้วเริ่มใหม่) — ผลการรันจริงเก็บถาวรที่ runs/<id>/run.json
@@ -21,6 +22,9 @@ global.__openhands_swarm_settings ??= {
   autoRetest: process.env.UAT_AUTO_RETEST !== "0",
   maxParallelBots: 3,
   headed: process.env.UAT_HEADED === "1",
+  // รอบกลางคืนจดลงไฟล์ (settings อื่นหายตอนรีสตาร์ท แต่ deploy ต้องไม่ปิดรอบคืนเอง) · ค่าเริ่มต้นปิด
+  nightlyEnabled: loadState().enabled,
+  nightlyTime: loadState().time,
 };
 
 export const getBots = (): BotConfig[] => global.__openhands_swarm_bots!;
@@ -67,11 +71,18 @@ export function updateSettings(input: Record<string, unknown>): SwarmSettings {
   if (typeof input.autoScripts === "boolean") next.autoScripts = input.autoScripts;
   if (typeof input.autoRetest === "boolean") next.autoRetest = input.autoRetest;
   if (typeof input.headed === "boolean") next.headed = input.headed;
+  const nightlyTime = str(input.nightlyTime);
+  if (nightlyTime !== undefined) {
+    if (!isTime(nightlyTime)) throw new Error("เวลารอบกลางคืนต้องเป็นรูปแบบ HH:MM เช่น 02:00");
+    next.nightlyTime = nightlyTime;
+  }
+  if (typeof input.nightlyEnabled === "boolean") next.nightlyEnabled = input.nightlyEnabled;
   if (input.maxParallelBots !== undefined) {
     const n = Number(input.maxParallelBots);
     if (!Number.isInteger(n) || n < 1 || n > 10) throw new Error("จำนวนบอทรันพร้อมกันต้องเป็นเลข 1–10");
     next.maxParallelBots = n;
   }
   global.__openhands_swarm_settings = next;
+  if (next.nightlyEnabled !== cur.nightlyEnabled || next.nightlyTime !== cur.nightlyTime) saveState({ ...loadState(), enabled: next.nightlyEnabled, time: next.nightlyTime });
   return next;
 }

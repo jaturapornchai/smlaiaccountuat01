@@ -4,6 +4,8 @@ import { ScriptRun } from "@/types/bot";
 import { pushActivity, waitActivity, waitAny } from "./activity";
 import { scriptsForIssue } from "./issuemate";
 import { logDays, readLogs, timed } from "./log";
+import { nightLines } from "./nightly";
+import { nightReport } from "./nightly-run";
 import { getBots, getSettings, updateSettings } from "./swarm-store";
 import { testDb } from "./test-db";
 import { checkAll } from "./uat-health";
@@ -20,7 +22,7 @@ const strs = { type: "array", items: str } as const;
 export const TOOLS = [
   {
     name: "status",
-    description: "Tester health (ERP web, demo DB, brain, IssueMate), settings and counts. bots:true adds one line per bot. settings:{erpTargetUrl,brainModel,scriptModel,analystModel,eyesModel,autoIssueMate,autoScripts,autoRetest,maxParallelBots(1-10),headed} updates settings.",
+    description: "Tester health (ERP web, demo DB, brain, IssueMate), settings and counts. bots:true adds one line per bot. settings:{erpTargetUrl,brainModel,scriptModel,analystModel,eyesModel,autoIssueMate,autoScripts,autoRetest,maxParallelBots(1-10),headed,nightlyEnabled,nightlyTime(HH:MM Bangkok)} updates settings.",
     inputSchema: { type: "object", properties: { bots: bool, settings: { type: "object" } } },
   },
   {
@@ -64,6 +66,11 @@ export const TOOLS = [
     inputSchema: { type: "object", properties: { action: { type: "string", enum: ["list", "create", "drop"] }, name: str }, required: ["action"] },
   },
   {
+    name: "nightly",
+    description: "Morning summary of the nightly full regression (all scripts except AI-written ask-*/auto-*; on/off + Bangkok time via status settings nightlyEnabled/nightlyTime, default off). date YYYY-MM-DD, default latest night. Counts pass/fail/skip, failed scripts with their IssueMate ticket, and the diff vs the previous night (new failures / fixed).",
+    inputSchema: { type: "object", properties: { date: str } },
+  },
+  {
     name: "notify",
     description: "Show a short message to the human watching the tester web page (animated card), e.g. what you are fixing or about to test.",
     inputSchema: { type: "object", properties: { text: str }, required: ["text"] },
@@ -90,7 +97,7 @@ async function status(a: Args) {
   const { scripts, errors } = loadScripts();
   const out = [
     ...(["erp", "db", "brain", "issuemate"] as const).map((k) => `${k}: ${h[k].ok ? "ok" : "FAIL"} ${h[k].message}`),
-    `settings: target=${s.erpTargetUrl} brain=${s.brainModel} script=${s.scriptModel} analyst=${s.analystModel} eyes=${s.eyesModel} autoIssue=${s.autoIssueMate} autoScripts=${s.autoScripts} autoRetest=${s.autoRetest} parallel=${s.maxParallelBots}`,
+    `settings: target=${s.erpTargetUrl} brain=${s.brainModel} script=${s.scriptModel} analyst=${s.analystModel} eyes=${s.eyesModel} autoIssue=${s.autoIssueMate} autoScripts=${s.autoScripts} autoRetest=${s.autoRetest} parallel=${s.maxParallelBots} nightly=${s.nightlyEnabled ? s.nightlyTime : "off"}`,
     `scripts=${scripts.length}${errors.length ? ` invalid=${errors.map((e) => `${e.file}(${e.error})`).join(",")}` : ""} active=${activeRunCount()}`,
   ];
   if (a.bots) for (const b of getBots()) out.push(`${b.id}|${b.role}/${b.lens}|${b.status}|runs ${b.stats.runs} ✓${b.stats.passed} ✗${b.stats.failed}`);
@@ -216,6 +223,7 @@ async function dispatch(name: string, a: Args, signal: AbortSignal): Promise<str
       return JSON.stringify({ days: logDays().slice(0, 30), ...r });
     }
     case "test_db": return testDb(String(a.action ?? ""), String(a.name ?? ""));
+    case "nightly": return nightly(a);
     case "notify":
       if (!String(a.text ?? "").trim()) throw new Error("text required");
       return "shown";
@@ -229,6 +237,14 @@ async function saveFromMcp(a: Args) {
   const sc = a.script as Args | undefined;
   if (sc && typeof sc === "object" && Array.isArray(sc.steps)) await (await import("./command")).checkScript(sc as never);
   return saveScript({ ...a, script: sc && typeof sc === "object" ? { ...sc, ai: true } : sc });
+}
+
+async function nightly(a: Args) {
+  const date = typeof a.date === "string" ? a.date : undefined;
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must be YYYY-MM-DD");
+  const r = await nightReport(date);
+  const cfg = `nightly ${r.enabled ? "ON" : "OFF"} ${r.time} Asia/Bangkok · nights: ${r.nights.slice(0, 7).join(",") || "none yet"}`;
+  return [cfg, ...(r.summary ? nightLines(r.summary) : [date ? `no night run on ${date}` : "no night run yet"])].join("\n");
 }
 
 // import ตอนเรียก กัน import วนกับ command.ts (ซึ่งใช้ saveScript ของไฟล์นี้)

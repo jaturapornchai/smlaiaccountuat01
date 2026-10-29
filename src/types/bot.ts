@@ -77,6 +77,8 @@ export interface SwarmSettings {
   autoRetest: boolean; // ticket ที่ Tester เปิดเป็น deployed ใน IssueMate → รันสคริปต์เดิมตรวจซ้ำเอง (auto-retest.ts)
   maxParallelBots: number;
   headed: boolean;
+  nightlyEnabled: boolean; // รอบ regression เต็มตอนกลางคืน (ค่าเริ่มต้นปิด) — จดลง runs/nightly.json เพราะ settings อื่นหายตอนรีสตาร์ท
+  nightlyTime: string; // HH:MM เวลาไทย (Asia/Bangkok)
 }
 
 export interface BroadcastRequest {
@@ -153,6 +155,7 @@ export interface ScriptRun {
   retestOf?: string; // เลข issue ที่สั่งตรวจซ้ำ
   ai?: boolean; // สคริปต์ที่ AI เขียน (ดู UatScript.ai)
   healOf?: string; // รอบลองสคริปต์ที่ AI ซ่อม: รันจาก runs/<healOf>/heal.json แทนไฟล์ในคลัง (command.ts healScript)
+  nightly?: string; // รอบกลางคืนของวันที่ไทย YYYY-MM-DD ที่สั่งรอบนี้ (ไว้สรุปเช้า)
   liveAt?: string; // เวลาภาพหน้าจอสดล่าสุด (runs/<id>/live.jpg)
 }
 
