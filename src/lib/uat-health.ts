@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { HealthCheck as Check, HealthReport } from "@/types/bot";
-import { checkBrain } from "./brain";
+import { checkBrain, MODEL_KEYS } from "./brain";
 import { checkIssueMate } from "./issuemate";
 import { getSettings } from "./swarm-store";
 
@@ -52,6 +52,6 @@ async function checkDb(): Promise<Check> {
 
 export async function checkAll(): Promise<HealthReport> {
   const s = getSettings();
-  const [erp, db, brain, issuemate] = await Promise.all([ping(s.erpTargetUrl, "เว็บ ERP"), checkDb(), checkBrain(s.brainModel), checkIssueMate()]);
+  const [erp, db, brain, issuemate] = await Promise.all([ping(s.erpTargetUrl, "เว็บ ERP"), checkDb(), checkBrain(MODEL_KEYS.map((k) => s[k])), checkIssueMate()]);
   return { erp: { ...erp, url: s.erpTargetUrl }, db, brain, issuemate, timestamp: new Date().toISOString() };
 }

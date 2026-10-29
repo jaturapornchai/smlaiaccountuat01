@@ -3,7 +3,15 @@ import { timed } from "./log";
 
 // สมองของบอท = Ollama Cloud — คีย์อยู่ใน .env.local เท่านั้น
 const API = process.env.OLLAMA_API_URL || "https://ollama.com";
-export const DEFAULT_BRAIN = process.env.OLLAMA_MODEL || "deepseek-v4.1-flash"; // เร็ว ~1 วิ อ่านภาพได้ ตอบไทยได้ (ทดสอบ 2026-10-29)
+// รุ่นตามงาน — วัดกับงานจริง 2026-10-29: เขียนสคริปต์ mistral-large-4 ตรวจ 6 มิติ SQL ใช้ได้ 6/6 (deepseek-v4.1-flash ได้ 4 มิติ)
+// วิเคราะห์ issue mistral-large-4 บอกชัดว่าส่วนไหนเดา (deepseek-v4-pro แต่งชื่อตาราง) · ดูจอ kimi-k3 ชี้ถูก 4/4 · งานเร็ว deepseek-v4.1-flash ~1 วิ
+export const DEFAULT_MODELS = {
+  brainModel: process.env.OLLAMA_MODEL || "deepseek-v4.1-flash",
+  scriptModel: process.env.UAT_SCRIPT_MODEL || "mistral-large-4",
+  analystModel: process.env.UAT_ANALYST_MODEL || "mistral-large-4",
+  eyesModel: process.env.UAT_EYES_MODEL || "kimi-k3",
+};
+export const MODEL_KEYS = Object.keys(DEFAULT_MODELS) as (keyof typeof DEFAULT_MODELS)[];
 
 const auth = () => {
   const key = process.env.OLLAMA_API_KEY;
@@ -68,14 +76,16 @@ export async function webResearch(queries: string[], perQuery = 3): Promise<stri
     .join("\n");
 }
 
-export async function checkBrain(model: string): Promise<HealthCheck> {
+export async function checkBrain(models: string[]): Promise<HealthCheck> {
   try {
     const res = await fetch(`${API}/api/tags`, { headers: auth(), signal: AbortSignal.timeout(8000) });
     if (!res.ok) return { ok: false, message: `Ollama Cloud ตอบ HTTP ${res.status}`, url: API };
     const names: string[] = ((await res.json()).models ?? []).map((m: { name: string }) => m.name);
-    return names.includes(model)
-      ? { ok: true, message: `สมอง AI พร้อม (${model})`, url: API }
-      : { ok: false, message: `ไม่พบโมเดล ${model} ใน Ollama Cloud`, url: API };
+    const want = [...new Set(models)];
+    const missing = want.filter((m) => !names.includes(m));
+    return missing.length
+      ? { ok: false, message: `ไม่พบโมเดล ${missing.join(", ")} ใน Ollama Cloud`, url: API }
+      : { ok: true, message: `สมอง AI พร้อม (${want.join(" · ")})`, url: API };
   } catch (e) {
     return { ok: false, message: `ต่อ Ollama Cloud ไม่ได้: ${(e as Error).message}`, url: API };
   }

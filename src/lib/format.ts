@@ -8,6 +8,7 @@ export const fmtSpan = (from?: string, to?: string) => (from ? fmtDur((to ? Date
 export function kindLabel(kind: string) {
   if (kind.startsWith("ui.")) return "หน้าจอ";
   if (kind.startsWith("api.")) return "API";
+  if (kind === "report.pdf") return "รายงาน PDF";
   if (kind === "db.exec") return "SQL เขียน";
   if (kind.startsWith("db.")) return "SQL";
   return kind === "wait" ? "รอ" : "ตัวแปร";

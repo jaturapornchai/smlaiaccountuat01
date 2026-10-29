@@ -444,6 +444,26 @@ const ACTIONS = {
     for (const [name, path] of Object.entries(p.save ?? {})) vars[name] = String(dig(body, path) ?? "");
     return { detail: `${p.method ?? "GET"} ${url.pathname} → ${res.status()}`, evidence };
   },
+  // PDF แบบที่ผู้ใช้กดพิมพ์รายงาน (backend gopdf ฝังฟอนต์ไทยเป็นตัวอักษรจริง) → pdftotext แล้วหาค่าที่ต้องมี · ภาพหน้าแรกเป็นหลักฐาน
+  // ponytail: ตรวจว่ามีข้อความ ไม่เทียบตำแหน่งคอลัมน์ — วรรณยุกต์ไทยบางตัวในไฟล์เป็น private-use (U+F70A–F70F) จึงหาเลข/เลขเอกสารเป็นหลัก
+  async "report.pdf"(p) {
+    await ensurePage();
+    const res = await context.request.fetch(sameOrigin("/api/process/report/pdf").href, { method: "POST", data: p.body, failOnStatusCode: false, timeout: p.timeout ?? 120_000 });
+    const buf = await res.body();
+    if (res.status() !== 200 || buf.subarray(0, 5).toString() !== "%PDF-") throw new Fail("ไม่ได้ไฟล์ PDF ของรายงาน", "HTTP 200 + ไฟล์ PDF", `${res.status()} ${res.headers()["content-type"] ?? ""} ${cut(buf.toString("utf8"), 200)}`);
+    const base = `${String(++evidenceSeq).padStart(3, "0")}-report`;
+    const pdf = join(outDir, `${base}.pdf`);
+    writeFileSync(pdf, buf);
+    let text;
+    try { text = execFileSync("pdftotext", ["-layout", pdf, "-"], { encoding: "utf8", timeout: 30_000 }); }
+    catch (e) { throw Object.assign(new Fail(`อ่านข้อความใน PDF ไม่ได้ (เครื่องทดสอบต้องมี pdftotext จาก poppler-utils): ${cut(e.message, 200)}`), { evidence: `${base}.pdf` }); }
+    let evidence = `${base}.pdf`;
+    try { execFileSync("pdftoppm", ["-png", "-r", "80", "-f", "1", "-l", "1", "-singlefile", pdf, join(outDir, base)], { timeout: 30_000 }); evidence = `${base}.png`; } catch { /* ไม่มีภาพก็ยังมีไฟล์ PDF */ }
+    const flat = text.replace(/\s+/g, " ");
+    const want = [].concat(p.contains ?? []).map(String);
+    for (const w of want) if (!flat.includes(w)) throw Object.assign(new Fail(`PDF รายงานไม่มีข้อความ "${w}"`, w, cut(flat, 300)), { evidence });
+    return { detail: `PDF ${Math.ceil(buf.length / 1024)} KB · พบครบ ${want.length} ค่า`, evidence };
+  },
   async "db.query"(p) {
     const db = ensureDemoDb(p.database);
     const rows = parseCsv(psql(p.sql, { readOnly: true, csv: true, db }));
@@ -477,6 +497,10 @@ async function exec(step) {
     const fn = ACTIONS[step.do];
     if (!fn) throw new Fail(`ไม่รู้จักประเภทขั้นตอน "${step.do}"`);
     const p = fillDeep(step);
+    // ขั้นที่ไม่มีหน้าจอ (SQL/API) → ส่งคำสั่งจริงให้การ์ดบอทโชว์แทนภาพ · cut ตัดความยาวและปิดความลับให้
+    const call = step.do === "report.pdf" ? "POST /api/process/report/pdf" : step.do === "api.request" ? `${p.method ?? "GET"} ${p.path}` : "";
+    const query = step.do.startsWith("db.") ? p.sql : call && `${call}${p.body ? ` ${JSON.stringify(p.body)}` : ""}`;
+    if (query) emit({ t: "step", i: step.i, status: "running", query: cut(query, 600) });
     const r = (await fn(p)) ?? {};
     if (p.wait && page) await page.waitForTimeout(Math.min(p.wait, 30_000));
     counts.passed++;
@@ -490,7 +514,7 @@ async function exec(step) {
       return false;
     }
     counts.failed++;
-    const evidence = page && step.do.startsWith("ui.") ? await shot(`fail-${step.i}`) : undefined;
+    const evidence = e.evidence ?? (page && step.do.startsWith("ui.") ? await shot(`fail-${step.i}`) : undefined);
     emit({ t: "step", i: step.i, status: "failed", durationMs: Date.now() - t0, detail: cut(e.message, 500), expected: e.expected === undefined ? undefined : cut(e.expected), actual: e.actual === undefined ? undefined : cut(e.actual), evidence });
     if (step.do.startsWith("ui.")) await live();
     return false;

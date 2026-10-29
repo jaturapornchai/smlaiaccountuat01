@@ -5,7 +5,7 @@ import { RUN_DIR } from "@/lib/uat-runs";
 
 // ชื่อไฟล์ถูกจำกัดด้วย regex (ไม่มี / .. หรือ \) กัน path traversal
 const ID = /^[A-Z0-9]+$/;
-const FILE = /^[\w-]+\.(png|jpg|json)$/;
+const FILE = /^[\w-]+\.(png|jpg|json|pdf)$/;
 
 export const GET = (_req: Request, { params }: { params: Promise<{ id: string; file: string }> }) =>
   guard(async () => {
@@ -18,6 +18,6 @@ export const GET = (_req: Request, { params }: { params: Promise<{ id: string; f
       return bad("ไม่พบไฟล์หลักฐาน", 404);
     }
     return new Response(new Uint8Array(data), {
-      headers: { "Content-Type": file.endsWith(".png") ? "image/png" : file.endsWith(".jpg") ? "image/jpeg" : "application/json; charset=utf-8", "Cache-Control": "no-store" },
+      headers: { "Content-Type": file.endsWith(".png") ? "image/png" : file.endsWith(".jpg") ? "image/jpeg" : file.endsWith(".pdf") ? "application/pdf" : "application/json; charset=utf-8", "Cache-Control": "no-store" },
     });
   });

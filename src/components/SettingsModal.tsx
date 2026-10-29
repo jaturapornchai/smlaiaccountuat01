@@ -24,6 +24,13 @@ const Row: React.FC<{ label: string; check?: HealthCheck }> = ({ label, check })
   </li>
 );
 
+// รุ่นตามงาน · ค่าแนะนำ = ค่าเริ่มต้นใน DEFAULT_MODELS (lib/brain.ts) ที่วัดกับงานจริงแล้ว
+const MODEL_FIELDS = [
+  ["brainModel", "รุ่น AI งานเร็ว (เลือกบอท · กดหน้าจอแทนคน)", "deepseek-v4.1-flash"],
+  ["scriptModel", "รุ่น AI เขียนสคริปต์ตรวจ", "mistral-large-4"],
+  ["analystModel", "รุ่น AI วิเคราะห์ก่อนเปิด issue", "mistral-large-4"],
+  ["eyesModel", "รุ่น AI ดูภาพหน้าจอ (ui.see · ui.play)", "kimi-k3"],
+] as const;
 const field = "mt-1 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-[0.85rem] outline-none focus:border-cyan-300/50";
 
 export const SettingsModal: React.FC<Props> = ({ open, settings, health, onClose, onSaved, onRecheck, onReset }) => {
@@ -64,11 +71,13 @@ export const SettingsModal: React.FC<Props> = ({ open, settings, health, onClose
             <span className="font-semibold">เว็บ ERP ที่ทดสอบ</span>
             <input value={form.erpTargetUrl} onChange={(e) => set("erpTargetUrl", e.target.value)} className={field} placeholder="https://www.smlwork.com" />
           </label>
-          <label>
-            <span className="font-semibold">โมเดลสมอง AI (Ollama Cloud)</span>
-            <input value={form.brainModel} onChange={(e) => set("brainModel", e.target.value)} className={field} placeholder="deepseek-v4.1-flash" />
-            <span className="mt-1 block text-[0.7rem] text-slate-500">เช่น deepseek-v4.1-flash · deepseek-v4-pro:0813 · kimi-k3</span>
-          </label>
+          {MODEL_FIELDS.map(([k, label, hint]) => (
+            <label key={k}>
+              <span className="font-semibold">{label}</span>
+              <input value={form[k]} onChange={(e) => set(k, e.target.value)} className={field} placeholder={hint} />
+              <span className="mt-1 block text-[0.7rem] text-slate-500">ชื่อรุ่นบน Ollama Cloud · แนะนำ {hint}</span>
+            </label>
+          ))}
           <label>
             <span className="font-semibold">รันพร้อมกันสูงสุด (บอท)</span>
             <input type="number" min={1} max={10} value={form.maxParallelBots} onChange={(e) => set("maxParallelBots", Number(e.target.value))} className={field} />

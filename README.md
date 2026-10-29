@@ -45,7 +45,8 @@
    - ตัวรันพิมพ์ผลทีละบรรทัด (JSON) → หน้าจอแสดงไทม์ไลน์ขั้นตอน ค่าที่คาดหวังเทียบค่าจริง และภาพหลักฐาน
    - ขั้น `cleanup` รันเสมอแม้ขั้นหลักพัง
    - หลังทุกขั้นที่เป็นหน้าจอ (`ui.*`) ตัวรันเขียนทับภาพ `runs/<id>/live.jpg` → การ์ดบอทบนหน้าแรกโชว์จอสดว่ากำลังทำอะไร (การ์ดเรียงบอทที่กำลังรันก่อน แล้วตามเวลาทำงานล่าสุด, `src/components/BotCard.tsx`)
-3. ผลถาวรเก็บที่ `runs/<id>/run.json` พร้อมไฟล์หลักฐาน `NNN-*.png|json`
+   - ขั้นที่ไม่มีหน้าจอ (`db.*`, `api.request`, `report.pdf`) ตัวรันส่งคำสั่งจริงที่เติมตัวแปรแล้ว (`query`, ตัดที่ 600 ตัว ปิดค่าลับ) → การ์ดโชว์ SQL/คำขอ API แทนภาพ: ขณะรัน = ขั้นที่กำลังทำ, จบแล้ว = ขั้นที่ไม่ผ่าน หรือขั้นสุดท้ายที่มีคำสั่ง · issue ที่เปิดก็แนบคำสั่งนี้ไปด้วย
+3. ผลถาวรเก็บที่ `runs/<id>/run.json` พร้อมไฟล์หลักฐาน `NNN-*.png|json|pdf`
 4. ถ้ารอบนั้น **ไม่ผ่าน** และเปิด "ส่งเข้า IssueMate อัตโนมัติ" ไว้ (`src/lib/issuemate.ts`):
    1. สมอง AI อ่านขั้นที่พังพร้อมภาพหน้าจอ แล้วเขียนบทวิเคราะห์ (เป็นการคาดเดา ต้องตรวจโค้ดจริง)
    2. ระบบเรียก `create_issue` ผ่าน MCP ของ IssueMate โดยตั้งระดับความสำคัญตามระดับปัญหา: S1→critical, S2→high, S3→medium, S4→low
@@ -127,9 +128,11 @@
 | `UAT_PG_DUMP` | ตำแหน่ง pg_dump สำหรับ `runner/make-test-template.sh` (สร้างแม่แบบ `uat_template` ของ `test_db`) |
 | `UAT_HEADED` | `1` = เปิดหน้าต่าง Chrome ให้เห็น |
 | `OLLAMA_API_URL`, `OLLAMA_API_KEY` | สมองของบอท (Ollama Cloud) |
-| `OLLAMA_MODEL` | ว่างไว้ = `deepseek-v4.1-flash` |
+| `OLLAMA_MODEL` | รุ่นงานเร็ว (เลือกบอท + `ui.act`) ว่างไว้ = `deepseek-v4.1-flash` |
+| `UAT_SCRIPT_MODEL` | รุ่นเขียนสคริปต์จากคำสั่ง ว่างไว้ = `mistral-large-4` |
+| `UAT_ANALYST_MODEL` | รุ่นวิเคราะห์รอบที่ไม่ผ่านก่อนเปิด issue ว่างไว้ = `mistral-large-4` |
 | `UAT_STAGEHAND` | ตำแหน่ง `@browserbasehq/stagehand/dist/index.mjs` (v4.3.0) สำหรับขั้น AI |
-| `UAT_EYES_MODEL` | ตา AI ที่ดูภาพแล้วบอกพิกัดคลิก ว่างไว้ = `kimi-k3` (ทดสอบ 2026-10-29 รุ่นอื่นชี้พิกัดไม่ได้) |
+| `UAT_EYES_MODEL` | ตา AI ของ `ui.see`/`ui.play` ดูภาพแล้วบอกพิกัดคลิก ว่างไว้ = `kimi-k3` |
 | `ISSUEMATE_MCP_URL`, `ISSUEMATE_PROJECT`, `ISSUEMATE_TOKEN` | ปลายทาง issue (MCP ของ IssueMate) |
 | `ISSUEMATE_AUTO` | `0` = ไม่ส่งอัตโนมัติ |
 | `UAT_MCP_TOKEN` | รหัสให้ AI เรียก `/api/mcp` (ไม่ตั้ง = MCP ปิด ตอบ 503) |
@@ -137,9 +140,20 @@
 | `UAT_ADMIN_EMAIL` | อีเมล Google ของผู้ดูแล หลายคนคั่นด้วยจุลภาค (จำเป็น — ไม่ตั้ง = ไม่มีใครสั่งงานผ่านหน้าเว็บได้) |
 | `GOOGLE_CLIENT_ID` | ว่างไว้ = Client ID ของ UAT Tester (`501250317679-5kud8…`, origin `https://uat.smlwork.com`) |
 
-หน้าตั้งค่า (ไอคอนเฟือง) แก้ได้ 5 ค่า:
+รุ่น AI แยกตามงาน (ค่าเริ่มต้นใน `DEFAULT_MODELS` ของ `src/lib/brain.ts`) เลือกจากการวัดกับงานจริงบน Ollama Cloud 2026-10-29:
+
+| งาน | รุ่น | หลักฐาน |
+|---|---|---|
+| เขียนสคริปต์ตรวจจากคำสั่ง | `mistral-large-4` | คำสั่งเดียวกันได้สคริปต์ 6 มิติ SQL ผ่าน `EXPLAIN` 6/6 (~23 วิ) · `deepseek-v4.1-flash` ได้ 4 มิติ |
+| วิเคราะห์ก่อนเปิด issue | `mistral-large-4` | แยกชัดว่าส่วนไหนเดา · `deepseek-v4-pro` แต่งชื่อตารางที่ไม่มีจริง |
+| ดูภาพหน้าจอ (`ui.see`, `ui.play`) | `kimi-k3` | ชี้พิกัดถูก 4/4 รุ่นอื่นชี้ไม่ได้ |
+| งานเร็ว (เลือกบอท, Stagehand `ui.act`) | `deepseek-v4.1-flash` | ตอบ ~1–4 วิ |
+
+สถานะสุขภาพ (`GET /api/health`, MCP `status`) ตรวจว่าทุกรุ่นมีใน Ollama Cloud
+
+หน้าตั้งค่า (ไอคอนเฟือง) แก้ได้ 8 ค่า:
 - เว็บ ERP
-- โมเดลสมอง AI
+- รุ่น AI 4 งาน
 - จำนวนรันพร้อมกัน
 - ส่งเข้า IssueMate อัตโนมัติ
 - เปิดหน้าต่าง Chrome ให้เห็น
@@ -149,6 +163,7 @@
 ## Dependency
 - Node 22+ (เครื่องลุงจืด Node 24, เซิร์ฟเวอร์ Node 22), pnpm, Next.js 15, React 19, Tailwind 3, lucide-react
 - Playwright + Chromium และ psql
+- poppler-utils (`pdftotext`, `pdftoppm`) สำหรับขั้น `report.pdf` — บน Ubuntu `apt-get install -y poppler-utils`
 - บริการภายนอก:
   - Ollama Cloud (`https://ollama.com/api/chat`)
   - IssueMate MCP (`https://issue.dedezoom.com/mcp`)
@@ -239,6 +254,7 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 - หน้าจอ: `ui.goto`, `ui.demoLogin`, `ui.adminLogin` `{targetPath: "/admin/providers" | "/home"}`, `ui.openMenu`, `ui.click`, `ui.fill`, `ui.select`, `ui.press`, `ui.readText`, `ui.expectText`, `ui.expectVisible`, `ui.expectValue`, `ui.expectUrl`, `ui.expectClean`, `ui.screenshot`
 - AI กดเล่นหน้าจอ: `ui.act` `{instruction}` (Stagehand ทำ 1 อย่างตามคำสั่งภาษาไทย), `ui.see` `{expect}` (AI ดูภาพแล้วตัดสินผ่าน/ไม่ผ่าน), `ui.play` `{goal, maxSteps}` (Computer Use: AI ดูจอ คลิก พิมพ์ จนครบเป้าหมาย สิ่งผิดปกติที่ AI เห็น = ขั้นไม่ผ่าน บันทึกเอกสารทดสอบได้โดยใส่ `{{run.tag}}`) · ผลจาก AI ต้องให้คนยืนยันก่อนแก้
 - API: `api.request`
+- รายงาน PDF: `report.pdf` `{body, contains[]}` — ขอ PDF แบบที่ผู้ใช้กดพิมพ์รายงาน (`POST /api/process/report/pdf` ใช้ body เดียวกับ `/api/process/report/run`) แล้วหาทุกค่าใน `contains` จากข้อความในไฟล์ · หลักฐาน = ภาพหน้าแรก + ไฟล์ PDF (ปุ่ม "เปิด PDF รายงาน" ในไทม์ไลน์)
 - ฐานข้อมูล: `db.query` (อ่านอย่างเดียว), `db.exec` (เขียน — ใช้กับข้อมูลที่ขึ้นต้นด้วย UAT) · ใส่ `database` ได้ 3 ฐานทดสอบ (ดูข้อ 9 ใน Workflow)
 - อื่น ๆ: `wait`, `set`
 
@@ -247,6 +263,7 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 ถ้าไม่ใส่ `lens` ระบบเลือกให้เอง: มีขั้น `db.*` = data, ไม่มี = screen
 
 ## Limitation
+- `report.pdf` ตรวจว่ามีข้อความ ไม่ตรวจตำแหน่งคอลัมน์ · วรรณยุกต์ไทยบางตัวใน PDF ของ ERP เป็นอักษร private-use (U+F70A–F70F) คำไทยจึงหาไม่เจอ ให้ใส่เลขเอกสาร/ตัวเลขใน `contains`
 - `test_db` คัดลอกจากแม่แบบ `uat_template` ไม่ใช่ smldemo สด (smldemo มีคนต่ออยู่ตลอดจึงเป็นแม่แบบตรงๆ ไม่ได้) — อยากได้ข้อมูลล่าสุดให้รัน `sh runner/make-test-template.sh` บนเซิร์ฟเวอร์ (ใช้เวลาหลายนาที) · ฐานละ ~600 MB จึงจำกัด 5 ฐาน · ฐานใหม่จะโผล่ให้เลือกในจอ ERP ได้เมื่อมี provider `uatadmin` (ฐาน `smlerpmainuatadmin`) แล้วเท่านั้น ถ้ายังไม่มีใช้ได้จากขั้น `db.*` อย่างเดียว
 - ปุ่ม Google ใช้ได้เมื่อเพิ่ม `https://uat.smlwork.com` ใน Authorized JavaScript origins ของ Client ID นั้นใน Google Cloud Console แล้ว
 - ใครก็เปิดดูได้ รวมถึง SQL ในสคริปต์ ผลคิวรีของฐาน Demo และภาพหน้าจอ Demo (ไม่มีรหัสผ่าน/token: ตัวรันปิดค่าลับจาก env เป็น `***`)

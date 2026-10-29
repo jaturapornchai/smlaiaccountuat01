@@ -88,7 +88,7 @@ export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLi
   if (sent[key]) return { status: "duplicate", code: sent[key], message: `ปัญหาเดียวกับ ${sent[key]} ที่ส่งไปแล้ว`, at: at() };
 
   const line = (s: ScriptRun["steps"][number]) =>
-    `- ขั้น ${s.i + 1} ${s.title} [${s.kind}]${s.detail ? ` — ${s.detail}` : ""}${s.expected !== undefined ? `\n  - คาดหวัง: \`${s.expected}\`` : ""}${s.actual !== undefined ? `\n  - ค่าจริง: \`${s.actual}\`` : ""}`;
+    `- ขั้น ${s.i + 1} ${s.title} [${s.kind}]${s.detail ? ` — ${s.detail}` : ""}${s.expected !== undefined ? `\n  - คาดหวัง: \`${s.expected}\`` : ""}${s.actual !== undefined ? `\n  - ค่าจริง: \`${s.actual}\`` : ""}${s.query ? `\n  - คำสั่งที่รัน: \`${s.query}\`` : ""}`;
   // สคริปต์เดียว = issue เดียว: ขั้นแรกที่พังเปลี่ยนไปในรอบใหม่ (เช่น smoke ที่ตรวจหลายเมนู) → ต่อท้ายผลใน issue เดิมแทนการเปิดใหม่ จนกว่าสคริปต์จะผ่าน (clearSent)
   const open = Object.entries(sent).find(([k]) => k.startsWith(`${run.scriptId}#`))?.[1];
   if (open) {
@@ -111,7 +111,7 @@ export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLi
     ...(failed.length ? failed.map(line) : ["- (ไม่มีขั้นที่ไม่ผ่าน — รันผิดพลาดก่อนจบ)"]),
   ].join("\n");
 
-  const model = getSettings().brainModel;
+  const model = getSettings().analystModel;
   let analysis: string;
   try {
     // เรื่องเงิน/ภาษี/บัญชี → ค้นกฎทางการมาประกอบ (เรื่องโค้ดล้วนไม่ต้องค้น กัน prompt ฟุ้ง)

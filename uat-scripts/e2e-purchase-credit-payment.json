@@ -78,6 +78,12 @@
       ]
     },
     {
+      "title": "พิมพ์รายงานภาษีซื้อเป็น PDF (ปุ่มพิมพ์จริง) มีบิลนี้ ยอด 300.00 + 21.00 = 321.00",
+      "do": "report.pdf",
+      "body": { "menuKey": "menu_report_vat_buy", "mode": "summary", "dateFrom": "{{today}}", "dateTo": "{{today}}", "fromCode": "", "toCode": "", "orderBy": "", "keyword": "{{pu}}", "viewDetail": false },
+      "contains": ["{{pu}}", "300.00", "21.00", "321.00"]
+    },
+    {
       "title": "บันทึกจ่ายชำระเงินสดเต็มจำนวน 321.00",
       "do": "api.request",
       "method": "POST",

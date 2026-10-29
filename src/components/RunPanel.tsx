@@ -52,6 +52,12 @@ const Step: React.FC<{ run: ScriptRun; s: StepResult; onImage: (url: string) => 
             ดูหลักฐาน {s.evidence}
           </a>
         ))}
+      {s.evidence?.endsWith("-report.png") && (
+        <a href={evidenceUrl(run.id, s.evidence.replace(/png$/, "pdf"))} target="_blank" rel="noreferrer" className="baseline-center mt-1 gap-1 text-[0.7rem] text-cyan-300 hover:underline">
+          <FileText className="h-3 w-3" />
+          เปิด PDF รายงาน
+        </a>
+      )}
     </li>
   );
 };

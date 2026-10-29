@@ -68,7 +68,10 @@ export interface BotConfig {
 
 export interface SwarmSettings {
   erpTargetUrl: string;
-  brainModel: string; // โมเดลบน Ollama Cloud
+  brainModel: string; // รุ่นบน Ollama Cloud แยกตามงาน — งานเร็ว: เลือกบอท + Stagehand (ui.act) ในตัวรัน
+  scriptModel: string; // เขียนสคริปต์ตรวจจากคำสั่ง
+  analystModel: string; // วิเคราะห์รอบที่ไม่ผ่านก่อนเปิด issue
+  eyesModel: string; // ดูภาพหน้าจอ (ui.see · ui.play)
   autoIssueMate: boolean; // ส่งรอบที่ไม่ผ่านเข้า IssueMate อัตโนมัติ
   maxParallelBots: number;
   headed: boolean;
@@ -106,6 +109,7 @@ export interface StepResult {
   expected?: string;
   actual?: string;
   evidence?: string; // ชื่อไฟล์ใน runs/<id>/
+  query?: string; // SQL หรือคำขอ API จริงของขั้นนี้ — การ์ดบอทโชว์แทนภาพหน้าจอ
 }
 
 export type RunStatus = "queued" | "running" | "passed" | "failed" | "error" | "stopped";

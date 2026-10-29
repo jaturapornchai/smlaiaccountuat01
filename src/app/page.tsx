@@ -162,7 +162,7 @@ export default function Home() {
             <section>
               <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <h2 className="text-xl font-bold">ฝูงบอท {bots.length} ตัว · เรียงตามเวลาทำงานล่าสุด</h2>
-                <p className="text-[0.8rem] text-slate-400">กดจอเพื่อดูทุกขั้นตอน · ▶ รันสคริปต์ของบอทนั้น · ✨ สั่งงาน: AI ({settings?.brainModel ?? "…"}) เขียนสคริปต์แล้วรันจริง</p>
+                <p className="text-[0.8rem] text-slate-400">กดจอเพื่อดูทุกขั้นตอน · ▶ รันสคริปต์ของบอทนั้น · ✨ สั่งงาน: AI ({settings?.scriptModel ?? "…"}) เขียนสคริปต์แล้วรันจริง</p>
               </div>
               <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,19rem),1fr))]">
                 {ordered.map((b, i) => {

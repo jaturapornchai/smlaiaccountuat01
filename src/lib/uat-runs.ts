@@ -103,7 +103,7 @@ function launch(run: ScriptRun) {
     return finish(run);
   }
   const child = spawn(process.execPath, [RUNNER, "--script", script.file, "--out", outDir, "--base", run.target], {
-    env: { ...process.env, UAT_RUN_ID: run.id, UAT_HEADED: run.headed ? "1" : "", UAT_BRAIN_MODEL: getSettings().brainModel },
+    env: { ...process.env, UAT_RUN_ID: run.id, UAT_HEADED: run.headed ? "1" : "", UAT_BRAIN_MODEL: getSettings().brainModel, UAT_EYES_MODEL: getSettings().eyesModel },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: !run.headed,
   });
@@ -146,6 +146,7 @@ function onLine(run: ScriptRun, line: string) {
     const st = run.steps[m.i as number];
     if (!st) return;
     Object.assign(st, { status: m.status, durationMs: m.durationMs, detail: m.detail, expected: m.expected, actual: m.actual, evidence: m.evidence });
+    if (m.query) st.query = String(m.query);
     if (m.status === "passed") addEvent(bot, "pass", `ขั้น ${st.i + 1}: ${st.title}`);
     else if (m.status === "failed") addEvent(bot, "fail", `ขั้น ${st.i + 1}: ${st.title} — ${st.detail ?? ""}`);
     else if (m.status === "skipped") addEvent(bot, "skip", `ขั้น ${st.i + 1}: ${st.title} (ข้าม)`);

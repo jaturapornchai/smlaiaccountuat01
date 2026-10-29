@@ -26,11 +26,18 @@ export const BotCard: React.FC<BotCardProps> = ({ i, bot, run, shot, scriptCount
     ? `ขั้น ${step.i + 1}/${run!.steps.length} · ${kindLabel(step.kind)} · ${step.title}`
     : (bot.taskHistory[0]?.result ?? (scriptCount ? `สคริปต์ ${scriptCount} ชุด พร้อมรัน` : "ยังไม่มีสคริปต์ · สั่งบอท AI สำรวจได้"));
   const no = `#${String(bot.number).padStart(2, "0")}`;
+  // ขั้น SQL/API ไม่มีภาพ → โชว์คำสั่งจริง: ขณะรัน = ขั้นที่กำลังทำ, จบแล้ว = ขั้นที่ไม่ผ่าน หรือขั้นสุดท้ายที่มีคำสั่ง
+  const q = live ? (step?.query ? step : undefined) : shot?.liveAt ? undefined : (run?.steps.find((s) => s.status === "failed" && s.query) ?? run?.steps.findLast((s) => s.query && !s.cleanup));
 
   return (
     <article className={`glass spot rise flex flex-col overflow-hidden rounded-3xl transition duration-300 hover:-translate-y-0.5 ${live ? "ring-live" : ""}`} style={{ "--i": i, "--c": bot.accent } as React.CSSProperties}>
       <button onClick={() => run && onOpenRun(run.id)} disabled={!run} title={run ? "ดูทุกขั้นตอนของรอบนี้" : undefined} className="relative block aspect-video w-full overflow-hidden bg-black/50 text-left">
-        {shot?.liveAt ? (
+        {q ? (
+          <span className="block h-full overflow-hidden px-3 pb-8 pt-9 font-mono text-[0.68rem] leading-relaxed text-emerald-200/90">
+            <span className="mb-1 block font-sans text-[0.65rem] text-slate-400">{q.kind.startsWith("db.") ? "คำสั่ง SQL" : "คำขอ API"} · ขั้น {q.i + 1}</span>
+            <span className="block whitespace-pre-wrap break-words">{q.query}</span>
+          </span>
+        ) : shot?.liveAt ? (
           <img src={`/api/runs/${shot.id}/evidence/live.jpg?t=${encodeURIComponent(shot.liveAt)}`} alt={`หน้าจอล่าสุดของบอท ${no}`} loading="lazy" className="h-full w-full object-cover object-top" />
         ) : (
           <span className="grid h-full place-items-center px-6 text-center text-[0.75rem] text-slate-500">

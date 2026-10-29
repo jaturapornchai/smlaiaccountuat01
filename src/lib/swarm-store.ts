@@ -1,5 +1,5 @@
 import { BotConfig, BotEvent, BotStatus, SwarmSettings } from "@/types/bot";
-import { DEFAULT_BRAIN } from "./brain";
+import { DEFAULT_MODELS, MODEL_KEYS } from "./brain";
 import { INITIAL_BOTS } from "./swarm-data";
 
 // สถานะอยู่ในหน่วยความจำของ Node (รีสตาร์ทเซิร์ฟเวอร์แล้วเริ่มใหม่) — ผลการรันจริงเก็บถาวรที่ runs/<id>/run.json
@@ -15,7 +15,7 @@ const freshBots = (): BotConfig[] => JSON.parse(JSON.stringify(INITIAL_BOTS));
 global.__openhands_swarm_bots ??= freshBots();
 global.__openhands_swarm_settings ??= {
   erpTargetUrl: process.env.ERP_TARGET_URL || "https://www.smlwork.com",
-  brainModel: DEFAULT_BRAIN,
+  ...DEFAULT_MODELS,
   autoIssueMate: process.env.ISSUEMATE_AUTO !== "0",
   maxParallelBots: 3,
   headed: process.env.UAT_HEADED === "1",
@@ -55,10 +55,11 @@ export function updateSettings(input: Record<string, unknown>): SwarmSettings {
     if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("ที่อยู่ ERP ต้องขึ้นต้นด้วย http:// หรือ https://");
     next.erpTargetUrl = u.origin;
   }
-  const model = str(input.brainModel);
-  if (model) {
+  for (const k of MODEL_KEYS) {
+    const model = str(input[k]);
+    if (!model) continue;
     if (!/^[\w.:/-]{1,80}$/.test(model)) throw new Error("ชื่อโมเดลไม่ถูกต้อง");
-    next.brainModel = model;
+    next[k] = model;
   }
   if (typeof input.autoIssueMate === "boolean") next.autoIssueMate = input.autoIssueMate;
   if (typeof input.headed === "boolean") next.headed = input.headed;

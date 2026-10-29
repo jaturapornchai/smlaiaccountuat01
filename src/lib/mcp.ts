@@ -11,8 +11,8 @@ import { activeRunCount, getRun, listRuns, sendToIssueMate, startRuns, stopRun }
 import { SCRIPT_DIR, loadScripts } from "./uat-scripts";
 
 // MCP tools ของ UAT Tester — คำอธิบายเป็นอังกฤษสั้นและผลลัพธ์เป็นบรรทัดกะทัดรัด เพื่อประหยัด token ของ AI ที่เรียก
-const STEP_KINDS = ["ui.goto", "ui.demoLogin", "ui.adminLogin", "ui.openMenu", "ui.click", "ui.fill", "ui.select", "ui.press", "ui.readText", "ui.expectText", "ui.expectVisible", "ui.expectValue", "ui.expectUrl", "ui.expectClean", "ui.screenshot", "ui.act", "ui.see", "ui.play", "api.request", "db.query", "db.exec", "wait", "set"];
-export const SCRIPT_FORMAT = `Shape: {id(a-z0-9-),title,module(master|sales|purchase|inventory|gl|tax|reports|security|admin|recon),lens(screen|data|api),severityOnFail(S1-S4),description,steps[],cleanup[]}. Step = {title,do,...}; do: ${STEP_KINDS.join(" ")}. ui.adminLogin{targetPath:/admin/providers|/home} = System Admin login with server-held credentials (never put passwords in scripts). ui.act{instruction} = Stagehand does one plain-Thai action; ui.see{expect} = AI judges the screenshot; ui.play{goal,maxSteps<=30} = Computer Use loop (AI clicks/types until done, its findings fail the step, may save test docs tagged {{run.tag}}). api.request{method,path,body,expectStatus,expect[]}, db.query{sql,database,rows,expect[],save{var:col}} (read-only, psql :'var'), db.exec{sql,database,affected}; database = smldemo (default; db.exec only for rows prefixed UAT) | smluatadmin | smlerpmainuatadmin | uat_<name> from test_db (your own copy of smldemo: any change allowed). expect item {path|col,op:eq|ne|same|gt|gte|lt|lte|contains|matches|exists|empty,value}; {{var}} interpolation. Money compared as decimal.`;
+const STEP_KINDS = ["ui.goto", "ui.demoLogin", "ui.adminLogin", "ui.openMenu", "ui.click", "ui.fill", "ui.select", "ui.press", "ui.readText", "ui.expectText", "ui.expectVisible", "ui.expectValue", "ui.expectUrl", "ui.expectClean", "ui.screenshot", "ui.act", "ui.see", "ui.play", "api.request", "report.pdf", "db.query", "db.exec", "wait", "set"];
+export const SCRIPT_FORMAT = `Shape: {id(a-z0-9-),title,module(master|sales|purchase|inventory|gl|tax|reports|security|admin|recon),lens(screen|data|api),severityOnFail(S1-S4),description,steps[],cleanup[]}. Step = {title,do,...}; do: ${STEP_KINDS.join(" ")}. ui.adminLogin{targetPath:/admin/providers|/home} = System Admin login with server-held credentials (never put passwords in scripts). ui.act{instruction} = Stagehand does one plain-Thai action; ui.see{expect} = AI judges the screenshot; ui.play{goal,maxSteps<=30} = Computer Use loop (AI clicks/types until done, its findings fail the step, may save test docs tagged {{run.tag}}). api.request{method,path,body,expectStatus,expect[]}, report.pdf{body,contains[]} = download the PDF of a report like a user pressing print (POST /api/process/report/pdf, same body as /api/process/report/run) and require each text in contains (use numbers/doc numbers; some Thai tone marks are private-use glyphs in the PDF), db.query{sql,database,rows,expect[],save{var:col}} (read-only, psql :'var'), db.exec{sql,database,affected}; database = smldemo (default; db.exec only for rows prefixed UAT) | smluatadmin | smlerpmainuatadmin | uat_<name> from test_db (your own copy of smldemo: any change allowed). expect item {path|col,op:eq|ne|same|gt|gte|lt|lte|contains|matches|exists|empty,value}; {{var}} interpolation. Money compared as decimal.`;
 const str = { type: "string" } as const;
 const bool = { type: "boolean" } as const;
 const strs = { type: "array", items: str } as const;
@@ -20,7 +20,7 @@ const strs = { type: "array", items: str } as const;
 export const TOOLS = [
   {
     name: "status",
-    description: "Tester health (ERP web, demo DB, brain, IssueMate), settings and counts. bots:true adds one line per bot. settings:{erpTargetUrl,brainModel,autoIssueMate,maxParallelBots(1-10),headed} updates settings.",
+    description: "Tester health (ERP web, demo DB, brain, IssueMate), settings and counts. bots:true adds one line per bot. settings:{erpTargetUrl,brainModel,scriptModel,analystModel,eyesModel,autoIssueMate,maxParallelBots(1-10),headed} updates settings.",
     inputSchema: { type: "object", properties: { bots: bool, settings: { type: "object" } } },
   },
   {
@@ -90,7 +90,7 @@ async function status(a: Args) {
   const { scripts, errors } = loadScripts();
   const out = [
     ...(["erp", "db", "brain", "issuemate"] as const).map((k) => `${k}: ${h[k].ok ? "ok" : "FAIL"} ${h[k].message}`),
-    `settings: target=${s.erpTargetUrl} brain=${s.brainModel} autoIssue=${s.autoIssueMate} parallel=${s.maxParallelBots}`,
+    `settings: target=${s.erpTargetUrl} brain=${s.brainModel} script=${s.scriptModel} analyst=${s.analystModel} eyes=${s.eyesModel} autoIssue=${s.autoIssueMate} parallel=${s.maxParallelBots}`,
     `scripts=${scripts.length}${errors.length ? ` invalid=${errors.map((e) => `${e.file}(${e.error})`).join(",")}` : ""} active=${activeRunCount()}`,
   ];
   if (a.bots) for (const b of getBots()) out.push(`${b.id}|${b.role}/${b.lens}|${b.status}|runs ${b.stats.runs} ✓${b.stats.passed} ✗${b.stats.failed}`);

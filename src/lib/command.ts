@@ -95,7 +95,7 @@ ${cols}`;
 
   let err = "";
   for (let round = 0; round < 2; round++) {
-    const text = await askBrain(getSettings().brainModel, system, `คำสั่ง: ${command}${err ? `\n\nสคริปต์รอบก่อนถูกปฏิเสธ: ${err} — แก้แล้วส่งใหม่` : ""}`, [], SCRIPT_SCHEMA);
+    const text = await askBrain(getSettings().scriptModel, system, `คำสั่ง: ${command}${err ? `\n\nสคริปต์รอบก่อนถูกปฏิเสธ: ${err} — แก้แล้วส่งใหม่` : ""}`, [], SCRIPT_SCHEMA);
     try {
       const raw = json(text);
       const sc = (raw.steps ? raw : (Object.values(raw).find((v) => (v as Script)?.steps) ?? raw)) as Script; // บางครั้งโมเดลห่อไว้ใน {script:{...}}
