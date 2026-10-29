@@ -5,7 +5,7 @@ import { BotConfig, BotTask, IssueLink, ScriptRun, StepResult } from "@/types/bo
 import { pushActivity } from "./activity";
 import { redact } from "./log";
 import { clearSent, commentIssue, reportRun } from "./issuemate";
-import { scriptFault } from "./script-fault";
+import { aiTriage, scriptFault } from "./script-fault";
 import { addEvent, getBotById, getBots, getSettings } from "./swarm-store";
 import { loadScripts } from "./uat-scripts";
 
@@ -197,15 +197,7 @@ function finish(run: ScriptRun) {
   // ตรวจไม่ผ่าน → เปิด issue ให้หาวิธีแก้ทันที (ลุงจืดสั่ง 2026-10-29) · สคริปต์ ask-* ที่ AI เขียนเองจะมีหมายเหตุใน issue ให้ตรวจสคริปต์ก่อน
   // ยกเว้นพังเพราะตัวสคริปต์เอง (ไม่ใช่หลักฐานว่าระบบผิด) — รอบตรวจซ้ำของ issue ยังส่งเสมอ ให้คนแก้รู้ผล
   // สคริปต์ auto-* ที่ AI เสนอเองไม่เปิด issue อัตโนมัติ (ลุงจืดสั่ง 2026-10-29: เปิด ticket ไม่จริงบ่อย) — ตรวจแล้วกด "ส่งเข้า IssueMate" เอง
-  const fault = run.retestOf ? undefined : scriptFault(run);
-  if (run.status === "failed" && getSettings().autoIssueMate) {
-    if (fault) run.noIssue = `สคริปต์พังเอง ยังไม่ได้ตรวจ ERP (ขั้น ${fault.i + 1}: ${(fault.detail ?? "").slice(0, 120)}) — แก้สคริปต์แล้วรันใหม่`;
-    else if (!run.retestOf && run.scriptId.startsWith("auto-")) run.noIssue = "สคริปต์ที่ AI เสนอเอง — ตรวจผลก่อน ถ้าเป็นบั๊กจริงกด \"ส่งเข้า IssueMate\" ที่หน้ารอบนี้";
-    if (run.noIssue) {
-      addEvent(bot, "info", `ไม่เปิด issue: "${run.scriptTitle}" ${run.noIssue}`);
-      save(run);
-    } else void sendToIssueMate(run);
-  }
+  if (run.status === "failed" && getSettings().autoIssueMate) void autoIssue(run, bot);
   if (ok) void closeLoop(run);
 
   batch[ok ? "p" : run.status === "failed" ? "f" : "e"]++;
@@ -221,6 +213,20 @@ function finish(run: ScriptRun) {
 }
 
 // สคริปต์ผ่าน: ปลดตัวกันส่งซ้ำ แล้วแจ้งใน issue เดิมว่าตรวจซ้ำผ่าน (ปิดวงจร สร้าง → ตรวจ → แก้ → ตรวจซ้ำ)
+// สคริปต์ที่ AI เขียน (ask-*, MCP save_script) ผ่านด่าน AI ก่อน: ชี้ชัดว่าสคริปต์ผิดเอง → ไม่เปิด (กดส่งเองได้), ERP ผิด/ไม่แน่ใจ → เปิดตามเดิม
+async function autoIssue(run: ScriptRun, bot: BotConfig) {
+  const fault = run.retestOf ? undefined : scriptFault(run);
+  if (fault) run.noIssue = `สคริปต์พังเอง ยังไม่ได้ตรวจ ERP (ขั้น ${fault.i + 1}: ${(fault.detail ?? "").slice(0, 120)}) — แก้สคริปต์แล้วรันใหม่`;
+  else if (!run.retestOf && run.scriptId.startsWith("auto-")) run.noIssue = "สคริปต์ที่ AI เสนอเอง — ตรวจผลก่อน ถ้าเป็นบั๊กจริงกด \"ส่งเข้า IssueMate\" ที่หน้ารอบนี้";
+  else if (!run.retestOf && run.ai) {
+    const why = await aiTriage(run, join(RUN_DIR, run.id), getSettings().analystModel);
+    if (why) run.noIssue = `AI ตรวจแล้วเห็นว่าสคริปต์ผิดเอง: ${why} — ถ้าเป็นบั๊กจริงกด "ส่งเข้า IssueMate" ที่หน้ารอบนี้`;
+  }
+  if (!run.noIssue) return void (await sendToIssueMate(run));
+  addEvent(bot, "info", `ไม่เปิด issue: "${run.scriptTitle}" ${run.noIssue}`);
+  save(run);
+}
+
 async function closeLoop(run: ScriptRun) {
   const codes = [...new Set([...clearSent(run.scriptId), ...(run.retestOf ? [run.retestOf] : [])])];
   for (const code of codes) {
