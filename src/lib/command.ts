@@ -9,7 +9,7 @@ import { loadScripts } from "./uat-scripts";
 
 // สั่งงานตรวจ: ผู้ใช้พิมพ์ว่าจะตรวจอะไร → สมอง AI เลือกบอท → แต่ละบอทเขียนสคริปต์ → ตัวรันเดิมต่อ PostgreSQL/เว็บ/API จริง
 const MAX_PICK = 6;
-type Step = { title?: string; do?: string; method?: string };
+type Step = { title?: string; do?: string; method?: string; sql?: unknown; database?: string };
 type Script = { title: string; steps: Step[]; cleanup?: Step[]; severityOnFail?: string };
 
 const PICK_SCHEMA = { type: "object", properties: { botIds: { type: "array", items: { type: "string" } } }, required: ["botIds"] };
@@ -51,6 +51,7 @@ async function pickBots(command: string): Promise<BotConfig[]> {
   const list = bots.map((b) => `${b.id} | ${b.name} | ${b.focus}`).join("\n");
   // ponytail: ดึงรหัส bot-NN จากคำตอบตรงๆ เพราะโมเดลไม่ยึดชื่อช่องใน schema เสมอ (ทดสอบ 2026-10-29 ตอบ "bots" แทน "botIds")
   const text = await askBrain(
+    "pick",
     getSettings().brainModel,
     `คุณคือหัวหน้าทีม UAT ของ SML AI Account มีบอท 30 ตัว (10 โมดูล × 3 มุมตรวจ: หน้าจอ ฐานข้อมูล API) เลือกบอทที่ต้องลงมือตามคำสั่ง 1-${MAX_PICK} ตัว เฉพาะที่เกี่ยวจริง ตอบ JSON เท่านั้น`,
     `คำสั่ง: ${command}\n\nบอท (id | ชื่อ | หน้าที่):\n${list}`,
@@ -65,6 +66,18 @@ async function pickBots(command: string): Promise<BotConfig[]> {
 function readOnlyGuard(sc: Script) {
   const bad = [...sc.steps, ...(sc.cleanup ?? [])].find((s) => s?.do === "db.exec" || s?.do === "ui.adminLogin" || (s?.do === "api.request" && String(s.method ?? "GET").toUpperCase() !== "GET"));
   if (bad) throw new Error(`ขั้น "${bad.title}" ถูกห้าม: สคริปต์จากคำสั่งต้องอ่านอย่างเดียว (ห้าม db.exec, ห้าม ui.adminLogin, api.request ใช้ GET เท่านั้น)`);
+}
+
+// AI ยังเดาชื่อตาราง/คอลัมน์ได้ทั้งที่ให้คอลัมน์จริงไปแล้ว (2026-10-29 เดา ar_invoice → รันพัง → เปิด SMLAIACC-165 ทั้งที่ ERP ไม่ผิด)
+// EXPLAIN แค่วางแผน ไม่รันจริง · ตัวแปร psql :'x' แทนด้วย NULL · จับเฉพาะตาราง/คอลัมน์ที่ไม่มีจริง ที่เหลือให้ตัวรันตัดสิน
+async function sqlGuard(sc: Script) {
+  for (const s of sc.steps) {
+    if (s?.do !== "db.query" || s.database || typeof s.sql !== "string") continue;
+    const sql = s.sql.replace(/(?<!:):(['"]?)[A-Za-z_]\w*\1/g, "NULL");
+    const e = await psqlRead(`EXPLAIN ${sql}`).then(() => "", errText);
+    const miss = e.match(/(relation|column) \S+ does not exist/);
+    if (miss) throw new Error(`ขั้น "${s.title}": ${miss[0]} — ใช้เฉพาะตาราง/คอลัมน์ใน "คอลัมน์จริง"`);
+  }
 }
 
 // ให้ AI เขียนสคริปต์ของบอทนี้ แล้วบันทึกผ่านตัวตรวจเดียวกับ MCP save_script (ผิดแล้วให้แก้อีก 1 รอบ)
@@ -95,12 +108,17 @@ ${cols}`;
 
   let err = "";
   for (let round = 0; round < 2; round++) {
-    const text = await askBrain(getSettings().scriptModel, system, `คำสั่ง: ${command}${err ? `\n\nสคริปต์รอบก่อนถูกปฏิเสธ: ${err} — แก้แล้วส่งใหม่` : ""}`, [], SCRIPT_SCHEMA);
+    const prompt = `คำสั่ง: ${command}${err ? `\n\nสคริปต์รอบก่อนถูกปฏิเสธ: ${err} — แก้แล้วส่งใหม่` : ""}`;
+    // รุ่นเขียนสคริปต์ช้า/หมดเวลาตอนสั่งหลายบอทพร้อมกัน (log 2026-10-29: 99-120 วิ, timeout จนบอทล้ม) → สลับใช้รุ่นเร็วแทน บอทไม่ล้มทั้งตัว
+    const text = await askBrain("script", getSettings().scriptModel, system, prompt, [], SCRIPT_SCHEMA).catch(() =>
+      askBrain("script-fallback", getSettings().brainModel, system, prompt, [], SCRIPT_SCHEMA),
+    );
     try {
       const raw = json(text);
       const sc = (raw.steps ? raw : (Object.values(raw).find((v) => (v as Script)?.steps) ?? raw)) as Script; // บางครั้งโมเดลห่อไว้ใน {script:{...}}
       if (!Array.isArray(sc.steps) || !sc.steps.length) throw new Error("ไม่มีขั้นตอน (steps ว่าง)");
       readOnlyGuard(sc);
+      await sqlGuard(sc);
       const severity = /^S[1-4]$/.test(String(sc.severityOnFail)) ? sc.severityOnFail : "S3";
       saveScript({ script: { ...sc, id, module: bot.role, lens: bot.lens, severityOnFail: severity, description: `สั่งงาน: ${command}${raw.description ? ` · ${raw.description}` : ""}` } });
       return sc;

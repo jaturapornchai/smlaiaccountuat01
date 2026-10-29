@@ -45,7 +45,7 @@ export const TOOLS = [
   },
   {
     name: "command",
-    description: "Plain-language test order (Thai ok), e.g. 'check trial balance debit=credit'. The tester picks the relevant bots (or use botIds), each bot writes a read-only script from real PostgreSQL columns and queues it on the real ERP/DB. Returns per bot: script id, steps, run id; then use runs/events for results. Scripts ask-* do not auto-open IssueMate issues.",
+    description: "Plain-language test order (Thai ok), e.g. 'check trial balance debit=credit'. The tester picks the relevant bots (or use botIds), each bot writes a read-only script from real PostgreSQL columns and queues it on the real ERP/DB. Returns per bot: script id, steps, run id; then use runs/events for results. Failed ask-* runs also auto-open IssueMate issues (with a note to check the AI-written script first).",
     inputSchema: { type: "object", properties: { text: str, botIds: strs }, required: ["text"] },
   },
   {
@@ -55,7 +55,7 @@ export const TOOLS = [
   },
   {
     name: "logs",
-    description: "Persistent work log of this tester, one file per Thai day kept 30 days: brain (model, prompt/reply excerpt, ms), web (search query, hits), mcp (every AI tool call), activity (runs, batches, issues), api (route errors), server (restarts). Use it to audit what the system did and find slow or failing parts to improve. Returns the day's summary (count/failed/avg+max ms per kind, top errors, slowest) and the latest matching entries.",
+    description: "Persistent work log of this tester, one file per Thai day kept 30 days: brain (job pick|script|script-fallback|analyst, model, prompt/reply excerpt, ms), web (search query, hits), mcp (every AI tool call), activity (runs, batches, issues), api (route errors), server (start/stop). Use it to audit what the system did and find slow or failing parts to improve. Returns the day's summary (count/failed/avg+max ms per kind, top errors, slowest) and the latest matching entries.",
     inputSchema: { type: "object", properties: { date: { type: "string", description: "YYYY-MM-DD, default today" }, kind: { type: "string", enum: ["server", "activity", "brain", "web", "mcp", "api"] }, q: str, errors: { type: "boolean" }, limit: { type: "integer", minimum: 1, maximum: 500 } } },
   },
   {

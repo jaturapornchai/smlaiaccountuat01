@@ -20,8 +20,28 @@ const auth = () => {
 };
 
 // images = base64 ของภาพ png/jpg (โมเดลต้องรองรับ vision) · format = JSON schema ให้ตอบเป็น JSON
-export const askBrain = (model: string, system: string, prompt: string, images: string[] = [], format?: object) =>
-  timed("brain", { model, images: images.length, json: !!format, prompt: prompt.slice(0, 1500) }, () => callBrain(model, system, prompt, images, format), (reply) => ({ reply: reply.slice(0, 1500), replyChars: reply.length }));
+// Ollama Cloud จำกัดคำขอพร้อมกันต่อบัญชี (Pro/จ่ายตามใช้ 3, Max 10 — ollama.com/pricing 2026-10-29) เกินแล้วเข้าคิวฝั่งเขา
+// ซึ่งกินเวลา timeout ของเรา (log 2026-10-29: พร้อมกัน 5 → mistral 99-120 วิ timeout) → ต่อคิวฝั่งเราแทน แล้วเริ่มนับเวลาตอนได้ช่อง
+// ponytail: นับเฉพาะในโปรเซส Next — runner/run.mjs (ตาดูจอ) เรียกแยกเอง ยังแย่งช่องได้ · ทำคิวข้ามโปรเซสเมื่อเจอ 429 จริง
+const MAX_CONCURRENT = Number(process.env.OLLAMA_MAX_CONCURRENT) || 3;
+let busy = 0;
+const waiting: (() => void)[] = [];
+async function slot<T>(fn: (waitMs: number) => Promise<T>): Promise<T> {
+  const t = Date.now();
+  if (busy < MAX_CONCURRENT) busy++;
+  else await new Promise<void>((r) => waiting.push(r)); // ช่องถูกส่งต่อมาจากคนที่ใช้เสร็จ (busy ไม่ลด)
+  try {
+    return await fn(Date.now() - t);
+  } finally {
+    const next = waiting.shift();
+    if (next) next();
+    else busy--;
+  }
+}
+
+// job = งานที่เรียก (pick/script/analyst) ลง log ไว้แยกดูว่างานไหนช้า/ล้ม · waitMs = เวลารอคิว (ms = เวลาที่โมเดลใช้จริง)
+export const askBrain = (job: string, model: string, system: string, prompt: string, images: string[] = [], format?: object) =>
+  slot((waitMs) => timed("brain", { job, model, waitMs, images: images.length, json: !!format, prompt: prompt.slice(0, 1500) }, () => callBrain(model, system, prompt, images, format), (reply) => ({ reply: reply.slice(0, 1500), replyChars: reply.length })));
 
 async function callBrain(model: string, system: string, prompt: string, images: string[], format?: object): Promise<string> {
   const res = await fetch(`${API}/api/chat`, {
@@ -52,7 +72,7 @@ export async function webResearch(queries: string[], perQuery = 3): Promise<stri
   const found = await Promise.all(
     queries.map(async (query) => {
       try {
-        return await timed("web", { query }, async () => {
+        return await slot((waitMs) => timed("web", { query, waitMs }, async () => {
           const res = await fetch(`${API}/api/web_search`, {
             method: "POST",
             headers: { ...auth(), "Content-Type": "application/json" },
@@ -62,7 +82,7 @@ export async function webResearch(queries: string[], perQuery = 3): Promise<stri
           const j = await res.json();
           if (!res.ok) throw new Error(`HTTP ${res.status} ${j?.error ?? ""}`);
           return (j.results ?? []) as { title?: string; url?: string; content?: string }[];
-        }, (r) => ({ hits: r.length, urls: r.map((x) => x.url) }));
+        }, (r) => ({ hits: r.length, urls: r.map((x) => x.url) })));
       } catch {
         return [];
       }

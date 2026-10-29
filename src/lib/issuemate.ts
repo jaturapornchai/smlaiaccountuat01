@@ -117,7 +117,7 @@ export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLi
     // เรื่องเงิน/ภาษี/บัญชี → ค้นกฎทางการมาประกอบ (เรื่องโค้ดล้วนไม่ต้องค้น กัน prompt ฟุ้ง)
     const refs = TAXY.test(facts) ? await webResearch([`${run.scriptTitle} ${first?.title ?? ""}`.slice(0, 120) + " กรมสรรพากร"]) : "";
     const web = refs ? `\n\nข้อมูลอ้างอิงจากเว็บ (อ้าง URL เมื่อใช้):\n${refs}` : "";
-    analysis = await askBrain(model, ANALYST, `${facts}${web}${png ? "\n\n(แนบภาพหน้าจอตอนขั้นที่พัง)" : ""}`, png ? [png] : []);
+    analysis = await askBrain("analyst", model, ANALYST, `${facts}${web}${png ? "\n\n(แนบภาพหน้าจอตอนขั้นที่พัง)" : ""}`, png ? [png] : []);
   } catch (e) {
     analysis = `(สมอง AI วิเคราะห์ไม่สำเร็จ: ${(e as Error).message})`;
   }
