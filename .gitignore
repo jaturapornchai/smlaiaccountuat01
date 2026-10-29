@@ -52,3 +52,6 @@ credentials*.json
 
 # ภาพอ้างอิงเทียบหน้าจอ/PDF (runner/run.mjs visualCheck) — ข้อมูลรันจริง ไม่เข้า git
 /baselines/
+
+# persistent run history (data/run-history/*.jsonl)
+/data/

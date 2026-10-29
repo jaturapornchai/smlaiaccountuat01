@@ -32,6 +32,7 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pinned, setPinned] = useState<ScriptRun | null>(null); // รอบที่เปิดจากลิงก์ /?run=<id> (หน้าแนวโน้ม) — เก่าเกินกว่า /api/runs ส่งมาให้ก็ยังเปิดได้
 
   const [admin, setAdmin] = useState(false); // ผู้ดูแลเข้าสู่ระบบ Google แล้ว = เห็นปุ่มสั่งงานบนแถบบน
   const say = useCallback((ok: boolean, text: string) => setToast({ ok, text }), []);
@@ -68,6 +69,13 @@ export default function Home() {
       say(false, `ตรวจสถานะระบบไม่ได้: ${(e as Error).message}`);
     }
   }, [say]);
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("run");
+    if (!id) return;
+    setSelectedRunId(id);
+    call<{ run: ScriptRun }>(`/api/runs/${encodeURIComponent(id)}`).then((d) => setPinned(d.run), () => {});
+  }, []);
 
   useEffect(() => {
     refresh();
@@ -189,7 +197,7 @@ export default function Home() {
           </div>
 
           <div className="min-w-0 2xl:sticky 2xl:top-[5.5rem]">
-            <RunPanel runs={runs} selectedId={selectedRunId} onSelect={setSelectedRunId} onStop={stopRun} onIssue={sendIssue} issueMateUrl={health?.issuemate.url} />
+            <RunPanel runs={pinned && !runs.some((r) => r.id === pinned.id) ? [...runs, pinned] : runs} selectedId={selectedRunId} onSelect={setSelectedRunId} onStop={stopRun} onIssue={sendIssue} issueMateUrl={health?.issuemate.url} />
           </div>
         </div>
       </main>

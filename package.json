@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start -p 3050",
     "lint": "next lint",
-    "check:nightly": "node --no-warnings scripts/check-nightly.mjs"
+    "check:nightly": "node --no-warnings scripts/check-nightly.mjs",
+    "check:history": "node --no-warnings scripts/check-run-history.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

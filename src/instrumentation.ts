@@ -5,6 +5,12 @@ export async function register() {
   writeLog("server", { event: "start", pid: process.pid, node: process.version });
   // ตัวตั้งเวลารอบ regression กลางคืน (ปิดอยู่จนกว่าเปิดที่หน้าตั้งค่า) — nightly-run.ts
   (await import("./lib/nightly-run")).startNightly();
+  try {
+    const { backfillHistory } = await import("./lib/run-history");
+    writeLog("server", { event: "history-backfill", added: backfillHistory() }); // เติมประวัติจาก runs/*/run.json ที่ยังไม่อยู่ในไฟล์
+  } catch (e) {
+    writeLog("server", { event: "history-backfill", error: e instanceof Error ? e.message : String(e) });
+  }
   // systemd stop ส่ง SIGTERM แต่ Next รอคำขอที่ค้าง (MCP run wait / events รอได้หลายนาที) จนโดน SIGKILL หลัง 90 วิทุกครั้ง (journal 2026-10-29)
   // ให้ Next ปิดเอง 5 วิ ไม่ทันก็ออกเลย · คิวรันอยู่ในหน่วยความจำ หายตอนรีสตาร์ทอยู่แล้ว (deploy รอคิวว่างก่อน)
   process.once("SIGTERM", () => {

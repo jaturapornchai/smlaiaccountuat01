@@ -6,6 +6,7 @@ import { pushActivity } from "./activity";
 import { redact } from "./log";
 import { clearSent, commentIssue, reportRun } from "./issuemate";
 import { aiTriage, scriptFault } from "./script-fault";
+import { recordRun } from "./run-history";
 import { addEvent, getBotById, getBots, getSettings } from "./swarm-store";
 import { loadScripts } from "./uat-scripts";
 
@@ -54,6 +55,7 @@ export const activeRunCount = () => [...runs.values()].filter((r) => r.status ==
 const save = (r: ScriptRun) => {
   mkdirSync(join(RUN_DIR, r.id), { recursive: true });
   writeFileSync(join(RUN_DIR, r.id, "run.json"), JSON.stringify(r, null, 1));
+  recordRun(r); // ประวัติถาวร: รอบที่จบแล้วเท่านั้น, ได้ ticket ทีหลังจึงจดอีกบรรทัด (src/lib/run-history.ts)
 };
 
 // retestOf = เลข issue ที่สั่งตรวจซ้ำหลังแก้ (ผลจะถูกแจ้งกลับใน issue นั้น) · healOf = รอบที่สคริปต์พังเอง (ลองฉบับที่ AI ซ่อม) · nightly = วันที่ไทยของรอบกลางคืนที่สั่ง (nightly.ts)
