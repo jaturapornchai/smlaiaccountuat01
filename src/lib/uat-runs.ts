@@ -70,7 +70,7 @@ export function startRuns(scriptIds: string[], retestOf?: string): { runs: Scrip
     const run: ScriptRun = {
       id, scriptId: sc.id, scriptTitle: sc.title, module: sc.module, lens: sc.lens, severityOnFail: sc.severityOnFail, botId: bot.id,
       target: s.erpTargetUrl, headed: s.headed, status: "queued", queuedAt: new Date().toISOString(),
-      steps: [], passed: 0, failed: 0, skipped: 0, issues: 0, retestOf,
+      steps: [], passed: 0, failed: 0, skipped: 0, issues: 0, retestOf, ai: sc.ai,
     };
     runs.set(id, run);
     queue.push(id);

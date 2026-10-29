@@ -6,7 +6,7 @@ import { SCRIPT_FORMAT, saveScript } from "./mcp";
 import { addEvent, getBotById, getBots, getSettings } from "./swarm-store";
 import { psqlRead } from "./uat-health";
 import { getRun, startRuns } from "./uat-runs";
-import { isAiScript, loadScripts } from "./uat-scripts";
+import { loadScripts } from "./uat-scripts";
 
 // สั่งงานตรวจ: ผู้ใช้พิมพ์ว่าจะตรวจอะไร → สมอง AI เลือกบอท → แต่ละบอทเขียนสคริปต์ → ตัวรันเดิมต่อ PostgreSQL/เว็บ/API จริง
 const MAX_PICK = 6;
@@ -100,9 +100,15 @@ async function sqlGuard(sc: Script) {
   }
 }
 
+// ตัวตรวจที่สคริปต์ AI ทุกทางต้องผ่าน (✨ คำสั่ง และ MCP save_script)
+export async function checkScript(sc: Script) {
+  varGuard(sc);
+  await sqlGuard(sc);
+}
+
 // ให้ AI เขียนสคริปต์ของบอทนี้ แล้วบันทึกผ่านตัวตรวจเดียวกับ MCP save_script (ผิดแล้วให้แก้อีก 1 รอบ)
 async function writeScript(bot: BotConfig, id: string, command: string): Promise<Script> {
-  const mine = loadScripts().scripts.filter((s) => s.module === bot.role && !isAiScript(s.id));
+  const mine = loadScripts().scripts.filter((s) => s.module === bot.role && !s.ai);
   const example = mine.find((s) => s.lens === bot.lens) ?? mine[0];
   const refs = await researchFor(command);
   const cols = await realColumns(`${command} ${bot.focus} ${mine.map((s) => readFileSync(s.file, "utf8")).join(" ")}`);
@@ -138,8 +144,7 @@ ${cols}`;
       const sc = (raw.steps ? raw : (Object.values(raw).find((v) => (v as Script)?.steps) ?? raw)) as Script; // บางครั้งโมเดลห่อไว้ใน {script:{...}}
       if (!Array.isArray(sc.steps) || !sc.steps.length) throw new Error("ไม่มีขั้นตอน (steps ว่าง)");
       readOnlyGuard(sc);
-      varGuard(sc);
-      await sqlGuard(sc);
+      await checkScript(sc);
       const severity = /^S[1-4]$/.test(String(sc.severityOnFail)) ? sc.severityOnFail : "S3";
       saveScript({ script: { ...sc, id, module: bot.role, lens: bot.lens, severityOnFail: severity, description: `${id.startsWith("auto-") ? "AI เสนอเอง" : "สั่งงาน"}: ${command}${raw.description ? ` · ${raw.description}` : ""}` } });
       return sc;

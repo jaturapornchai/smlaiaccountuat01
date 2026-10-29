@@ -200,7 +200,7 @@ async function dispatch(name: string, a: Args, signal: AbortSignal): Promise<str
   switch (name) {
     case "status": return status(a);
     case "scripts": return scripts(a);
-    case "save_script": return saveScript(a);
+    case "save_script": return saveFromMcp(a);
     case "run": return run(a, signal);
     case "command": return command(a);
     case "runs": return runs(a);
@@ -215,6 +215,14 @@ async function dispatch(name: string, a: Args, signal: AbortSignal): Promise<str
       return "shown";
     default: throw new Error(`unknown tool ${name}`);
   }
+}
+
+// ผู้เรียก MCP คือ AI (antigravity ฯลฯ) → ตรวจตัวแปร/ตาราง-คอลัมน์แบบเดียวกับ ✨ คำสั่ง และติด ai: true ให้ไม่ถูกนับเป็นสคริปต์ที่คนเขียน
+// (2026-10-29 SMLAIACC-231: ask-purchase-api บันทึกผ่าน MCP ข้ามตัวตรวจ ยิง path ผิด → เปิด ticket เป็นสคริปต์คนเขียน)
+async function saveFromMcp(a: Args) {
+  const sc = a.script as Args | undefined;
+  if (sc && typeof sc === "object" && Array.isArray(sc.steps)) await (await import("./command")).checkScript(sc as never);
+  return saveScript({ ...a, script: sc && typeof sc === "object" ? { ...sc, ai: true } : sc });
 }
 
 // import ตอนเรียก กัน import วนกับ command.ts (ซึ่งใช้ saveScript ของไฟล์นี้)

@@ -37,6 +37,7 @@ export function loadScripts(): { scripts: LoadedScript[]; errors: { file: string
         stepCount: j.steps.length,
         cleanupCount: (j.cleanup ?? []).length,
         usesDb,
+        ai: j.ai === true || isAiScript(j.id),
         file: join(SCRIPT_DIR, f),
       });
     } catch (e) {

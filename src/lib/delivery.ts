@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { ScriptRun, StepResult } from "@/types/bot";
 import menuList from "./erp-menus.json";
 import { listRuns } from "./uat-runs";
-import { isAiScript, loadScripts } from "./uat-scripts";
+import { loadScripts } from "./uat-scripts";
 
 // สรุปผลล่าสุดต่อเมนู/รายงาน/สคริปต์ตรวจ แล้วตัดสินว่าส่งมอบได้หรือไม่
 // ponytail: erp-menus.json คัดจาก smlaiaccount frontend/src/config/smlMenu.json (เมนูปลายทางของ SMLAccount) — เมนูใน ERP เปลี่ยนให้สร้างใหม่ตาม README
@@ -45,7 +45,7 @@ export function buildDelivery(): Delivery {
 
   const checks: CheckResult[] = scripts.map((sc) => {
     const run = latest.get(sc.id);
-    const base = { scriptId: sc.id, title: sc.title, module: sc.module, lens: sc.lens, severity: sc.severityOnFail, ai: isAiScript(sc.id) };
+    const base = { scriptId: sc.id, title: sc.title, module: sc.module, lens: sc.lens, severity: sc.severityOnFail, ai: sc.ai };
     if (!run) return { ...base, status: "untested" };
     const steps = (JSON.parse(readFileSync(sc.file, "utf8")).steps ?? []) as { key?: string }[];
     for (const m of menuResults(run, steps)) {

@@ -107,7 +107,7 @@ export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLi
   const png = shot && existsSync(join(outDir, shot)) ? readFileSync(join(outDir, shot)).toString("base64") : undefined;
   const facts = [
     `สคริปต์: uat-scripts/${run.scriptId}.json — ${run.scriptTitle}`,
-    ...(isAiScript(run.scriptId) ? ["(สคริปต์นี้ AI เขียนเอง — ตรวจก่อนว่า SQL/ค่าคาดหวังในสคริปต์ถูกต้อง แล้วค่อยแก้ระบบ)"] : []),
+    ...(run.ai || isAiScript(run.scriptId) ? ["(สคริปต์นี้ AI เขียนเอง — ตรวจก่อนว่า SQL/ค่าคาดหวังในสคริปต์ถูกต้อง แล้วค่อยแก้ระบบ)"] : []),
     `เว็บที่ทดสอบ: ${run.target} · โมดูล ${run.module} · มุมตรวจ ${run.lens}`,
     `ผล: ${run.status} ผ่าน ${run.passed} ไม่ผ่าน ${run.failed} ข้าม ${run.skipped}${run.message ? ` · ${run.message}` : ""}`,
     `ตัวตรวจจับเจอ HTTP>=400 / JS error / DB error ${run.issues} ครั้ง`,

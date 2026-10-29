@@ -95,6 +95,7 @@ export interface UatScript {
   stepCount: number;
   cleanupCount: number;
   usesDb: boolean;
+  ai: boolean; // AI เขียน: ask-*/auto-* หรือบันทึกผ่าน MCP save_script (ไฟล์มี "ai": true)
 }
 
 export type StepStatus = "pending" | "running" | "passed" | "failed" | "skipped";
@@ -139,6 +140,7 @@ export interface ScriptRun {
   issue?: IssueLink;
   noIssue?: string; // เหตุผลที่ไม่เปิด issue อัตโนมัติ (สคริปต์พังเอง / สคริปต์ auto-*) ให้คนเห็นบนการ์ดและหน้ารอบ
   retestOf?: string; // เลข issue ที่สั่งตรวจซ้ำ
+  ai?: boolean; // สคริปต์ที่ AI เขียน (ดู UatScript.ai)
   liveAt?: string; // เวลาภาพหน้าจอสดล่าสุด (runs/<id>/live.jpg)
 }
 
