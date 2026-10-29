@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
-import { BotConfig, BotTask } from "@/types/bot";
+import { BotConfig, BotTask, ScriptRun } from "@/types/bot";
+import { pushActivity } from "./activity";
 import { askBrain, webResearch } from "./brain";
 import { SCRIPT_FORMAT, saveScript } from "./mcp";
 import { addEvent, getBotById, getBots, getSettings } from "./swarm-store";
 import { psqlRead } from "./uat-health";
-import { startRuns } from "./uat-runs";
-import { loadScripts } from "./uat-scripts";
+import { getRun, startRuns } from "./uat-runs";
+import { isAiScript, loadScripts } from "./uat-scripts";
 
 // สั่งงานตรวจ: ผู้ใช้พิมพ์ว่าจะตรวจอะไร → สมอง AI เลือกบอท → แต่ละบอทเขียนสคริปต์ → ตัวรันเดิมต่อ PostgreSQL/เว็บ/API จริง
 const MAX_PICK = 6;
@@ -82,7 +83,7 @@ async function sqlGuard(sc: Script) {
 
 // ให้ AI เขียนสคริปต์ของบอทนี้ แล้วบันทึกผ่านตัวตรวจเดียวกับ MCP save_script (ผิดแล้วให้แก้อีก 1 รอบ)
 async function writeScript(bot: BotConfig, id: string, command: string): Promise<Script> {
-  const mine = loadScripts().scripts.filter((s) => s.module === bot.role && !s.id.startsWith("ask-"));
+  const mine = loadScripts().scripts.filter((s) => s.module === bot.role && !isAiScript(s.id));
   const example = mine.find((s) => s.lens === bot.lens) ?? mine[0];
   const refs = await researchFor(command);
   const cols = await realColumns(`${command} ${bot.focus} ${mine.map((s) => readFileSync(s.file, "utf8")).join(" ")}`);
@@ -120,7 +121,7 @@ ${cols}`;
       readOnlyGuard(sc);
       await sqlGuard(sc);
       const severity = /^S[1-4]$/.test(String(sc.severityOnFail)) ? sc.severityOnFail : "S3";
-      saveScript({ script: { ...sc, id, module: bot.role, lens: bot.lens, severityOnFail: severity, description: `สั่งงาน: ${command}${raw.description ? ` · ${raw.description}` : ""}` } });
+      saveScript({ script: { ...sc, id, module: bot.role, lens: bot.lens, severityOnFail: severity, description: `${id.startsWith("auto-") ? "AI เสนอเอง" : "สั่งงาน"}: ${command}${raw.description ? ` · ${raw.description}` : ""}` } });
       return sc;
     } catch (e) {
       err = errText(e);
@@ -131,12 +132,12 @@ ${cols}`;
 
 // บอท 1 ตัวรับคำสั่ง → เขียนสคริปต์ ask-<โมดูล>-<มุม> → เข้าคิวรันจริง · บันทึกลงประวัติงานของบอท
 // ponytail: id คงที่ต่อบอท (สั่งใหม่ = ทับของเดิม) กันไฟล์รก — ถ้าสั่งซ้ำขณะรอบเก่ายังรอคิว รอบนั้นจะรันสคริปต์ใหม่
-export async function commandBot(botId: string, command: string, title?: string): Promise<BotConfig | null> {
+export async function commandBot(botId: string, command: string, title?: string, scriptId?: string): Promise<BotConfig | null> {
   const bot = getBotById(botId);
   if (!bot) return null;
   const task: BotTask = { id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, title: title || command.slice(0, 40), kind: "agent", status: "running", startedAt: new Date().toISOString(), prompt: command };
   try {
-    const id = `ask-${bot.role}-${bot.lens}`;
+    const id = scriptId ?? `ask-${bot.role}-${bot.lens}`;
     const sc = await writeScript(bot, id, command);
     const run = startRuns([id]).runs[0];
     if (!run) throw new Error(`เข้าคิวรันสคริปต์ ${id} ไม่ได้`);
@@ -170,4 +171,55 @@ export async function dispatch(command: string, botIds?: string[]): Promise<BotC
     out.push(...batch.filter((b): b is BotConfig => b !== null));
   }
   return out;
+}
+
+// ลุงจืดสั่ง 2026-10-29: AI เห็นว่าควรทดสอบอะไรเพิ่ม ให้เขียนสคริปต์ใหม่เองได้เลย (on the fly) — เรียกตอนจบแต่ละชุดทดสอบ
+// สคริปต์ auto-* ผ่านตัวตรวจเดียวกับ ask-* (อ่านอย่างเดียว + ตรวจ SQL) แล้วเข้าคิวรัน · ชุดที่มีแต่ auto-* ไม่เสนอต่อ จึงไม่วนไม่จบ
+// ponytail: เพดาน AUTO_MAX ไฟล์ เต็มแล้วหยุดเสนอจนกว่าจะลบ/คัดเข้าคลัง — อยากให้หมุนเวียนค่อยเปลี่ยนเป็นลบตัวเก่าสุด
+const AUTO_PER_BATCH = 2;
+const AUTO_MAX = 30;
+const PROPOSE_SCHEMA = {
+  type: "object",
+  properties: { ideas: { type: "array", items: { type: "object", properties: { botId: { type: "string" }, command: { type: "string" } }, required: ["botId", "command"] } } },
+  required: ["ideas"],
+};
+let proposing = false;
+
+export async function proposeScripts(runIds: string[]) {
+  const done = runIds.map(getRun).filter((r): r is ScriptRun => r?.status === "passed" || r?.status === "failed");
+  if (proposing || !getSettings().autoScripts || !done.some((r) => !r.scriptId.startsWith("auto-"))) return;
+  const { scripts } = loadScripts();
+  const room = Math.min(AUTO_PER_BATCH, AUTO_MAX - scripts.filter((s) => s.id.startsWith("auto-")).length);
+  if (room <= 0) return;
+  proposing = true;
+  try {
+    const bots = getBots();
+    const results = done.map((r) => {
+      const f = r.steps.find((s) => s.status === "failed");
+      return `- [${r.status === "passed" ? "ผ่าน" : "ไม่ผ่าน"}] ${r.scriptTitle}${f ? ` · พังที่ขั้น "${f.title}": ${f.detail ?? ""}`.slice(0, 300) : ""}`;
+    });
+    const text = await askBrain(
+      "propose",
+      getSettings().brainModel,
+      `คุณคือหัวหน้าทีม UAT ของ SML AI Account (ERP บัญชีไทย) ดูผลชุดทดสอบที่เพิ่งจบกับรายชื่อสคริปต์ที่มีแล้ว แล้วเสนอเรื่องที่ควรทดสอบเพิ่มไม่เกิน ${room} เรื่อง: ขุดต่อจากขั้นที่พังเพื่อหาต้นเหตุ หรือเรื่องที่น่าจะพังแต่ยังไม่มีสคริปต์ตรวจ (ยอดเงิน ภาษี สต๊อก GL มาก่อน) ห้ามซ้ำกับสคริปต์ที่มีแล้ว · แต่ละเรื่องเลือกบอทที่ตรงที่สุด 1 ตัว และเขียนคำสั่งภาษาไทย 1-2 ประโยคที่ชัดพอให้บอทเขียนสคริปต์ได้ · ไม่มีเรื่องที่คุ้มทดสอบให้ตอบ ideas ว่าง · ตอบ JSON เท่านั้น`,
+      `ผลชุดทดสอบ:\n${results.join("\n").slice(0, 8000)}\n\nสคริปต์ที่มีแล้ว (id | ชื่อ):\n${scripts.map((s) => `${s.id} | ${s.title}`).join("\n")}\n\nบอท (id | ชื่อ | หน้าที่):\n${bots.map((b) => `${b.id} | ${b.name} | ${b.focus}`).join("\n")}`,
+      [],
+      PROPOSE_SCHEMA,
+    );
+    // ponytail: โมเดลไม่ยึดชื่อช่องใน schema (ทดสอบ 2026-10-29 ตอบ bot/instruction แทน botId/command) → รหัสบอทจาก bot-NN ในเรื่องนั้น, คำสั่ง = ข้อความยาวสุด
+    const raw = json(text);
+    const ideas: Record<string, unknown>[] = (Array.isArray(raw.ideas) ? raw.ideas : Object.values(raw).find(Array.isArray)) ?? [];
+    for (const idea of ideas.slice(0, room)) {
+      const bot = bots.find((b) => b.id === JSON.stringify(idea).match(/bot-\d{2}/)?.[0]);
+      const command = Object.values(idea).filter((v): v is string => typeof v === "string").sort((a, b) => b.length - a.length)[0];
+      if (!bot || !command) continue;
+      const task = (await commandBot(bot.id, command, `AI เสนอ: ${command.slice(0, 30)}`, `auto-${bot.role}-${Date.now().toString(36)}`))?.taskHistory[0];
+      const ok = task?.status === "completed";
+      pushActivity({ kind: "note", text: `AI เสนอทดสอบเพิ่มเอง (${bot.name}): ${command} → ${ok ? `เขียน ${task.scriptId} แล้วเข้าคิวรัน` : (task?.result ?? "ไม่สำเร็จ")}`, scriptId: ok ? task.scriptId : undefined });
+    }
+  } catch (e) {
+    pushActivity({ kind: "note", text: `AI คิดสคริปต์ทดสอบเพิ่มไม่สำเร็จ: ${errText(e)}` });
+  } finally {
+    proposing = false;
+  }
 }

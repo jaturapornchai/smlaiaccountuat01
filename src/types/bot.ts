@@ -73,6 +73,7 @@ export interface SwarmSettings {
   analystModel: string; // วิเคราะห์รอบที่ไม่ผ่านก่อนเปิด issue
   eyesModel: string; // ดูภาพหน้าจอ (ui.see · ui.play)
   autoIssueMate: boolean; // ส่งรอบที่ไม่ผ่านเข้า IssueMate อัตโนมัติ
+  autoScripts: boolean; // จบชุดทดสอบแล้วให้ AI เสนอ+เขียนสคริปต์ใหม่เอง (on the fly)
   maxParallelBots: number;
   headed: boolean;
 }

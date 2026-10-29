@@ -23,7 +23,7 @@ declare global {
   // eslint-disable-next-line no-var
   var __uat_procs: Map<string, ChildProcess> | undefined;
   // eslint-disable-next-line no-var
-  var __uat_batch: { p: number; f: number; e: number } | undefined;
+  var __uat_batch: { p: number; f: number; e: number; ids?: string[] } | undefined;
 }
 const runs = (global.__uat_runs ??= new Map());
 const queue = (global.__uat_queue ??= []);
@@ -58,7 +58,7 @@ const save = (r: ScriptRun) => {
 // retestOf = เลข issue ที่สั่งตรวจซ้ำหลังแก้ (ผลจะถูกแจ้งกลับใน issue นั้น)
 export function startRuns(scriptIds: string[], retestOf?: string): { runs: ScriptRun[]; unknown: string[] } {
   const { scripts } = loadScripts();
-  if (!activeRunCount()) Object.assign(batch, { p: 0, f: 0, e: 0 });
+  if (!activeRunCount()) Object.assign(batch, { p: 0, f: 0, e: 0, ids: [] });
   const s = getSettings();
   const out: ScriptRun[] = [];
   const unknown: string[] = [];
@@ -194,14 +194,23 @@ function finish(run: ScriptRun) {
   save(run);
   pump();
   // ตรวจไม่ผ่าน → เปิด issue ให้หาวิธีแก้ทันที (ลุงจืดสั่ง 2026-10-29) · สคริปต์ ask-* ที่ AI เขียนเองจะมีหมายเหตุใน issue ให้ตรวจสคริปต์ก่อน
-  if (run.status === "failed" && getSettings().autoIssueMate) void sendToIssueMate(run);
+  // ยกเว้นพังเพราะตัวสคริปต์เอง (ไม่ใช่หลักฐานว่าระบบผิด) — รอบตรวจซ้ำของ issue ยังส่งเสมอ ให้คนแก้รู้ผล
+  const fault = run.retestOf ? undefined : scriptFault(run);
+  if (run.status === "failed" && getSettings().autoIssueMate) {
+    if (fault) addEvent(bot, "info", `ไม่เปิด issue: "${run.scriptTitle}" พังเพราะตัวสคริปต์เอง (ขั้น ${fault.i + 1}: ${(fault.detail ?? "").slice(0, 120)}) — แก้สคริปต์แล้วรันใหม่`);
+    else void sendToIssueMate(run);
+  }
   if (ok) void closeLoop(run);
 
   batch[ok ? "p" : run.status === "failed" ? "f" : "e"]++;
+  (batch.ids ??= []).push(run.id);
   pushActivity({ kind: "run", status: run.status, runId: run.id, scriptId: run.scriptId, passed: run.passed, failed: run.failed, text: `${run.scriptTitle} · ${task.result}` });
   if (!activeRunCount()) {
     const n = batch.p + batch.f + batch.e;
     pushActivity({ kind: "batch", passed: batch.p, failed: batch.f + batch.e, text: `จบชุดทดสอบ ${n} สคริปต์ · ผ่าน ${batch.p} · ไม่ผ่าน ${batch.f}${batch.e ? ` · ผิดพลาด/หยุด ${batch.e}` : ""}` });
+    // จบชุด → ให้ AI คิดสคริปต์ทดสอบเพิ่มเอง (import ตอนเรียก กัน import วน command ↔ uat-runs)
+    const ids = batch.ids;
+    void import("./command").then((m) => m.proposeScripts(ids));
   }
 }
 
@@ -227,6 +236,14 @@ const ISSUE_TEXT: Record<IssueLink["status"], (i: IssueLink) => string> = {
 };
 
 // สมอง AI วิเคราะห์รอบที่พัง แล้วเปิด issue ใน IssueMate (โปรเจกต์ SMLAIACC) ให้ทีม/AI ฝั่ง IssueMate แก้ต่อ
+// ความผิดของตัวสคริปต์ (SQL ฝั่งทดสอบพัง, ตัวแปรที่ไม่เคย save, AI กดไม่จบ) ไม่บอกอะไรเรื่อง ERP
+// → คืนขั้นแรกที่พัง เมื่อทุกขั้นที่พัง (ไม่นับเก็บกวาด) เป็นแบบนี้ทั้งหมด
+const SCRIPT_FAULT = /^(psql ผิดพลาด|ไม่มีตัวแปร \{\{)|^AI ทำไม่จบใน \d+ ตา/;
+export function scriptFault(run: ScriptRun) {
+  const failed = run.steps.filter((s) => s.status === "failed" && !s.cleanup);
+  return failed.length > 0 && failed.every((s) => SCRIPT_FAULT.test(s.detail ?? "")) ? failed[0] : undefined;
+}
+
 export async function sendToIssueMate(run: ScriptRun): Promise<ScriptRun> {
   if (run.issue?.status === "sending") return run;
   run.issue = { status: "sending", at: new Date().toISOString() };

@@ -265,6 +265,22 @@ async function playAction(a, w, h) {
 
 const dig = (obj, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
 
+// เก็บ PDF + ภาพหน้าแรกเป็นหลักฐาน แล้วหาทุกค่าใน contains (ใช้ทั้ง report.pdf และ ui.pdf)
+function checkPdf(buf, contains) {
+  const base = `${String(++evidenceSeq).padStart(3, "0")}-report`;
+  const pdf = join(outDir, `${base}.pdf`);
+  writeFileSync(pdf, buf);
+  let text;
+  try { text = execFileSync("pdftotext", ["-layout", pdf, "-"], { encoding: "utf8", timeout: 30_000 }); }
+  catch (e) { throw Object.assign(new Fail(`อ่านข้อความใน PDF ไม่ได้ (เครื่องทดสอบต้องมี pdftotext จาก poppler-utils): ${cut(e.message, 200)}`), { evidence: `${base}.pdf` }); }
+  let evidence = `${base}.pdf`;
+  try { execFileSync("pdftoppm", ["-png", "-r", "80", "-f", "1", "-l", "1", "-singlefile", pdf, join(outDir, base)], { timeout: 30_000 }); evidence = `${base}.png`; } catch { /* ไม่มีภาพก็ยังมีไฟล์ PDF */ }
+  const flat = text.replace(/\s+/g, " ");
+  const want = [].concat(contains ?? []).map(String);
+  for (const w of want) if (!flat.includes(w)) throw Object.assign(new Fail(`PDF รายงานไม่มีข้อความ "${w}"`, w, cut(flat, 300)), { evidence });
+  return { detail: `PDF ${Math.ceil(buf.length / 1024)} KB · พบครบ ${want.length} ค่า`, evidence };
+}
+
 // ---------- step kinds ----------
 const ACTIONS = {
   async "ui.demoLogin"(p) {
@@ -451,18 +467,15 @@ const ACTIONS = {
     const res = await context.request.fetch(sameOrigin("/api/process/report/pdf").href, { method: "POST", data: p.body, failOnStatusCode: false, timeout: p.timeout ?? 120_000 });
     const buf = await res.body();
     if (res.status() !== 200 || buf.subarray(0, 5).toString() !== "%PDF-") throw new Fail("ไม่ได้ไฟล์ PDF ของรายงาน", "HTTP 200 + ไฟล์ PDF", `${res.status()} ${res.headers()["content-type"] ?? ""} ${cut(buf.toString("utf8"), 200)}`);
-    const base = `${String(++evidenceSeq).padStart(3, "0")}-report`;
-    const pdf = join(outDir, `${base}.pdf`);
-    writeFileSync(pdf, buf);
-    let text;
-    try { text = execFileSync("pdftotext", ["-layout", pdf, "-"], { encoding: "utf8", timeout: 30_000 }); }
-    catch (e) { throw Object.assign(new Fail(`อ่านข้อความใน PDF ไม่ได้ (เครื่องทดสอบต้องมี pdftotext จาก poppler-utils): ${cut(e.message, 200)}`), { evidence: `${base}.pdf` }); }
-    let evidence = `${base}.pdf`;
-    try { execFileSync("pdftoppm", ["-png", "-r", "80", "-f", "1", "-l", "1", "-singlefile", pdf, join(outDir, base)], { timeout: 30_000 }); evidence = `${base}.png`; } catch { /* ไม่มีภาพก็ยังมีไฟล์ PDF */ }
-    const flat = text.replace(/\s+/g, " ");
-    const want = [].concat(p.contains ?? []).map(String);
-    for (const w of want) if (!flat.includes(w)) throw Object.assign(new Fail(`PDF รายงานไม่มีข้อความ "${w}"`, w, cut(flat, 300)), { evidence });
-    return { detail: `PDF ${Math.ceil(buf.length / 1024)} KB · พบครบ ${want.length} ค่า`, evidence };
+    return checkPdf(buf, p.contains);
+  },
+  // ปุ่มบนจอที่ดาวน์โหลด PDF (เช่นปุ่มดาวน์โหลดในหน้าพิมพ์ smlaiaccount frontend/account/report/GlobalReportPrintModal.tsx:2228) — กดแล้วตรวจไฟล์เหมือน report.pdf
+  async "ui.pdf"(p) {
+    const pg = await ensurePage();
+    const [dl] = await Promise.all([pg.waitForEvent("download", { timeout: p.timeout ?? 60_000 }), pg.locator(p.selector).nth(p.nth ?? 0).click({ timeout: 15_000 })]);
+    const buf = readFileSync(await dl.path());
+    if (buf.subarray(0, 5).toString() !== "%PDF-") throw new Fail("ไฟล์ที่ได้จากปุ่มไม่ใช่ PDF", "ไฟล์ PDF", `${dl.suggestedFilename()} ${cut(buf.toString("utf8"), 200)}`);
+    return checkPdf(buf, p.contains);
   },
   async "db.query"(p) {
     const db = ensureDemoDb(p.database);

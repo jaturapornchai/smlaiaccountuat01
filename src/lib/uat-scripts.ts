@@ -4,6 +4,8 @@ import { Lens, UatScript } from "@/types/bot";
 import { LENSES, ROLES } from "./swarm-data";
 
 export const SCRIPT_DIR = join(process.cwd(), "uat-scripts");
+// ask-* = AI เขียนตามคำสั่งผู้ใช้ · auto-* = AI คิดเองหลังจบชุดทดสอบ — ทั้งคู่ต้องตรวจสคริปต์ก่อนเชื่อผล
+export const isAiScript = (id: string) => /^(ask|auto)-/.test(id);
 
 export interface LoadedScript extends UatScript {
   file: string;

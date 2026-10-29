@@ -87,6 +87,10 @@ export const SettingsModal: React.FC<Props> = ({ open, settings, health, onClose
             ส่งรอบที่ไม่ผ่านเข้า IssueMate อัตโนมัติ
           </label>
           <label className="baseline-center gap-2.5">
+            <input type="checkbox" checked={form.autoScripts} onChange={(e) => set("autoScripts", e.target.checked)} className="h-4 w-4 accent-violet-400" />
+            จบชุดทดสอบแล้วให้ AI คิดสคริปต์ทดสอบเพิ่มเอง
+          </label>
+          <label className="baseline-center gap-2.5">
             <input type="checkbox" checked={form.headed} onChange={(e) => set("headed", e.target.checked)} className="h-4 w-4 accent-cyan-400" />
             เปิดหน้าต่าง Chrome ให้เห็นตอนรัน
           </label>
