@@ -6,7 +6,8 @@
     "dev": "next dev -p 3050",
     "build": "next build",
     "start": "next start -p 3050",
-    "lint": "next lint"
+    "lint": "next lint",
+    "check:history": "node scripts/check-run-history.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

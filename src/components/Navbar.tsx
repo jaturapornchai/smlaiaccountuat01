@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { BookOpen, Bot, Globe, Play, Settings, Sparkles } from "lucide-react";
+import { BookOpen, Bot, Globe, Play, Settings, Sparkles, TrendingUp } from "lucide-react";
 import { HealthReport } from "@/types/bot";
 import { host } from "@/lib/format";
 import { AdminLogin } from "@/components/AdminLogin";
@@ -62,6 +62,10 @@ export const Navbar: React.FC<NavbarProps> = ({ target, health, activeRuns, busy
         <Link href="/guide" aria-label="คู่มือการใช้งาน" className="glass baseline-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/40">
           <BookOpen className="h-4 w-4 text-cyan-300" />
           <span className="hidden sm:inline">คู่มือ</span>
+        </Link>
+        <Link href="/trends" aria-label="แนวโน้มผลทดสอบ" className="glass baseline-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/40">
+          <TrendingUp className="h-4 w-4 text-cyan-300" />
+          <span className="hidden sm:inline">แนวโน้ม</span>
         </Link>
         {admin && (
           <>

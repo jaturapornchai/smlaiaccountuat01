@@ -49,3 +49,5 @@ credentials*.json
 
 # runtime results, evidence, MCP token hashes
 /runs/
+# persistent run history (data/run-history/*.jsonl)
+/data/
