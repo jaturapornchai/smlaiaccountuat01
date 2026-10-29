@@ -18,6 +18,7 @@ global.__openhands_swarm_settings ??= {
   ...DEFAULT_MODELS,
   autoIssueMate: process.env.ISSUEMATE_AUTO !== "0",
   autoScripts: process.env.UAT_AUTO_SCRIPTS !== "0",
+  autoRetest: process.env.UAT_AUTO_RETEST !== "0",
   maxParallelBots: 3,
   headed: process.env.UAT_HEADED === "1",
 };
@@ -64,6 +65,7 @@ export function updateSettings(input: Record<string, unknown>): SwarmSettings {
   }
   if (typeof input.autoIssueMate === "boolean") next.autoIssueMate = input.autoIssueMate;
   if (typeof input.autoScripts === "boolean") next.autoScripts = input.autoScripts;
+  if (typeof input.autoRetest === "boolean") next.autoRetest = input.autoRetest;
   if (typeof input.headed === "boolean") next.headed = input.headed;
   if (input.maxParallelBots !== undefined) {
     const n = Number(input.maxParallelBots);

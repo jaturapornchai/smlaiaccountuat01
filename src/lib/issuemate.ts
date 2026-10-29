@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HealthCheck, IssueLink, ScriptRun } from "@/types/bot";
+import type { DeployedIssue } from "./auto-retest";
 import { askBrain, webResearch } from "./brain";
 import { PERSONA } from "./swarm-data";
 import { getSettings } from "./swarm-store";
@@ -42,6 +43,14 @@ const PROJECT = () => process.env.ISSUEMATE_PROJECT || "SMLAIACC";
 // ตอบกลับใน issue เดิม (ผลตรวจซ้ำ) — ไม่เปลี่ยนสถานะ issue ให้ฝั่งคนแก้เป็นคนเลื่อนสถานะเอง
 export const commentIssue = (code: string, message: string) =>
   tool("converse_on_issue", { projectKey: PROJECT(), code, agentName: "UAT Tester", role: "UAT Tester", message });
+
+// ticket ที่ deploy แล้วและอ้างสคริปต์ของ Tester (auto-retest.ts คัดต่อว่า Tester เปิดเอง)
+// ponytail: เห็นแค่ 200 ใบล่าสุดตามวันเปิด (เพดานฝั่ง IssueMate 500) — ticket เก่ากว่านั้นที่เพิ่ง deploy จะหลุด ถ้าเจอจริงค่อยไล่ทีละ code จาก issuemate-sent.json ด้วย get_issue
+export async function listDeployed(): Promise<DeployedIssue[]> {
+  const r = await tool("list_issues", { projectKey: PROJECT(), status: "deployed", search: "uat-scripts/", limit: 200 });
+  if (!Array.isArray(r)) throw new Error(`IssueMate list_issues ตอบไม่ใช่รายการ: ${JSON.stringify(r).slice(0, 200)}`);
+  return r;
+}
 
 export async function checkIssueMate(): Promise<HealthCheck> {
   const url = process.env.ISSUEMATE_MCP_URL ? new URL(process.env.ISSUEMATE_MCP_URL).origin : undefined;

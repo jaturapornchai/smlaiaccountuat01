@@ -14,7 +14,7 @@
 - AI ที่เขียนโปรแกรม (Claude, Antigravity บนเครื่องลุงจืด) สั่งงานผ่าน MCP วงจรคือ
   1. AI สั่งตรวจ → Tester รันกับของจริง
   2. ไม่ผ่าน → เปิด issue ใน IssueMate · ยกเว้นทุกขั้นที่พัง (ไม่นับเก็บกวาด) พังเพราะตัวสคริปต์เอง: `psql ผิดพลาด`, `ไม่มีตัวแปร {{…}}`, `AI ทำไม่จบใน N ตา` → ไม่เปิด issue แต่บันทึกเหตุการณ์ในบอท และขึ้นเหตุผลบนการ์ดบอท/หน้ารอบ (`noIssue`) ให้แก้สคริปต์ (`scriptFault` ใน `src/lib/uat-runs.ts`, รอบตรวจซ้ำของ issue ยังส่งผลเสมอ) · สคริปต์ `auto-*` ที่ AI เสนอเองก็ไม่เปิด issue อัตโนมัติ (เปิด ticket ไม่จริงบ่อย) — ตรวจผลก่อนแล้วกด "ส่งเข้า IssueMate" ที่หน้ารอบ · สั่งส่งเองได้ด้วย MCP `runs {id, action:"issue"}`
-  3. AI แก้โค้ด แล้วสั่งตรวจซ้ำด้วยเลข issue
+  3. AI แก้โค้ด แล้วสั่งตรวจซ้ำด้วยเลข issue · หรือเปิดสวิตช์ `autoRetest` ให้ Tester ตรวจซ้ำเองเมื่อ ticket ที่มันเปิดเป็น `deployed`
   4. ผ่าน → Tester เขียนคอมเมนต์ปิดวงจรใน issue นั้น (ไม่ผ่าน → คอมเมนต์ว่ายังพังขั้นไหน)
 - บทบาทของ AI (ทั้งสมองบอทและคำแนะนำใน MCP): คนไทย เป็นผู้ใช้ทั่วไปของ SML AI Account ที่ทำงานแบบผู้ใช้จริง และเก่ง query กับ data model ตรวจฐานข้อมูลและ flow งานได้ (เช่น ใบเสนอราคา → ใบสั่งขาย → ใบขาย → ภาษีขาย → GL → สต็อก)
 
@@ -60,6 +60,7 @@
    3. issue ที่สร้างมีขั้นตอนทำซ้ำ บทวิเคราะห์ ภาพหน้าจอ และ run.json แนบไปด้วย
    4. กันส่งซ้ำด้วย `runs/issuemate-sent.json`: สคริปต์เดียว = issue เดียว ถ้ารอบใหม่พังที่ขั้นอื่นจะต่อท้ายผลใน issue เดิม — เมื่อสคริปต์นั้นกลับมาผ่าน ระบบล้างรายการของสคริปต์นั้นเองและคอมเมนต์ใน issue เดิมว่าตรวจซ้ำผ่านแล้ว
    5. รอบที่ผิดพลาด (error) ไม่ส่งอัตโนมัติ ต้องกดส่งเองในแผง "รอบการรัน"
+   6. ตรวจซ้ำอัตโนมัติเมื่อแก้เสร็จ (`src/lib/auto-retest.ts`, ตั้งเวลาใน `src/instrumentation.ts`, เปิดที่หน้าตั้งค่า "เรื่องที่แก้เสร็จ (deployed) ใน IssueMate ให้ตรวจซ้ำอัตโนมัติ" ปิดด้วย `UAT_AUTO_RETEST=0`): IssueMate ไม่มี webhook จึงถาม `list_issues` (status `deployed`, ค้น `uat-scripts/`) ทุก 5 นาที → คัดเฉพาะ ticket ที่ Tester เปิดเอง (reporter ขึ้นต้น `UAT Tester Swarm` + บรรทัด `สคริปต์: uat-scripts/<id>.json` ใน description) → `startRuns([id], <เลข ticket>)` แล้ว `closeLoop` / `sendToIssueMate` คอมเมนต์ผลใน ticket เดิมเหมือนสั่งตรวจซ้ำเอง · กันสั่งซ้ำด้วย `runs/auto-retest.json` (เลข ticket → `closedAt` ของรอบ deploy) ถ้าเปิดกลับมาแก้แล้ว deploy ใหม่จะตรวจอีกรอบ · สคริปต์ถูกลบไปแล้ว = ลงฟีดกิจกรรมครั้งเดียว ไม่สั่งวน
 5. "สั่งงานตรวจ" (ปุ่มบนแถบบน, ✨ ที่บอท, MCP tool `command`) — `src/lib/command.ts`
    1. ผู้ดูแลพิมพ์ว่าจะให้ตรวจอะไร ไม่เลือกบอท = สมอง AI เลือกบอทที่เกี่ยวเอง (ไม่เกิน 6 ตัว) · ปุ่มบนแถบบนตอบรับทันทีแล้วทำเบื้องหลัง ผลหรือสาเหตุที่ทำไม่ได้ขึ้นฟีดกิจกรรม ("ระบบสั่งงาน") และลง log
    2. แต่ละบอทเขียนสคริปต์ `ask-<โมดูล>-<มุมตรวจ>` จากคอลัมน์จริงใน PostgreSQL แล้วบันทึกผ่านตัวตรวจเดียวกับ `save_script`
@@ -146,6 +147,7 @@
 | `ISSUEMATE_MCP_URL`, `ISSUEMATE_PROJECT`, `ISSUEMATE_TOKEN` | ปลายทาง issue (MCP ของ IssueMate) |
 | `ISSUEMATE_AUTO` | `0` = ไม่ส่งอัตโนมัติ |
 | `UAT_AUTO_SCRIPTS` | `0` = จบชุดทดสอบแล้วไม่ให้ AI คิดสคริปต์ `auto-*` เพิ่มเอง |
+| `UAT_AUTO_RETEST` | `0` = ticket ที่ Tester เปิดเป็น `deployed` แล้วไม่ต้องตรวจซ้ำเอง |
 | `UAT_MCP_TOKEN` | รหัสให้ AI เรียก `/api/mcp` (ไม่ตั้ง = MCP ปิด ตอบ 503) |
 | `UAT_SESSION_SECRET` | ลงชื่อคุกกี้ผู้ดูแล (สุ่ม ≥32 ตัว) ไม่ตั้ง = ไม่มีใครสั่งงานผ่านหน้าเว็บได้ |
 | `UAT_ADMIN_EMAIL` | อีเมล Google ของผู้ดูแล หลายคนคั่นด้วยจุลภาค (จำเป็น — ไม่ตั้ง = ไม่มีใครสั่งงานผ่านหน้าเว็บได้) |
@@ -237,7 +239,12 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 - เครื่องไม่มี psql: `bin/psql` เรียก psql ในคอนเทนเนอร์ `sml_postgresql`
 - Playwright + Chromium อยู่ `/opt/uat-tester/pw` (`UAT_PLAYWRIGHT`, `PLAYWRIGHT_BROWSERS_PATH`)
 - อัปเดตโค้ด: ส่งไฟล์ขึ้น `/opt/uat-tester` (ไม่ทับ `.env.local` และ `./runs/` ที่ราก — ถ้าใช้ tar ต้องเขียน `--exclude=./runs` ไม่งั้นจะตัด `src/app/api/runs` ทิ้งด้วย) แล้ว `corepack pnpm@10.33.0 install --frozen-lockfile && corepack pnpm@10.33.0 build && systemctl restart uat-tester` (ต้องระบุ pnpm 10.33.0 เพราะ pnpm ที่ corepack ให้มาบนเซิร์ฟเวอร์เป็นรุ่น 12 ซึ่งปฏิเสธ lockfile)
-- รีสตาร์ทตอนไม่มีรอบค้างเท่านั้น: เช็ก `GET /api/runs` ว่าไม่มี `running`/`queued` — service ใช้ `KillMode=control-group` รีสตาร์ทแล้วตัวรันที่ค้างถูกฆ่ากลางรอบ (เอกสาร `UAT-*` อาจค้างใน smldemo) · ค่าตั้งหน้าเว็บ/MCP `status settings` อยู่ในหน่วยความจำ รีสตาร์ทแล้วกลับเป็นค่าจาก env (`ISSUEMATE_AUTO`, `UAT_AUTO_SCRIPTS` …) ถ้าปิดส่ง IssueMate อัตโนมัติไว้ชั่วคราวต้องสั่งปิดซ้ำ
+- รีสตาร์ทตอนไม่มีรอบค้างเท่านั้น: เช็ก `GET /api/runs` ว่าไม่มี `running`/`queued` — service ใช้ `KillMode=control-group` รีสตาร์ทแล้วตัวรันที่ค้างถูกฆ่ากลางรอบ (เอกสาร `UAT-*` อาจค้างใน smldemo) · ค่าตั้งหน้าเว็บ/MCP `status settings` อยู่ในหน่วยความจำ รีสตาร์ทแล้วกลับเป็นค่าจาก env (`ISSUEMATE_AUTO`, `UAT_AUTO_SCRIPTS`, `UAT_AUTO_RETEST` …) ถ้าปิดส่ง IssueMate อัตโนมัติไว้ชั่วคราวต้องสั่งปิดซ้ำ
+
+ตรวจตรรกะตรวจซ้ำอัตโนมัติด้วย IssueMate ปลอม (ไม่เรียกของจริง ไม่รันสคริปต์):
+```bash
+node --no-warnings src/lib/auto-retest.check.mjs
+```
 
 ตัวอย่างคำสั่งที่ AI ส่ง (ตรวจซ้ำหลังแก้ issue):
 ```json
@@ -286,6 +293,7 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 - การแก้โปรแกรมอัตโนมัติขึ้นกับ IssueMate:
   - ต้องเปิด AI auto approval ของโปรเจกต์ SMLAIACC ในหน้า IssueMate
   - ถ้ายังไม่เปิด issue จะรอคนอนุมัติ
+- ตรวจซ้ำอัตโนมัติ (`autoRetest`): ช้าสุด 5 นาทีหลัง deploy · เห็นเฉพาะ 200 ticket ล่าสุดตามวันเปิด · เปิดสวิตช์ครั้งแรก (ยังไม่มี `runs/auto-retest.json`) จดของที่ deployed อยู่แล้วไว้เฉยๆ ไม่ตรวจย้อนหลัง · รอบตรวจซ้ำที่ไม่ผ่านจะคอมเมนต์กลับเมื่อเปิด `autoIssueMate` เท่านั้น และรอบ `error` ไม่คอมเมนต์ (ตามกติกาเดิม)
 - กันส่งซ้ำใช้ไฟล์ในเครื่อง: สคริปต์ที่ยังไม่ผ่านจะไม่เปิด issue ใหม่ แต่ต่อท้ายผลใน issue เดิม (รายการถูกล้างเองเมื่อสคริปต์กลับมาผ่าน)
 - ถ้าเบราว์เซอร์ของตัวทดสอบดับกลางรอบ (OOM-killer หรือบริการรีสตาร์ท) รอบนั้นจบเป็น `error` ขั้นที่เหลือเป็น "ข้าม" และไม่เปิด issue — สั่งรันใหม่ได้ · เครื่องทดสอบมีแรม 8 GB ใช้ร่วมกับระบบอื่น รันพร้อมกันได้ตาม `maxParallelBots`
 - Ollama Cloud จำกัดคำขอพร้อมกันต่อบัญชี เกินแล้วเข้าคิวฝั่งเขา คิวเต็มหรือรอนานจะตอบ 429 · ตัวทดสอบต่อคิวเองตาม `OLLAMA_MAX_CONCURRENT` (log มี `waitMs` = เวลารอคิว) แต่นับเฉพาะในเว็บ ส่วนตัวรัน (`runner/run.mjs` ตาดูจอ/`ui.play`) เรียกแยก ยังแย่งช่องเดียวกันได้ · ใช้ร่วมบัญชีกับระบบอื่นก็แย่งช่องเดียวกัน

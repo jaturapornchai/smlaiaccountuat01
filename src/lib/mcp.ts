@@ -20,7 +20,7 @@ const strs = { type: "array", items: str } as const;
 export const TOOLS = [
   {
     name: "status",
-    description: "Tester health (ERP web, demo DB, brain, IssueMate), settings and counts. bots:true adds one line per bot. settings:{erpTargetUrl,brainModel,scriptModel,analystModel,eyesModel,autoIssueMate,autoScripts,maxParallelBots(1-10),headed} updates settings.",
+    description: "Tester health (ERP web, demo DB, brain, IssueMate), settings and counts. bots:true adds one line per bot. settings:{erpTargetUrl,brainModel,scriptModel,analystModel,eyesModel,autoIssueMate,autoScripts,autoRetest,maxParallelBots(1-10),headed} updates settings.",
     inputSchema: { type: "object", properties: { bots: bool, settings: { type: "object" } } },
   },
   {
@@ -90,7 +90,7 @@ async function status(a: Args) {
   const { scripts, errors } = loadScripts();
   const out = [
     ...(["erp", "db", "brain", "issuemate"] as const).map((k) => `${k}: ${h[k].ok ? "ok" : "FAIL"} ${h[k].message}`),
-    `settings: target=${s.erpTargetUrl} brain=${s.brainModel} script=${s.scriptModel} analyst=${s.analystModel} eyes=${s.eyesModel} autoIssue=${s.autoIssueMate} autoScripts=${s.autoScripts} parallel=${s.maxParallelBots}`,
+    `settings: target=${s.erpTargetUrl} brain=${s.brainModel} script=${s.scriptModel} analyst=${s.analystModel} eyes=${s.eyesModel} autoIssue=${s.autoIssueMate} autoScripts=${s.autoScripts} autoRetest=${s.autoRetest} parallel=${s.maxParallelBots}`,
     `scripts=${scripts.length}${errors.length ? ` invalid=${errors.map((e) => `${e.file}(${e.error})`).join(",")}` : ""} active=${activeRunCount()}`,
   ];
   if (a.bots) for (const b of getBots()) out.push(`${b.id}|${b.role}/${b.lens}|${b.status}|runs ${b.stats.runs} ✓${b.stats.passed} ✗${b.stats.failed}`);

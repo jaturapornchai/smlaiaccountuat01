@@ -91,6 +91,10 @@ export const SettingsModal: React.FC<Props> = ({ open, settings, health, onClose
             จบชุดทดสอบแล้วให้ AI คิดสคริปต์ทดสอบเพิ่มเอง
           </label>
           <label className="baseline-center gap-2.5">
+            <input type="checkbox" checked={form.autoRetest} onChange={(e) => set("autoRetest", e.target.checked)} className="h-4 w-4 accent-violet-400" />
+            เรื่องที่แก้เสร็จ (deployed) ใน IssueMate ให้ตรวจซ้ำอัตโนมัติ
+          </label>
+          <label className="baseline-center gap-2.5">
             <input type="checkbox" checked={form.headed} onChange={(e) => set("headed", e.target.checked)} className="h-4 w-4 accent-cyan-400" />
             เปิดหน้าต่าง Chrome ให้เห็นตอนรัน
           </label>
