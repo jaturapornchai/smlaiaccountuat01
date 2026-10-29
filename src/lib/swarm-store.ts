@@ -20,7 +20,7 @@ global.__openhands_swarm_settings ??= {
   autoIssueMate: process.env.ISSUEMATE_AUTO !== "0",
   autoScripts: process.env.UAT_AUTO_SCRIPTS !== "0",
   autoRetest: process.env.UAT_AUTO_RETEST !== "0",
-  maxParallelBots: 3,
+  maxParallelBots: 5,
   headed: process.env.UAT_HEADED === "1",
   // รอบกลางคืนจดลงไฟล์ (settings อื่นหายตอนรีสตาร์ท แต่ deploy ต้องไม่ปิดรอบคืนเอง) · ค่าเริ่มต้นปิด
   nightlyEnabled: loadState().enabled,
