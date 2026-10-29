@@ -2,10 +2,11 @@
 // and prints one JSON line per event on stdout. Spawned by src/lib/uat-runs.ts.
 // Usage: node runner/run.mjs --script <file> --out <dir> --base <erp url>
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const arg = (n) => { const i = process.argv.indexOf(`--${n}`); return i > 0 ? process.argv[i + 1] : undefined; };
 const script = JSON.parse(readFileSync(arg("script"), "utf8"));
@@ -237,6 +238,149 @@ const live = async () => {
 };
 const jpeg64 = async () => (await page.screenshot({ type: "jpeg", quality: 70 })).toString("base64");
 
+// ---------- ระนาบ baseline (กฎ UI ลุงจืด: ทุกอย่างในแถวเดียวกันต้องมีกึ่งกลางแนวตั้งตรงกันเป๊ะ) → ข้อค้นพบ S4 ไม่ทำให้ขั้นล้ม ----------
+// ทำงานในหน้าเว็บ (page.evaluate) ห้ามอ้างตัวแปรนอกฟังก์ชัน · ชิ้นที่วัด = ช่องกรอก/ปุ่ม/ไอคอน + ข้อความ 1 บรรทัด
+// ข้อความวัดจากขอบตัวอักษรจริง (Range) ไม่ใช่กล่อง label ที่ยืดเต็มแถว · ข้อความใน inline เดียวกันเบราว์เซอร์วางบน baseline เดียวกันแล้ว → นับเป็นชิ้นเดียว
+// แถว = บรรพบุรุษชั้นบนสุดที่สูงไม่เกิน 64px · แถวที่มีของซ้อนบน-ล่าง (ชื่อ + คำอธิบาย 2 บรรทัด) ข้ามทั้งแถว กันแจ้งผิด
+// ponytail: แถวที่เป็น grid หลายบรรทัดในกล่องเดียว (label/input เป็นลูกตรงของ grid สูง >64px) ไม่ถูกจับเป็นแถว — SML ใช้ flex ต่อแถว (CustomerDetailScreen.tsx:1398)
+function measureAlignment() {
+  const ROW_MAX = 64, ATOM_MAX = 48, TOL = 1, rows = new Map();
+  const rowOf = (el) => {
+    if (!rows.has(el)) { const p = el.parentElement; rows.set(el, p && p !== document.body && p.getBoundingClientRect().height <= ROW_MAX ? rowOf(p) : el); }
+    return rows.get(el);
+  };
+  const blockOf = (el) => { while (el.parentElement && ["inline", "contents"].includes(getComputedStyle(el).display)) el = el.parentElement; return el; };
+  const ok = (el, r) => r.width >= 2 && r.height >= 4 && r.height <= ATOM_MAX && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth && el.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+  const atom = (el, r, what, control) => ({ el, r, what, control, cy: r.top + r.height / 2 });
+  const atoms = [];
+  for (const el of document.querySelectorAll("input:not([type=hidden]),select,textarea,button,svg,img")) {
+    const r = el.getBoundingClientRect();
+    if (!el.parentElement?.closest("svg") && ok(el, r)) atoms.push(atom(el, r, el.tagName.toLowerCase(), !el.matches("svg,img")));
+  }
+  const texts = new Map(), range = document.createRange(), walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n, k = 0; (n = walk.nextNode()) && k < 5000; k++) {
+    const p = n.parentElement;
+    if (!p || !n.data.trim() || p.closest("script,style,noscript,select,textarea,svg")) continue;
+    range.selectNodeContents(n);
+    const rs = range.getClientRects(), key = blockOf(p);
+    if (rs.length === 1 && ok(p, rs[0]) && !(texts.get(key)?.r.height >= rs[0].height)) texts.set(key, atom(p, rs[0], `"${n.data.trim().slice(0, 24)}"`, false));
+  }
+  const groups = new Map();
+  for (const a of [...atoms, ...texts.values()]) { const g = rowOf(a.el); if (groups.has(g)) groups.get(g).push(a); else groups.set(g, [a]); }
+  // จุดกึ่งกลางต้องเห็นจริง (ไม่ถูกกล่องเลื่อน/ป๊อปอัปบัง)
+  const shown = (a) => { const h = document.elementFromPoint(a.r.left + a.r.width / 2, a.cy); return !!h && (a.el.contains(h) || h.contains(a.el)); };
+  const out = [];
+  for (const g of groups.values()) {
+    if (g.length < 2 || g.some((a) => g.some((b) => Math.min(a.r.bottom, b.r.bottom) <= Math.max(a.r.top, b.r.top)))) continue;
+    g.sort((a, b) => a.r.left - b.r.left);
+    const ref = g.find((a) => a.control) ?? g[0]; // อ้างอิงช่องกรอก/ปุ่มตัวแรกในแถว (ไม่มี = ชิ้นซ้ายสุด)
+    const bad = g.filter((a) => Math.abs(a.cy - ref.cy) > TOL);
+    if (!bad.length || !shown(ref)) continue;
+    const seen = bad.filter(shown);
+    if (!seen.length) continue;
+    out.push({
+      key: [ref, ...seen].map((a) => a.what).join("|"),
+      text: `แถว y≈${Math.round(ref.cy)} อ้างอิง ${ref.what}: ${seen.map((a) => `${a.what} (x ${Math.round(a.r.left)}) ${a.cy > ref.cy ? "ต่ำกว่า" : "สูงกว่า"} ${Math.abs(a.cy - ref.cy).toFixed(1)}px`).join(", ")}`,
+      boxes: [ref, ...seen].map((a, i) => ({ x: a.r.left, y: a.r.top, w: a.r.width, h: a.r.height, bad: i > 0 })),
+    });
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+// กรอบเขียว = ชิ้นอ้างอิง, แดง = ชิ้นที่เหลื่อม (วาดทับชั่วคราวเพื่อถ่ายภาพหลักฐาน แล้วลบทิ้ง)
+function drawBoxes(boxes) {
+  const host = document.body.appendChild(document.createElement("div"));
+  host.id = "__uat_align";
+  host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647";
+  for (const b of boxes) host.appendChild(document.createElement("div")).style.cssText = `position:absolute;left:${b.x - 2}px;top:${b.y - 2}px;width:${b.w + 4}px;height:${b.h + 4}px;outline:2px solid ${b.bad ? "#ff1744" : "#00c853"}`;
+}
+const alignSeen = new Set(); // แถวเดิมที่เจอแล้วในรอบนี้ไม่แจ้งซ้ำ
+async function alignFindings() {
+  const rows = (await page.evaluate(measureAlignment).catch(() => [])).filter((r) => !alignSeen.has(r.key) && alignSeen.add(r.key));
+  if (!rows.length) return [];
+  await page.evaluate(drawBoxes, rows.flatMap((r) => r.boxes)).catch(() => {});
+  const evidence = await shot("align");
+  await page.evaluate(() => document.getElementById("__uat_align")?.remove()).catch(() => {});
+  return [{ severity: "S4", kind: "baseline", text: cut(`ระนาบเหลื่อม ${rows.length} แถว — ${rows.map((r) => r.text).join(" · ")}`, 800), evidence }];
+}
+
+// ---------- ภาพต่างจากรอบล่าสุดที่ผ่าน (ui.screenshot + ภาพหน้าแรกของ PDF) → ข้อค้นพบ S4 ไม่ทำให้ขั้นล้ม ----------
+// ภาพอ้างอิงถาวร baselines/<script>/<key>.png นอก runs/ · เขียนทับเฉพาะรอบที่ผ่าน (ภาพต่างที่รอบผ่าน = ยอมรับหน้าตาใหม่ แจ้งครั้งเดียว)
+const BASELINE_DIR = join(process.env.UAT_BASELINE_DIR || fileURLToPath(new URL("../baselines", import.meta.url)), String(script.id ?? "script").replace(/[^\w-]/g, "_"));
+const DIFF_PCT = Number(process.env.UAT_VISUAL_DIFF_PCT) || 0.3; // % ของพิกเซลที่ไม่ได้ปิดไว้
+const fresh = new Map(); // key → { src: ภาพรอบนี้, masks } · masks ของภาพอ้างอิงเก็บคู่ใน <key>.json (เลขยาวในภาพเก่าแต่สั้นในภาพใหม่ ต้องปิดทั้งสองฝั่ง)
+// ส่วนที่เปลี่ยนทุกรอบ (เลขเอกสาร วันที่ เวลา ยอด) = ข้อความ/ค่าในช่องที่มีตัวเลข → ไม่นับในการเทียบ · พิกัดเป็นพิกเซลภาพ (คูณ devicePixelRatio)
+function dynamicRects() {
+  const k = devicePixelRatio, out = [];
+  const add = (r) => r.width && r.height && out.push([Math.floor((r.left - 2) * k), Math.floor((r.top - 2) * k), Math.ceil((r.width + 4) * k), Math.ceil((r.height + 4) * k)]);
+  const walk = document.createTreeWalker(document.body ?? document.documentElement, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (/\d/.test(n.data) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP) });
+  for (let n; (n = walk.nextNode()); ) { const r = document.createRange(); r.selectNodeContents(n); for (const x of r.getClientRects()) add(x); }
+  for (const el of document.querySelectorAll("input, textarea, select")) if (/\d/.test(el.value)) add(el.getBoundingClientRect());
+  return out.slice(0, 5000);
+}
+// ถอดและเทียบ PNG ด้วย canvas ของ Chromium ที่เปิดอยู่แล้ว (ไม่เพิ่ม dependency · Blob ไม่ผ่าน URL จึงไม่ติด CSP ของหน้า)
+// พิกเซลต่าง = สีช่องใดช่องหนึ่งห่างเกิน tol (กันขอบตัวอักษรเพี้ยนเล็กน้อย) · ภาพ diff: เทาจาง = ภาพรอบนี้, แดง = ต่าง, ฟ้า = ส่วนที่ไม่นับ
+async function comparePng({ a, b, masks, tol, maxPct }) {
+  const load = async (s) => {
+    const bm = await createImageBitmap(new Blob([Uint8Array.from(atob(s), (c) => c.charCodeAt(0))]));
+    const c = new OffscreenCanvas(bm.width, bm.height), x = c.getContext("2d");
+    x.drawImage(bm, 0, 0);
+    return { w: bm.width, h: bm.height, d: x.getImageData(0, 0, bm.width, bm.height).data, c, x };
+  };
+  const [A, B] = await Promise.all([load(a), load(b)]);
+  if (A.w !== B.w || A.h !== B.h) return { size: `${B.w}×${B.h} → ${A.w}×${A.h}` };
+  const skip = new Uint8Array(A.w * A.h);
+  for (const [x, y, w, h] of masks) for (let j = Math.max(0, y); j < Math.min(A.h, y + h); j++) skip.fill(1, j * A.w + Math.max(0, x), j * A.w + Math.min(A.w, x + w));
+  const img = A.x.createImageData(A.w, A.h), o = img.data, d = A.d, e = B.d;
+  let diff = 0, used = 0;
+  for (let p = 0, i = 0; p < skip.length; p++, i += 4) {
+    const g = 178 + (d[i] + d[i + 1] + d[i + 2]) / 40;
+    o[i + 3] = 255;
+    if (skip[p]) { o[i] = g - 60; o[i + 1] = g - 20; o[i + 2] = 255; continue; }
+    used++;
+    if (Math.max(Math.abs(d[i] - e[i]), Math.abs(d[i + 1] - e[i + 1]), Math.abs(d[i + 2] - e[i + 2])) > tol) { diff++; o[i] = 255; o[i + 1] = 0; o[i + 2] = 0; }
+    else o[i] = o[i + 1] = o[i + 2] = g;
+  }
+  const pct = used ? (diff / used) * 100 : 0;
+  if (pct <= maxPct) return { pct };
+  A.x.putImageData(img, 0, 0);
+  const bytes = new Uint8Array(await (await A.c.convertToBlob({ type: "image/png" })).arrayBuffer());
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return { pct, png: btoa(s) };
+}
+// file = ภาพใน outDir · คืน note (ต่อท้าย detail ของขั้น) + finding เมื่อต่างเกินเกณฑ์ · เทียบไม่ได้ก็ไม่ทำให้ขั้นล้ม
+async function visualCheck(raw, file, masks) {
+  let key = raw;
+  for (let n = 2; fresh.has(key); n++) key = `${raw}-${n}`;
+  const cur = join(outDir, file), old = join(BASELINE_DIR, `${key}.png`);
+  if (!existsSync(cur)) return { note: "ไม่มีภาพให้เทียบ" };
+  fresh.set(key, { src: cur, masks });
+  if (!existsSync(old)) return { note: "ภาพแรกของสคริปต์นี้ เก็บเป็นภาพอ้างอิงเมื่อรอบผ่าน" };
+  try {
+    const r = await page.evaluate(comparePng, { a: readFileSync(cur).toString("base64"), b: readFileSync(old).toString("base64"), masks: [...masks, ...readMasks(old)], tol: 40, maxPct: DIFF_PCT });
+    const vs = "รอบล่าสุดที่ผ่าน";
+    if (r.size) return { note: `ขนาดภาพต่างจาก${vs}`, finding: { severity: "S4", kind: "visual", text: `ขนาดภาพ "${key}" ต่างจาก${vs} ${r.size}`, evidence: file } };
+    const pct = `${r.pct.toFixed(2)}% (เกณฑ์ ${DIFF_PCT}%)`;
+    if (!r.png) return { note: `ต่างจาก${vs} ${pct}` };
+    const f = `${String(++evidenceSeq).padStart(3, "0")}-diff-${key}.png`;
+    writeFileSync(join(outDir, f), Buffer.from(r.png, "base64"));
+    return { note: `ต่างจาก${vs} ${pct}`, finding: { severity: "S4", kind: "visual", text: `ภาพ "${key}" ต่างจาก${vs} ${pct} · ภาพ diff: แดง = ต่าง, ฟ้า = ตัวเลข/วันที่ที่เปลี่ยนทุกรอบ (ไม่นับ)`, evidence: f } };
+  } catch (e) { return { note: `เทียบภาพไม่ได้: ${cut(e.message, 120)}` }; }
+}
+const readMasks = (png) => { try { return JSON.parse(readFileSync(png.replace(/\.png$/, ".json"), "utf8")); } catch { return []; } };
+function saveBaselines() {
+  for (const [key, { src, masks }] of fresh) {
+    try {
+      mkdirSync(BASELINE_DIR, { recursive: true });
+      const dst = join(BASELINE_DIR, key);
+      writeFileSync(`${dst}.json`, JSON.stringify(masks));
+      copyFileSync(src, `${dst}.tmp`);
+      renameSync(`${dst}.tmp`, `${dst}.png`);
+    } catch { /* ไม่มี baseline = รอบหน้าเริ่มใหม่ ไม่กระทบผลรอบนี้ */ }
+  }
+}
+
 // ---------- Computer Use: the eyes model looks at the screen and picks one action per turn ----------
 const SEE_SCHEMA = { type: "object", properties: { pass: { type: "boolean" }, reason: { type: "string" } }, required: ["pass", "reason"] };
 const PLAY_SCHEMA = {
@@ -287,7 +431,8 @@ async function playAction(a, w, h) {
 const dig = (obj, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
 
 // เก็บ PDF + ภาพหน้าแรกเป็นหลักฐาน แล้วหาทุกค่าใน contains (ใช้ทั้ง report.pdf และ ui.pdf)
-function checkPdf(buf, contains) {
+// ภาพหน้าแรกเทียบกับรอบที่ผ่านด้วยเกณฑ์ % อย่างเดียว (ไม่มี DOM ให้หาตำแหน่งตัวเลข) · ภาพอ้างอิงผูกกับชื่อขั้น (title ไทย → hash)
+async function checkPdf(buf, contains, title) {
   const base = `${String(++evidenceSeq).padStart(3, "0")}-report`;
   const pdf = join(outDir, `${base}.pdf`);
   writeFileSync(pdf, buf);
@@ -299,7 +444,8 @@ function checkPdf(buf, contains) {
   const flat = text.replace(/\s+/g, " ");
   const want = [].concat(contains ?? []).map(String);
   for (const w of want) if (!flat.includes(w)) throw Object.assign(new Fail(`PDF รายงานไม่มีข้อความ "${w}"`, w, cut(flat, 300)), { evidence });
-  return { detail: `PDF ${Math.ceil(buf.length / 1024)} KB · พบครบ ${want.length} ค่า`, evidence };
+  const v = evidence.endsWith(".png") ? await visualCheck(`pdf-${createHash("sha1").update(String(title)).digest("hex").slice(0, 10)}`, evidence, []) : {};
+  return { detail: `PDF ${Math.ceil(buf.length / 1024)} KB · พบครบ ${want.length} ค่า${v.note ? ` · ${v.note}` : ""}`, evidence, findings: v.finding && [v.finding] };
 }
 
 // ---------- step kinds ----------
@@ -415,11 +561,15 @@ const ACTIONS = {
     const sqlErr = body.match(DB_ERROR_TEXT)?.[0];
     if (sqlErr) found.push(`ข้อความ DB error บนหน้าจอ: ${sqlErr}`);
     if (found.length) throw new Fail(`พบ ${found.length} ข้อผิดพลาดแฝงในหน้าจอ`, "ไม่มี HTTP>=400 / JS error / DB error", cut(found.slice(0, 5).join(" | "), 500));
-    return { detail: "ไม่พบข้อผิดพลาดแฝง (HTTP/JS/console/DB error)" };
+    return { detail: "ไม่พบข้อผิดพลาดแฝง (HTTP/JS/console/DB error)", findings: await alignFindings() };
   },
   async "ui.screenshot"(p) {
     await ensurePage();
-    return { detail: "ถ่ายภาพหน้าจอ", evidence: await shot(String(p.name ?? "shot").replace(/\W+/g, "-")) };
+    const name = String(p.name ?? "shot").replace(/\W+/g, "-");
+    const masks = await page.evaluate(dynamicRects).catch(() => []);
+    const evidence = await shot(name);
+    const v = await visualCheck(name, evidence, masks);
+    return { detail: `ถ่ายภาพหน้าจอ · ${v.note}`, evidence, findings: v.finding && [v.finding] };
   },
   // Stagehand: one plain-Thai instruction, grounded on the page DOM
   async "ui.act"(p) {
@@ -488,7 +638,7 @@ const ACTIONS = {
     const res = await context.request.fetch(sameOrigin("/api/process/report/pdf").href, { method: "POST", data: p.body, failOnStatusCode: false, timeout: p.timeout ?? 120_000 });
     const buf = await res.body();
     if (res.status() !== 200 || buf.subarray(0, 5).toString() !== "%PDF-") throw new Fail("ไม่ได้ไฟล์ PDF ของรายงาน", "HTTP 200 + ไฟล์ PDF", `${res.status()} ${res.headers()["content-type"] ?? ""} ${cut(buf.toString("utf8"), 200)}`);
-    return checkPdf(buf, p.contains);
+    return checkPdf(buf, p.contains, p.title ?? p.i);
   },
   // ปุ่มบนจอที่ดาวน์โหลด PDF (เช่นปุ่มดาวน์โหลดในหน้าพิมพ์ smlaiaccount frontend/account/report/GlobalReportPrintModal.tsx:2228) — กดแล้วตรวจไฟล์เหมือน report.pdf
   async "ui.pdf"(p) {
@@ -496,7 +646,7 @@ const ACTIONS = {
     const [dl] = await Promise.all([pg.waitForEvent("download", { timeout: p.timeout ?? 60_000 }), pg.locator(p.selector).nth(p.nth ?? 0).click({ timeout: 15_000 })]);
     const buf = readFileSync(await dl.path());
     if (buf.subarray(0, 5).toString() !== "%PDF-") throw new Fail("ไฟล์ที่ได้จากปุ่มไม่ใช่ PDF", "ไฟล์ PDF", `${dl.suggestedFilename()} ${cut(buf.toString("utf8"), 200)}`);
-    return checkPdf(buf, p.contains);
+    return checkPdf(buf, p.contains, p.title ?? p.i);
   },
   async "db.query"(p) {
     const db = ensureDemoDb(p.database);
@@ -557,7 +707,10 @@ async function exec(step) {
     const { r, k } = await attempt(step, fn, p);
     if (p.wait && page) await page.waitForTimeout(Math.min(p.wait, 30_000));
     counts.passed++;
-    emit({ t: "step", i: step.i, status: "passed", durationMs: Date.now() - t0, detail: cut(k ? `ผ่านเมื่อลองซ้ำครั้งที่ ${k} · ${r.detail ?? ""}` : r.detail), ...(k && { flaky: true }), expected: r.expected, actual: r.actual, evidence: r.evidence });
+    // ข้อค้นพบ S4 ไม่ทำให้ขั้นล้ม → ไม่เข้า IssueMate (ส่งเฉพาะขั้นที่ไม่ผ่าน) แต่โชว์ในหน้ารอบ + MCP runs
+    const findings = r.findings?.length ? r.findings : undefined;
+    const detail = k ? `ผ่านเมื่อลองซ้ำครั้งที่ ${k} · ${r.detail ?? ""}` : (r.detail ?? "");
+    emit({ t: "step", i: step.i, status: "passed", durationMs: Date.now() - t0, detail: cut(`${detail}${findings ? ` · ข้อค้นพบ S4 ${findings.length} ข้อ (ไม่ทำให้ขั้นล้ม)` : ""}`), expected: r.expected, actual: r.actual, evidence: r.evidence, findings, ...(k && { flaky: true }) });
     if (step.do.startsWith("ui.")) await live();
     return true;
   } catch (e) {
@@ -590,6 +743,7 @@ try {
   for (const step of tail) await exec(step); // cleanup always runs
   // รอบที่เครื่องทดสอบล้มกลางทาง = error (ไม่เปิด issue) ให้รันใหม่ แทนที่จะโทษ ERP
   status = gone ? "error" : counts.failed ? "failed" : "passed";
+  if (status === "passed") saveBaselines();
   emit({ t: "end", status, ...counts, issues: issues.length, dialogs: dialogs.length, ...(gone && { message: `${gone} — รอบนี้ไม่สมบูรณ์ ไม่ใช่ข้อผิดพลาดของ ERP · สั่งรันใหม่ได้` }) });
 } catch (e) {
   emit({ t: "end", status: "error", message: cut(e.message, 500) });

@@ -100,6 +100,14 @@ export interface UatScript {
 
 export type StepStatus = "pending" | "running" | "passed" | "failed" | "skipped";
 
+// ข้อค้นพบที่ไม่ทำให้ขั้นล้ม (ไม่เปิด issue อัตโนมัติ): baseline = ชิ้นในแถวเดียวกันกึ่งกลางเหลื่อมเกิน 1px, visual = ภาพต่างจากรอบล่าสุดที่ผ่านเกินเกณฑ์
+export interface Finding {
+  severity: Severity;
+  kind: "baseline" | "visual";
+  text: string;
+  evidence?: string; // ภาพมีกรอบชี้จุด / ภาพ diff ใน runs/<id>/
+}
+
 export interface StepResult {
   i: number;
   title: string;
@@ -113,6 +121,7 @@ export interface StepResult {
   evidence?: string; // ชื่อไฟล์ใน runs/<id>/
   query?: string; // SQL หรือคำขอ API จริงของขั้นนี้ — การ์ดบอทโชว์แทนภาพหน้าจอ
   flaky?: boolean; // ล้มครั้งแรกแต่ผ่านตอนลองซ้ำ (runner/run.mjs RETRY)
+  findings?: Finding[];
 }
 
 export type RunStatus = "queued" | "running" | "passed" | "failed" | "error" | "stopped";

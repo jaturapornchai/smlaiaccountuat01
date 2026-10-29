@@ -49,3 +49,6 @@ credentials*.json
 
 # runtime results, evidence, MCP token hashes
 /runs/
+
+# ภาพอ้างอิงเทียบหน้าจอ/PDF (runner/run.mjs visualCheck) — ข้อมูลรันจริง ไม่เข้า git
+/baselines/

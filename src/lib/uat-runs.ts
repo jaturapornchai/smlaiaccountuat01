@@ -147,7 +147,7 @@ function onLine(run: ScriptRun, line: string) {
   } else if (m.t === "step") {
     const st = run.steps[m.i as number];
     if (!st) return;
-    Object.assign(st, { status: m.status, durationMs: m.durationMs, detail: m.detail, expected: m.expected, actual: m.actual, evidence: m.evidence, flaky: m.flaky === true || undefined });
+    Object.assign(st, { status: m.status, durationMs: m.durationMs, detail: m.detail, expected: m.expected, actual: m.actual, evidence: m.evidence, findings: m.findings, flaky: m.flaky === true || undefined });
     if (m.query) st.query = String(m.query);
     if (m.status === "passed") addEvent(bot, "pass", `ขั้น ${st.i + 1}: ${st.title}`);
     else if (m.status === "failed") addEvent(bot, "fail", `ขั้น ${st.i + 1}: ${st.title} — ${st.detail ?? ""}`);

@@ -74,6 +74,18 @@ const Step: React.FC<{ run: ScriptRun; s: StepResult; onImage: (url: string) => 
           เปิด PDF รายงาน
         </a>
       )}
+      {s.findings?.map((f, k) => (
+        <div key={k} className="mt-1.5 rounded-lg border border-amber-300/20 bg-amber-400/5 px-2 py-1 text-[0.7rem] leading-snug text-amber-100">
+          <span className="mr-1 rounded bg-amber-400/15 px-1 font-semibold text-amber-200">{f.severity}</span>
+          <span className="break-words">{f.text}</span>
+          {f.evidence && (
+            <button onClick={() => onImage(evidenceUrl(run.id, f.evidence!))} className="group mt-1 block overflow-hidden rounded-md border border-white/10">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={evidenceUrl(run.id, f.evidence)} alt={`ภาพข้อค้นพบขั้น ${s.i + 1}`} loading="lazy" className="h-20 w-auto object-cover transition group-hover:scale-105" />
+            </button>
+          )}
+        </div>
+      ))}
     </li>
   );
 };
@@ -137,6 +149,7 @@ export const RunPanel: React.FC<Props> = ({ runs, selectedId, onSelect, onStop, 
   const main = run?.steps.filter((s) => !s.cleanup) ?? [];
   const tail = run?.steps.filter((s) => s.cleanup) ?? [];
   const doneSteps = run?.steps.filter((s) => s.status !== "pending" && s.status !== "running").length ?? 0;
+  const nFindings = run?.steps.reduce((n, s) => n + (s.findings?.length ?? 0), 0) ?? 0;
 
   return (
     <section className="glass flex max-h-[calc(100vh-7rem)] min-h-[28rem] flex-col overflow-hidden rounded-3xl">
@@ -202,6 +215,7 @@ export const RunPanel: React.FC<Props> = ({ runs, selectedId, onSelect, onStop, 
             {run.message && <p className="mt-3 rounded-xl border border-amber-300/20 bg-amber-400/5 px-3 py-2 text-[0.75rem] text-amber-100">{run.message}</p>}
             {(run.status === "failed" || run.status === "error") && <IssueBox run={run} url={issueMateUrl} onSend={() => onIssue(run.id)} />}
             {(run.status === "failed" || run.status === "error") && <Recording key={run.id} runId={run.id} />}
+            {nFindings > 0 && <p className="mt-2 text-[0.72rem] text-amber-200">ข้อค้นพบ S4 {nFindings} ข้อ (ระนาบเหลื่อม/ภาพต่างจากรอบที่ผ่าน) — ไม่ทำให้รอบล้มและไม่เปิด issue อัตโนมัติ ดูใต้แต่ละขั้น</p>}
             {run.issues > 0 && <p className="mt-2 text-[0.72rem] text-amber-200">ตัวตรวจจับเจอ HTTP ผิดพลาด / JS error / ข้อความ DB error รวม {run.issues} ครั้งระหว่างรัน</p>}
 
             <ol className="relative mt-5 space-y-4 before:absolute before:bottom-2 before:left-3 before:top-2 before:w-px before:bg-white/10">
