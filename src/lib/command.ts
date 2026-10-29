@@ -2,10 +2,11 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BotConfig, BotTask, ScriptRun } from "@/types/bot";
 import { pushActivity } from "./activity";
-import { askBrain, webResearch } from "./brain";
+import { askBrain, checkSources, webResearch } from "./brain";
 import menuList from "./erp-menus.json";
 import { SCRIPT_FORMAT, lintScript, saveScript } from "./mcp";
 import { DESIGN } from "./script-fault";
+import { smlContext } from "./sml-mcp";
 import { addEvent, getBotById, getBots, getSettings } from "./swarm-store";
 import { psqlRead } from "./uat-health";
 import { RUN_DIR, getRun, retireRun, startRuns } from "./uat-runs";
@@ -113,7 +114,7 @@ export async function checkScript(sc: Script) {
 async function writeScript(bot: BotConfig, id: string, command: string): Promise<Script> {
   const mine = loadScripts().scripts.filter((s) => s.module === bot.role && !s.ai);
   const example = mine.find((s) => s.lens === bot.lens) ?? mine[0];
-  const refs = await researchFor(command);
+  const [refs, sml] = await Promise.all([researchFor(command), smlContext(`เขียนสคริปต์ UAT ตามคำสั่ง: ${command}`)]);
   const cols = await realColumns(`${command} ${bot.focus} ${mine.map((s) => readFileSync(s.file, "utf8")).join(" ")}`);
   const system = `${bot.systemPrompt}
 
@@ -124,11 +125,12 @@ ${SCRIPT_FORMAT}
 - ทำเฉพาะส่วนของคำสั่งที่ตรงกับหน้าที่ของคุณ ใช้ขั้นตามมุมตรวจ: ฐานข้อมูล → db.query, API → api.request, หน้าจอ → ui.* (เริ่มด้วย ui.demoLogin; ไม่รู้ selector ให้ ui.openMenu แล้วใช้ ui.play {goal})
 - SQL ใช้เฉพาะตารางและคอลัมน์ใน "คอลัมน์จริง" ห้ามเดาชื่อ · ตรวจแบบนับแถวที่ผิด select count(*) as n ... แล้ว expect {col:"n",op:"eq",value:0}
 - อ่านอย่างเดียว: ห้าม db.exec, api.request ใช้ GET เท่านั้น · เงินเทียบตรงเป๊ะ ห้ามปัดเศษ
+- ค่าคาดหวังยึดระบบของ SML AI Account (ข้อมูลจาก MCP ด้านล่าง/การออกแบบ/คอลัมน์จริง) ไม่ใช่ความเห็นของ AI
 - title ของสคริปต์และทุกขั้นเป็นภาษาไทยที่ผู้ใช้ทั่วไปเข้าใจ · 2-10 ขั้น
 
 ข้อมูลอ้างอิงจากเว็บ (ใช้เฉพาะส่วนที่เกี่ยวกับคำสั่ง · ถ้าใช้ตัดสินว่าถูก/ผิด ให้ใส่ URL ไว้ใน description ของสคริปต์):
 ${refs || "(ค้นไม่เจอ)"}
-
+${sml ? `\n${sml}\n` : ""}
 ตัวอย่างสคริปต์ที่รันผ่านจริงของโมดูลนี้:
 ${example ? readFileSync(example.file, "utf8").slice(0, 3000) : "(ไม่มี)"}
 
@@ -149,7 +151,7 @@ ${cols}`;
       readOnlyGuard(sc);
       await checkScript(sc);
       const severity = /^S[1-4]$/.test(String(sc.severityOnFail)) ? sc.severityOnFail : "S3";
-      saveScript({ script: { ...sc, id, module: bot.role, lens: bot.lens, severityOnFail: severity, description: `${id.startsWith("auto-") ? "AI เสนอเอง" : "สั่งงาน"}: ${command}${raw.description ? ` · ${raw.description}` : ""}` } });
+      saveScript({ script: { ...sc, id, module: bot.role, lens: bot.lens, severityOnFail: severity, description: `${id.startsWith("auto-") ? "AI เสนอเอง" : "สั่งงาน"}: ${command}${raw.description ? ` · ${checkSources(String(raw.description), `${refs}\n${sml}`).text}` : ""}` } });
       return sc;
     } catch (e) {
       err = errText(e);
@@ -268,6 +270,7 @@ export async function healScript(run: ScriptRun, why: string): Promise<string | 
     // ponytail: เมนูทั้งหมด 90 KB ยาวเกิน → ส่งเฉพาะเมนูที่ key/ชื่อมีคำจาก key ที่ผิดหรือชื่อสคริปต์ (ไม่เกิน 80) พอให้เลือกเมนูที่ถูก
     const words = [...(text0.match(/menu_[a-z0-9_]+/g) ?? []).flatMap((k) => k.split("_").slice(1)), ...`${run.scriptTitle} ${failed.map((s) => s.title).join(" ")}`.split(/\s+/)].filter((w) => w.length >= 2 && w !== "menu");
     const menus = failed.some((s) => s.kind === "ui.openMenu") ? menuList.filter(([k, name]) => words.some((w) => k.includes(w) || name.includes(w))).slice(0, 80).map(([k, name]) => `${k} = ${name}`).join("\n") : "";
+    const sml = await smlContext(`ซ่อมสคริปต์ UAT "${run.scriptTitle}" ที่พังเพราะ: ${why}`);
     const system = `คุณซ่อมสคริปต์ UAT ของ SML AI Account ที่รันแล้วพังเพราะตัวสคริปต์เอง (ยังไม่ได้ตรวจ ERP จริง)
 ${SCRIPT_FORMAT}
 กติกา:
@@ -277,7 +280,7 @@ ${SCRIPT_FORMAT}
 - ตอบ JSON ของสคริปต์ทั้งไฟล์ (title, steps, cleanup) เท่านั้น
 การออกแบบของ SML ที่ยืนยันจากโค้ดแล้ว (ไม่ใช่บั๊ก):
 ${DESIGN}
-${menus ? `เมนูที่มีจริง (key = ชื่อ):\n${menus}\n` : ""}คอลัมน์จริงใน PostgreSQL:
+${sml ? `${sml}\n` : ""}${menus ? `เมนูที่มีจริง (key = ชื่อ):\n${menus}\n` : ""}คอลัมน์จริงใน PostgreSQL:
 ${await realColumns(text0)}`;
     let err = "";
     for (let round = 0; round < 2; round++) {

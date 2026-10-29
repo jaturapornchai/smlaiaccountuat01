@@ -7,6 +7,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, 
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { EVIDENCE_RULE } from "./evidence-rule.mjs";
 
 const arg = (n) => { const i = process.argv.indexOf(`--${n}`); return i > 0 ? process.argv[i + 1] : undefined; };
 const script = JSON.parse(readFileSync(arg("script"), "utf8"));
@@ -143,6 +144,7 @@ const OLLAMA = process.env.OLLAMA_API_URL || "https://ollama.com";
 const BRAIN = process.env.UAT_BRAIN_MODEL || process.env.OLLAMA_MODEL || "deepseek-v4.1-flash";
 const EYES = process.env.UAT_EYES_MODEL || "kimi-k3";
 async function ollama(model, messages, schema) {
+  if (messages[0]?.role === "system") messages = [{ ...messages[0], content: `${messages[0].content}\n\n${EVIDENCE_RULE}` }, ...messages.slice(1)]; // กฎกลางเดียวกับ askBrain
   if (!process.env.OLLAMA_API_KEY) throw new Fail("ยังไม่ได้ตั้ง OLLAMA_API_KEY ใน .env.local");
   const res = await fetch(`${OLLAMA}/api/chat`, {
     method: "POST", headers: { Authorization: `Bearer ${process.env.OLLAMA_API_KEY}`, "Content-Type": "application/json" },

@@ -2,7 +2,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HealthCheck, IssueLink, ScriptRun } from "@/types/bot";
 import type { DeployedIssue } from "./auto-retest";
-import { askBrain, webResearch } from "./brain";
+import { askBrain, checkSources, webResearch } from "./brain";
+import { smlContext } from "./sml-mcp";
 import { PERSONA } from "./swarm-data";
 import { getSettings } from "./swarm-store";
 import { isAiScript } from "./uat-scripts";
@@ -83,7 +84,7 @@ const ANALYST = `${PERSONA}
 งานตอนนี้: วิเคราะห์ผลทดสอบ UAT ของระบบบัญชี SML AI Account (Next.js + Go + PostgreSQL)
 ผู้อ่านคือ AI นักพัฒนาที่จะรับ issue นี้ไปแก้ต่อ ตอบภาษาไทย สั้น ตรงประเด็น ไม่แต่งข้อมูลที่ไม่มีในหลักฐาน หัวข้อ:
 1. ไม่ผ่านเพราะอะไร (1-2 บรรทัด: ขั้นไหน คาดหวังอะไร ได้อะไร)
-2. สาเหตุที่น่าจะเป็น (เรียงจากน่าจะสุด ระบุว่าเป็นการคาดเดา)
+2. สาเหตุ (เฉพาะที่หลักฐานหรือข้อมูลจาก MCP ของ SML ชี้ · หลักฐานไม่พอ เขียนว่า "ไม่แน่ใจ" แล้วบอกว่าต้องตรวจอะไรเพิ่ม)
 3. จุดที่ควรตรวจในโค้ด/ตาราง (ชื่อตาราง คอลัมน์ API หรือหน้าจอที่เกี่ยว)
 4. แนวทางแก้ไขที่แนะนำ (ทำอะไรที่ไหน เป็นข้อๆ ให้ AI ทำต่อได้ทันที · เรื่องภาษี/บัญชีให้อ้างหลักที่ถูกพร้อม URL)
 5. วิธีตรวจว่าแก้แล้ว (รันสคริปต์ไหน ขั้นไหน คาดหวังค่าอะไร)`;
@@ -129,9 +130,14 @@ export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLi
   let analysis: string;
   try {
     // เรื่องเงิน/ภาษี/บัญชี → ค้นกฎทางการมาประกอบ (เรื่องโค้ดล้วนไม่ต้องค้น กัน prompt ฟุ้ง)
-    const refs = TAXY.test(facts) ? await webResearch([`${run.scriptTitle} ${first?.title ?? ""}`.slice(0, 120) + " กรมสรรพากร"]) : "";
+    const [refs, sml] = await Promise.all([
+      TAXY.test(facts) ? webResearch([`${run.scriptTitle} ${first?.title ?? ""}`.slice(0, 120) + " กรมสรรพากร"]) : "",
+      smlContext(`วิเคราะห์รอบทดสอบที่ไม่ผ่านก่อนเปิด issue: ${run.scriptTitle} — ${failed.map((s) => `${s.title}: ${s.detail ?? ""}`).join(" · ")}`.slice(0, 1500)),
+    ]);
     const web = refs ? `\n\nข้อมูลอ้างอิงจากเว็บ (อ้าง URL เมื่อใช้):\n${refs}` : "";
-    analysis = await askBrain("analyst", model, ANALYST, `${facts}${web}${png ? "\n\n(แนบภาพหน้าจอตอนขั้นที่พัง)" : ""}`, png ? [png] : []);
+    const raw = await askBrain("analyst", model, ANALYST, `${facts}${web}${sml ? `\n\n${sml}` : ""}${png ? "\n\n(แนบภาพหน้าจอตอนขั้นที่พัง)" : ""}`, png ? [png] : []);
+    const { text, dropped } = checkSources(raw, `${facts}\n${refs}\n${sml}`);
+    analysis = dropped.length ? `${text}\n\n(ระบบตัด URL ที่ AI อ้างแต่ไม่มีในแหล่งอ้างอิง ${dropped.length} ลิงก์)` : text;
   } catch (e) {
     analysis = `(สมอง AI วิเคราะห์ไม่สำเร็จ: ${(e as Error).message})`;
   }
@@ -150,7 +156,7 @@ export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLi
     "### ขั้นตอนทำซ้ำ",
     repro || "-",
     "",
-    `### วิเคราะห์และแนวทางแก้โดยสมอง AI (${model}) — เป็นการคาดเดา ต้องตรวจโค้ดจริงก่อนแก้`,
+    `### วิเคราะห์และแนวทางแก้โดยสมอง AI (${model}) — อ้างเฉพาะหลักฐานรอบนี้ ต้องตรวจโค้ดจริงก่อนแก้`,
     analysis,
     "",
     ...rec.flatMap((l) => [l, ""]),
@@ -176,4 +182,54 @@ export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLi
   if (res?.status !== "created" || !code) throw new Error(`IssueMate ไม่ได้สร้าง issue (${res?.status ?? "ไม่ทราบสถานะ"})`);
   writeFileSync(SENT_FILE, JSON.stringify({ ...readSent(), [key]: code }, null, 1));
   return { status: "sent", code, analysis, at: at() };
+}
+
+// ---------- ขอเครื่องมือ MCP เพิ่มจาก SML AI Account (sml-mcp.ts smlContext เรียกเมื่อ AI บอกว่าข้อมูลที่ต้องใช้ไม่มีเครื่องมือไหนให้) ----------
+// ขอโครงสร้าง/workflow ของระบบใหม่ ไม่ใช่โค้ดเดิม · กันซ้ำด้วยไฟล์แยกจาก SENT_FILE (คีย์ไม่มี # ของ scriptsForIssue) และไม่เขียน "uat-scripts/" ใน ticket (listDeployed ค้นคำนี้)
+// ponytail: เพดาน 3 ใบต่อวัน กัน AI ตั้งชื่อต่างกันเรื่องเดียวกันจน ticket ท่วม — ถ้าไม่พอค่อยให้ AI เห็นรายชื่อที่ขอไปแล้ว
+const MCP_FILE = join(process.cwd(), "runs", "mcp-requests.json");
+const asking = new Set<string>();
+type McpNeed = { name?: unknown; why?: unknown; input?: unknown; output?: unknown };
+
+export async function requestMcp(need: McpNeed | undefined, task: string, existing: string[]): Promise<string> {
+  const name = String(need?.name ?? "");
+  const [why, input, output] = [need?.why, need?.input, need?.output].map((v) => String(v ?? "").trim());
+  if (!/^sml_[a-z0-9_]{3,50}$/.test(name) || existing.includes(name) || [why, input, output].some((v) => v.length < 10)) return "";
+  const done: Record<string, { code: string; at: string }> = existsSync(MCP_FILE) ? JSON.parse(readFileSync(MCP_FILE, "utf8")) : {};
+  const wait = (code: string) => `ยังไม่มีเครื่องมือ ${name} (ขอ SML AI Account สร้างแล้ว ${code}) — ข้อมูลส่วนนี้ห้ามเดา ให้บอกว่าไม่แน่ใจ`;
+  if (done[name]) return wait(done[name].code);
+  const today = new Date().toISOString().slice(0, 10);
+  if (!getSettings().autoIssueMate || asking.has(name) || Object.values(done).filter((r) => r.at.startsWith(today)).length >= 3) return "";
+  asking.add(name);
+  try {
+    const res = await tool("create_issue", {
+      projectKey: PROJECT(),
+      title: `[UAT ขอ MCP] ${name} — ${why}`.slice(0, 200),
+      description: [
+        "**UAT Tester ขอเครื่องมือ MCP เพิ่มใน sml-ai-account-mcp (อ่านอย่างเดียว)** เพื่อตรวจตามโครงสร้าง/workflow ของ SML AI Account เอง ไม่ต้องเดา",
+        "",
+        `- ชื่อเครื่องมือ: \`${name}\``,
+        `- ใช้ทำอะไร: ${why}`,
+        `- input: ${input}`,
+        `- output ที่ต้องการ: ${output}`,
+        "",
+        `งานของ Tester ที่ต้องใช้: ${task.slice(0, 1500)}`,
+        `เครื่องมือที่มีแล้ว: ${existing.join(", ")}`,
+        "",
+        "ข้อตกลง: อ่านอย่างเดียว ใช้ token smlmcp_ro_ เดิมได้ · ถ้า workflow ต่อยอดจากโค้ด C#/Java เดิม ระบุว่ามาจากส่วนไหนและปรับอะไร · เพิ่มแล้ว Tester เห็นเองจาก tools/list ภายใน 10 นาทีและใช้ทันที",
+      ].join("\n"),
+      type: "feature",
+      priority: "medium",
+      reporter: "UAT Tester Swarm",
+      labels: ["uat", "mcp-request"],
+    });
+    const code: string | undefined = res?.issue?.code;
+    if (res?.status !== "created" || !code) return "";
+    writeFileSync(MCP_FILE, JSON.stringify({ ...done, [name]: { code, at: new Date().toISOString() } }, null, 1));
+    return wait(code);
+  } catch {
+    return "";
+  } finally {
+    asking.delete(name);
+  }
 }

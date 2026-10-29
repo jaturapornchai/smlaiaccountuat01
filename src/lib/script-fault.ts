@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { ScriptRun, StepResult } from "@/types/bot";
 import { askBrain } from "./brain";
 import menuList from "./erp-menus.json";
+import { smlContext } from "./sml-mcp";
 import { SCRIPT_DIR } from "./uat-scripts";
 
 // ความผิดของตัวสคริปต์ ไม่บอกอะไรเรื่อง ERP → ไม่เปิด issue
@@ -51,8 +52,9 @@ const TRIAGE = `คุณตรวจรอบทดสอบ UAT ที่ไ�
 ถ้าระบบอาจผิดจริงหรือไม่แน่ใจ ตอบ ERP_BUG หรือ UNSURE — บั๊กจริงที่หลุดไปแย่กว่า ticket ขยะ
 การออกแบบของ SML ที่ยืนยันจากโค้ดแล้ว (ไม่ใช่บั๊ก):
 ${DESIGN}
-ตอบ JSON เท่านั้น: verdict และ reason (ภาษาไทย 1 บรรทัด อ้างหลักฐานที่ใช้ตัดสิน)`;
-const TRIAGE_SCHEMA = { type: "object", properties: { verdict: { type: "string", enum: ["SCRIPT_FAULT", "ERP_BUG", "UNSURE"] }, reason: { type: "string" } }, required: ["verdict", "reason"] };
+ตอบ JSON เท่านั้น: verdict, reason (ภาษาไทย 1 บรรทัด) และ evidence = ข้อความที่คัดลอกตรงตัวจากหลักฐานด้านบนหรือการออกแบบ ที่ใช้ตัดสิน (ระบบตรวจว่ามีจริง ไม่มี = ไม่นับว่าสคริปต์ผิด)`;
+const TRIAGE_SCHEMA = { type: "object", properties: { verdict: { type: "string", enum: ["SCRIPT_FAULT", "ERP_BUG", "UNSURE"] }, reason: { type: "string" }, evidence: { type: "string" } }, required: ["verdict", "reason", "evidence"] };
+const flat = (s: string) => s.replace(/\s+/g, " ").trim();
 
 // คืนเหตุผลเมื่อ AI ชี้ชัดว่าสคริปต์ผิดเอง · ERP_BUG/UNSURE/สมองล่ม → undefined = เปิด issue ตามเดิม
 export async function aiTriage(run: ScriptRun, outDir: string, model: string): Promise<string | undefined> {
@@ -73,9 +75,14 @@ export async function aiTriage(run: ScriptRun, outDir: string, model: string): P
     ].join("\n");
     const shot = failed.find((s) => s.evidence?.endsWith(".png"))?.evidence;
     const png = shot && existsSync(join(outDir, shot)) ? [readFileSync(join(outDir, shot)).toString("base64")] : [];
-    const text = await askBrain("triage", model, TRIAGE, facts.slice(0, 12_000), png, TRIAGE_SCHEMA);
+    const sml = await smlContext(`คัดรอบทดสอบที่พัง: สคริปต์ "${run.scriptTitle}" ผิดเองหรือระบบ SML ผิดจริง — ${failed.map((s) => `${s.title}: ${s.detail ?? ""}`).join(" · ")}`.slice(0, 1500));
+    const prompt = `${facts.slice(0, 12_000)}${sml ? `\n\n${sml}` : ""}`;
+    const text = await askBrain("triage", model, TRIAGE, prompt, png, TRIAGE_SCHEMA);
     const r = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)); // โมเดลชอบห่อด้วย ```json
-    return r.verdict === "SCRIPT_FAULT" && r.reason ? String(r.reason).slice(0, 300) : undefined;
+    // กฎกลางข้อ 1: ชี้ว่าสคริปต์ผิดได้เฉพาะเมื่อคัดหลักฐานที่มีจริงมา — แต่งเหตุผลเอง = เปิด issue ตามเดิม (บั๊กจริงไม่หลุด)
+    const quote = flat(String(r.evidence ?? ""));
+    if (quote.length < 8 || !flat(`${DESIGN}\n${prompt}`).includes(quote)) return undefined;
+    return r.verdict === "SCRIPT_FAULT" && r.reason ? `${String(r.reason).slice(0, 300)} (หลักฐาน: ${quote.slice(0, 200)})` : undefined;
   } catch {
     return undefined;
   }

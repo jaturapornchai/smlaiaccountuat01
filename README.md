@@ -18,6 +18,12 @@
   4. ผ่าน → Tester เขียนคอมเมนต์ปิดวงจรใน issue นั้น (ไม่ผ่าน → คอมเมนต์ว่ายังพังขั้นไหน)
 - Zero-touch (ไม่ต้องมีคนกด): ตัวรันขัดข้อง/เกินเวลารวม → ลองรันใหม่เอง 1 ครั้ง (รอบใหม่มี `retryOf`, สรุปรอบกลางคืนนับเฉพาะรอบที่ลองใหม่) · ทุกครั้งที่เซิร์ฟเวอร์เริ่ม (`rerunStranded` เรียกจาก `src/instrumentation.ts`, log `rerun-stranded`) ดูรอบล่าสุดของแต่ละสคริปต์: ไม่ผ่าน/ขัดข้องแต่ไม่มี ticket และไม่มีเหตุผลจากกฎหรือ AI (รีสตาร์ตกลางด่าน AI หรือระหว่างส่ง, ส่ง IssueMate ไม่สำเร็จ, ลองใหม่แล้วยังขัดข้อง) → รันใหม่ให้ผลเข้าด่านเปิด ticket ตามปกติ, `auto-*` ที่ยังพังเอง → ปลดออกจากคลัง · ทำเฉพาะตอนเปิด `autoIssueMate` (ตัวตรวจ `node scripts/check-rerun-stranded.mjs`)
 - บทบาทของ AI (ทั้งสมองบอทและคำแนะนำใน MCP): คนไทย เป็นผู้ใช้ทั่วไปของ SML AI Account ที่ทำงานแบบผู้ใช้จริง และเก่ง query กับ data model ตรวจฐานข้อมูลและ flow งานได้ (เช่น ใบเสนอราคา → ใบสั่งขาย → ใบขาย → ภาษีขาย → GL → สต็อก)
+- กฎกลางทุกงาน AI (`runner/evidence-rule.mjs` ต่อท้าย system prompt ทุกครั้งที่ `askBrain` ใน `src/lib/brain.ts` และ `ollama()` ใน `runner/run.mjs` เรียกสมอง): ห้ามเดา ห้ามแต่งเติม สรุปจากผลทดสอบจริงหรือแหล่งอ้างอิงที่ให้ไปเท่านั้น และตรวจตามระบบของ SML AI Account (โครงสร้าง/workflow/กฎของระบบใหม่ ซึ่งต่อยอดจากโค้ด C#/Java เดิมโดยปรับน้อยที่สุด) ไม่ใช่ความเห็นของ AI · ระบบตรวจตามกฎจริง:
+  - SQL ในสคริปต์ AI ต้องผ่าน `EXPLAIN` กับฐาน Demo (`sqlGuard` ใน `src/lib/command.ts`) — ตาราง/คอลัมน์ที่ไม่มีจริงถูกตีกลับ
+  - URL ที่ AI อ้างใน description ของสคริปต์และในบทวิเคราะห์ของ issue ต้องมีในผลค้นเว็บ/หลักฐาน/ข้อมูล MCP ของ SML (`checkSources` ใน `src/lib/brain.ts`) — ที่แต่งขึ้นถูกตัดเป็น "(ตัด URL ที่ไม่มีในแหล่งอ้างอิง)"
+  - ด่านคัดรอบพัง (`aiTriage`) ชี้ว่าสคริปต์ผิดเองได้เฉพาะเมื่อคัดข้อความหลักฐานมาตรงตัว (ขั้นที่พัง/ค่าจริง/การออกแบบ/ข้อมูล MCP ของ SML) — คัดไม่ตรง = เปิด issue ตามเดิม
+- ข้อมูลระบบจาก MCP ของ SML AI Account (`src/lib/sml-mcp.ts`, ปลายทาง `<ERP_TARGET_URL>/api/mcp` ตามหน้า MCP Token ของ SML): ก่อนเขียน/ซ่อมสคริปต์ คัดรอบพัง และวิเคราะห์ issue สมอง AI เลือกเครื่องมือ MCP ของ SML (อ่านอย่างเดียว ≤3 ครั้งต่องาน) ที่ให้โครงสร้าง/workflow ที่งานนั้นต้องใช้ ผลแนบเป็นหลักฐานให้ AI · ชื่อเครื่องมือที่ AI แต่งไม่ถูกเรียก
+  - ขาดเครื่องมือที่ต้องใช้ → เปิด ticket ประเภท feature ใน IssueMate (`[UAT ขอ MCP] sml_<ชื่อ> — เหตุผล`, ป้าย `uat` `mcp-request`) ขอ SML AI Account สร้างเพิ่ม (`requestMcp` ใน `src/lib/issuemate.ts`) — ขอโครงสร้าง/workflow ของระบบใหม่ ไม่ใช่โค้ดเดิม · 1 ใบต่อชื่อ (`runs/mcp-requests.json`) ไม่เกิน 3 ใบต่อวัน ทำเฉพาะตอนเปิด `autoIssueMate` · SML เพิ่มแล้ว Tester เห็นจาก `tools/list` เองภายใน 10 นาที (ตัวตรวจ `node scripts/check-evidence.mjs`)
 
 ฝูงบอทมี 32 ตัว = 10 โมดูล × 3 มุมตรวจ + เงินสด/ธนาคาร 2 มุม (หน้าจอ ฐานข้อมูล — ยังไม่มีมุม API)
 - โมดูล: master, sales, purchase, inventory, gl, tax, reports, security, admin, recon
@@ -173,6 +179,8 @@
 | `UAT_EYES_MODEL` | ตา AI ของ `ui.see`/`ui.play` ดูภาพแล้วบอกพิกัดคลิก ว่างไว้ = `kimi-k3` |
 | `ISSUEMATE_MCP_URL`, `ISSUEMATE_PROJECT`, `ISSUEMATE_TOKEN` | ปลายทาง issue (MCP ของ IssueMate) |
 | `ISSUEMATE_AUTO` | `0` = ไม่ส่งอัตโนมัติ |
+| `SML_MCP_TOKEN` | token อ่านอย่างเดียว `smlmcp_ro_…` ที่ผู้ดูแล SML สร้างในหน้า MCP Token ของ SML AI Account · ไม่ตั้ง = ไม่ใช้ MCP ของ SML และไม่ขอเครื่องมือเพิ่ม |
+| `SML_MCP_URL` | ปลายทาง MCP ของ SML ว่างไว้ = `<ERP_TARGET_URL>/api/mcp` |
 | `UAT_AUTO_SCRIPTS` | `0` = จบชุดทดสอบแล้วไม่ให้ AI คิดสคริปต์ `auto-*` เพิ่มเอง |
 | `UAT_AUTO_RETEST` | `0` = ticket ที่ Tester เปิดเป็น `deployed` แล้วไม่ต้องตรวจซ้ำเอง |
 | `UAT_MCP_TOKEN` | รหัสให้ AI เรียก `/api/mcp` (ไม่ตั้ง = MCP ปิด ตอบ 503) |
@@ -210,6 +218,7 @@
 - บริการภายนอก:
   - Ollama Cloud (`https://ollama.com/api/chat`)
   - IssueMate MCP (`https://issue.dedezoom.com/mcp`)
+  - MCP ของ SML AI Account (`https://www.smlwork.com/api/mcp`, `sml-ai-account-mcp` อ่านอย่างเดียว)
 
 ## Usage example
 รันแบบ production ที่พอร์ต 3050:
@@ -287,6 +296,11 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 - อัปเดตโค้ด: ส่งไฟล์ขึ้น `/opt/uat-tester` (ไม่ทับ `.env.local`, `./runs/`, `./baselines/` และ `./data/` ที่ราก — ถ้าใช้ tar ต้องเขียน `--exclude=./runs --exclude=./baselines --exclude=./data` ไม่งั้นจะตัด `src/app/api/runs` ทิ้งด้วย และภาพอ้างอิงถูกทับ) แล้ว `corepack pnpm@10.33.0 install --frozen-lockfile && corepack pnpm@10.33.0 build && systemctl restart uat-tester` (ต้องระบุ pnpm 10.33.0 เพราะ pnpm ที่ corepack ให้มาบนเซิร์ฟเวอร์เป็นรุ่น 12 ซึ่งปฏิเสธ lockfile)
 - รีสตาร์ทตอนไม่มีรอบค้างเท่านั้น: เช็ก `GET /api/runs` ว่าไม่มี `running`/`queued` — service ใช้ `KillMode=control-group` รีสตาร์ทแล้วตัวรันที่ค้างถูกฆ่ากลางรอบ (เอกสาร `UAT-*` อาจค้างใน smldemo) · ค่าตั้งหน้าเว็บ/MCP `status settings` อยู่ในหน่วยความจำ รีสตาร์ทแล้วกลับเป็นค่าจาก env (`ISSUEMATE_AUTO`, `UAT_AUTO_SCRIPTS`, `UAT_AUTO_RETEST` …) ถ้าปิดส่ง IssueMate อัตโนมัติไว้ชั่วคราวต้องสั่งปิดซ้ำ
 
+ตรวจกฎกลางห้ามเดา + MCP ของ SML + การขอ MCP เพิ่ม ด้วย fetch/สมองปลอม (ไม่เรียก SML/IssueMate จริง):
+```bash
+node scripts/check-evidence.mjs
+```
+
 ตรวจตรรกะตรวจซ้ำอัตโนมัติด้วย IssueMate ปลอม (ไม่เรียกของจริง ไม่รันสคริปต์):
 ```bash
 node --no-warnings src/lib/auto-retest.check.mjs
@@ -328,6 +342,7 @@ node --no-warnings src/lib/auto-retest.check.mjs
 ถ้าไม่ใส่ `lens` ระบบเลือกให้เอง: มีขั้น `db.*` = data, ไม่มี = screen
 
 ## Limitation
+- MCP ของ SML AI Account ใช้ได้เมื่อตั้ง `SML_MCP_TOKEN` แล้วเท่านั้น · สคริปต์ยังเรียกเครื่องมือ MCP ของ SML เป็นขั้นตรวจไม่ได้ (ใช้เป็นข้อมูลให้ AI ตอนเขียน/ซ่อม/คัด/วิเคราะห์เท่านั้น) · ด่านคัดรอบพังตรวจหลักฐานได้เฉพาะข้อความ — AI ที่ตัดสินจากภาพหน้าจออย่างเดียวจะถูกนับว่าไม่แน่ใจ (เปิด issue) · AI อาจตั้งชื่อเครื่องมือที่ขอต่างกันในเรื่องเดียวกัน จึงจำกัด 3 ใบต่อวัน
 - เทียบภาพ (`ui.screenshot`/PDF): ภาพอ้างอิงเขียนทับทุกรอบที่ผ่าน จึงแจ้งหน้าตาเปลี่ยนแค่รอบแรกที่เห็น (รอบไม่ผ่านไม่เขียนทับ) · PDF ไม่มี DOM จึงไม่ปิดตัวเลข เลขเอกสาร/ยอดที่เปลี่ยนทุกรอบอาศัยเกณฑ์ % · ส่วนที่เปลี่ยนเองแต่ไม่มีตัวเลข (กราฟ canvas, toast, ภาพสุ่ม) ไม่ถูกปิด อาจแจ้งเกิน · ขั้นที่เปลี่ยนชื่อภาพ/ชื่อขั้นเริ่มภาพอ้างอิงใหม่ ภาพเก่าไม่ถูกลบ · ยังไม่ได้ทดสอบเส้นทาง PDF ในเครื่อง Windows (ไม่มี `pdftoppm`)
 - ตรวจระนาบ (`ui.expectClean`) ดูเฉพาะแถวที่สูงไม่เกิน 64px และข้ามกลุ่มที่วางซ้อนบน-ล่าง · ข้อความที่จัดตรงแล้วยังห่างกึ่งกลางช่องกรอก ~0.5px ตามเมตริกฟอนต์ จึงเลื่อน 1px วัดได้ ~1.5px และถูกแจ้ง · ฟอนต์ต่างขนาดในแถวเดียวกันวัดด้วยกึ่งกลาง ไม่ใช่เส้นฐานตัวอักษร · แถวเดิมแจ้งครั้งเดียวต่อรอบ (สูงสุด 8 แถวต่อครั้ง)
 - `report.pdf` ตรวจว่ามีข้อความ ไม่ตรวจตำแหน่งคอลัมน์ · วรรณยุกต์ไทยบางตัวใน PDF ของ ERP เป็นอักษร private-use (U+F70A–F70F) คำไทยจึงหาไม่เจอ ให้ใส่เลขเอกสาร/ตัวเลขใน `contains`

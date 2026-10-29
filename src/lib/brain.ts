@@ -1,5 +1,6 @@
 import { HealthCheck } from "@/types/bot";
 import { timed } from "./log";
+import { EVIDENCE_RULE } from "../../runner/evidence-rule.mjs";
 
 // สมองของบอท = Ollama Cloud — คีย์อยู่ใน .env.local เท่านั้น
 const API = process.env.OLLAMA_API_URL || "https://ollama.com";
@@ -53,7 +54,7 @@ async function callBrain(model: string, system: string, prompt: string, images: 
       think: false,
       ...(format ? { format, options: { temperature: 0 } } : {}),
       messages: [
-        { role: "system", content: system },
+        { role: "system", content: `${system}\n\n${EVIDENCE_RULE}` }, // กฎกลางห้ามเดา/ตรวจตามระบบ SML ต่อท้ายทุกงาน
         { role: "user", content: prompt, ...(images.length ? { images } : {}) },
       ],
     }),
@@ -94,6 +95,18 @@ export async function webResearch(queries: string[], perQuery = 3): Promise<stri
     .filter((r) => r.url && !seen.has(r.url) && seen.add(r.url))
     .map((r) => `- ${r.title ?? ""} — ${r.url}\n  ${String(r.content ?? "").replace(/\s+/g, " ").slice(0, 600)}`)
     .join("\n");
+}
+
+// กฎกลางข้อ 3 (runner/evidence-rule.mjs): URL ที่ AI อ้างต้องมีอยู่ในแหล่งที่ให้ไป (ผลค้นเว็บ/หลักฐาน/MCP ของ SML) — ที่แต่งขึ้นถูกตัดทิ้ง
+export function checkSources(text: string, sources: string): { text: string; dropped: string[] } {
+  const dropped: string[] = [];
+  const out = text.replace(/https?:\/\/[^\s<>"'`)\]]+/g, (u) => {
+    const bare = u.replace(/[.,;:!?]+$/, "");
+    if (sources.includes(bare) || sources.includes(bare.replace(/\/$/, ""))) return u;
+    dropped.push(bare);
+    return `(ตัด URL ที่ไม่มีในแหล่งอ้างอิง)${u.slice(bare.length)}`;
+  });
+  return { text: out, dropped };
 }
 
 export async function checkBrain(models: string[]): Promise<HealthCheck> {
