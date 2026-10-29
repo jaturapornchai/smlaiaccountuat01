@@ -195,9 +195,11 @@ function finish(run: ScriptRun) {
   pump();
   // ตรวจไม่ผ่าน → เปิด issue ให้หาวิธีแก้ทันที (ลุงจืดสั่ง 2026-10-29) · สคริปต์ ask-* ที่ AI เขียนเองจะมีหมายเหตุใน issue ให้ตรวจสคริปต์ก่อน
   // ยกเว้นพังเพราะตัวสคริปต์เอง (ไม่ใช่หลักฐานว่าระบบผิด) — รอบตรวจซ้ำของ issue ยังส่งเสมอ ให้คนแก้รู้ผล
+  // สคริปต์ auto-* ที่ AI เสนอเองไม่เปิด issue อัตโนมัติ (ลุงจืดสั่ง 2026-10-29: เปิด ticket ไม่จริงบ่อย) — ตรวจแล้วกด "ส่งเข้า IssueMate" เอง
   const fault = run.retestOf ? undefined : scriptFault(run);
   if (run.status === "failed" && getSettings().autoIssueMate) {
     if (fault) addEvent(bot, "info", `ไม่เปิด issue: "${run.scriptTitle}" พังเพราะตัวสคริปต์เอง (ขั้น ${fault.i + 1}: ${(fault.detail ?? "").slice(0, 120)}) — แก้สคริปต์แล้วรันใหม่`);
+    else if (!run.retestOf && run.scriptId.startsWith("auto-")) addEvent(bot, "info", `ไม่เปิด issue อัตโนมัติ: "${run.scriptTitle}" เป็นสคริปต์ที่ AI เสนอเอง — ตรวจผลก่อน ถ้าเป็นบั๊กจริงกด "ส่งเข้า IssueMate" ที่หน้ารอบนี้`);
     else void sendToIssueMate(run);
   }
   if (ok) void closeLoop(run);
