@@ -54,7 +54,11 @@ export const HeroStats: React.FC<HeroProps> = ({ bots, scripts, runs }) => {
   const queued = runs.filter((r) => r.status === "queued").length;
   const done = runs.filter((r) => r.status === "passed" || r.status === "failed" || r.status === "error");
   const passed = done.filter((r) => r.status === "passed").length;
-  const rate = done.length ? Math.round((passed / done.length) * 100) : 0;
+  // อัตราผ่าน = ผลรอบล่าสุดของแต่ละสคริปต์ (สถานะตอนนี้) · ถ้านับทุกรอบ รอบที่พังก่อนแก้เสร็จจะดึงตัวเลขต่ำเกินจริง (2026-10-29: 56% ทั้งที่ล่าสุดผ่าน 36/36)
+  const latest = new Map<string, ScriptRun>();
+  for (const r of done) if ((r.finishedAt ?? "") >= (latest.get(r.scriptId)?.finishedAt ?? "")) latest.set(r.scriptId, r);
+  const latestPassed = [...latest.values()].filter((r) => r.status === "passed").length;
+  const rate = latest.size ? Math.round((latestPassed / latest.size) * 100) : 0;
   const steps = bots.reduce((a, b) => a + b.stats.stepsChecked, 0);
   const coveredBots = new Set(scripts.map((s) => `${s.module}:${s.lens}`)).size;
 
@@ -77,7 +81,7 @@ export const HeroStats: React.FC<HeroProps> = ({ bots, scripts, runs }) => {
           <Kpi i={3} icon={<Bot className="h-4 w-4" />} label="บอททั้งหมด" value={bots.length} sub={`มีสคริปต์แล้ว ${coveredBots} ตัว`} tone="text-cyan-300" />
           <Kpi i={4} icon={<ScrollText className="h-4 w-4" />} label="สคริปต์ทดสอบ" value={scripts.length} sub={`${scripts.reduce((a, s) => a + s.stepCount, 0)} ขั้นตอน`} tone="text-violet-300" />
           <Kpi i={5} icon={<Activity className="h-4 w-4" />} label="กำลังรัน" value={active} sub={queued ? `รอคิวอีก ${queued}` : "ไม่มีคิวค้าง"} tone="text-sky-300" />
-          <Kpi i={6} icon={<CircleCheck className="h-4 w-4" />} label="อัตราผ่าน" value={rate} suffix="%" sub={`ผ่าน ${passed} จาก ${done.length} รอบ`} tone="text-emerald-300" />
+          <Kpi i={6} icon={<CircleCheck className="h-4 w-4" />} label="อัตราผ่านล่าสุด" value={rate} suffix="%" sub={`${latestPassed}/${latest.size} สคริปต์ · สะสม ${passed}/${done.length} รอบ`} tone="text-emerald-300" />
           <Kpi i={7} icon={<ListChecks className="h-4 w-4" />} label="ขั้นตอนที่ตรวจ" value={steps} sub="สะสมตั้งแต่เปิดเซิร์ฟเวอร์" tone="text-amber-300" />
         </div>
       </div>
