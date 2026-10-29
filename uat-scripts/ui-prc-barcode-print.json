@@ -1,0 +1,655 @@
+{
+  "id": "ui-prc-barcode-print",
+  "title": "พิมพ์บาร์โค้ดด้วยเครื่องพิมพ์ทั่วไป: บันทึกรูปแบบป้ายครบทุกช่อง โหลดกลับ ดึงบาร์โค้ดจริงลงตาราง/ตัวอย่างก่อนพิมพ์ราคาตรง แล้วลบรูปแบบ",
+  "module": "reports",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "หน้าจอ 2.1.17 (menu_ic_item_barcode_laser_print): สร้างรูปแบบป้าย UAT{{run.short}}BC กำหนดทุกช่อง (เริ่มคอลัมน์/แถว จำนวนคอลัมน์/แถว ขนาดดวง ขอบ หน่วยวัดนิ้ว ราคาที่ 2 ชื่อบริษัท ไม่แสดงชื่อหน่วย พิมพ์เส้นขอบ กระดาษกำหนดเอง) บันทึกผ่าน /api/process/barcode/format แล้วตรวจ JSON ใน sml_barcode_print_format ทุกค่า เปิดหน้าจอใหม่เลือกรูปแบบกลับมาตรวจทุกช่อง เลือกบาร์โค้ดจริงที่มีราคา (อ่านจาก ic_inventory_barcode ตอนรัน) ตรวจตารางรายการและตัวอย่างก่อนพิมพ์ว่าราคาตาม 'ราคาที่ 2' (ถ้าเป็น 0 ใช้ราคาที่ 1 ตาม C#) จัดรูปแบบตามทศนิยมราคาใน erp_option จำนวนดวง/หน้าคำนวณถูก แล้วลบรูปแบบผ่านหน้าจอ ไม่กดพิมพ์จริง (window.open + window.print ไม่มีไฟล์ PDF ให้ตรวจ)",
+  "timeoutMs": 360000,
+  "steps": [
+    {
+      "title": "กำหนดรหัสรูปแบบทดสอบ",
+      "do": "set",
+      "name": "bf",
+      "value": "UAT{{run.short}}BC"
+    },
+    {
+      "title": "กำหนดชื่อรูปแบบทดสอบ",
+      "do": "set",
+      "name": "bn",
+      "value": "{{run.tag}} ป้ายทดสอบ"
+    },
+    {
+      "title": "กำหนดชื่อบริษัทบนป้าย",
+      "do": "set",
+      "name": "cn",
+      "value": "{{run.tag}} บริษัทบนป้าย"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เลือกบาร์โค้ดจริง 1 ตัวที่มีราคา และคำนวณราคาที่ 2 ที่ต้องแสดง (ราคาที่ 2 เป็น 0 ใช้ราคาที่ 1) ตามทศนิยมราคาใน erp_option",
+      "do": "db.query",
+      "sql": "with o as (select coalesce((select item_price_decimal from erp_option limit 1), 2)::int d),\nb as (select b.barcode, b.ic_code, b.description, b.unit_code, coalesce(nullif(u.name_1, ''), b.unit_code) uname, coalesce(b.price, 0) p1, coalesce(b.price_2, 0) p2\n from ic_inventory_barcode b left join ic_unit u on u.code = b.unit_code\n where b.barcode ~ '^[A-Za-z0-9-]+$' and coalesce(b.price, 0) > 0 and coalesce(b.description, '') <> '' and b.description !~ '[\"\\n]' and b.ic_code ~ '^[A-Za-z0-9._/-]+$' and b.description = btrim(b.description) and b.description !~ '\\s\\s' and coalesce(u.name_1, '') = btrim(coalesce(u.name_1, ''))\n and (select count(*) from ic_inventory_barcode x where x.barcode = b.barcode) = 1\n order by (coalesce(b.price_2, 0) > 0 and b.price_2 <> b.price) desc, b.ic_code, b.barcode limit 1)\nselect b.barcode bc, b.ic_code ic, b.description descr, b.uname,\n to_char(round(case when b.p2 = 0 then b.p1 else b.p2 end, o.d), 'FM999,999,999,990' || case when o.d > 0 then '.' || repeat('0', o.d) else '' end) pricef,\n (select count(*) from sml_barcode_print_format where upper(code) = :'bf')::text n\nfrom b, o",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "save": {
+        "bc": "bc",
+        "ic": "ic",
+        "descr": "descr",
+        "uname": "uname",
+        "pricef": "pricef"
+      }
+    },
+    {
+      "title": "กด Shift ปิดกล่องช่วยเหลือที่อาจลอยค้าง",
+      "do": "ui.press",
+      "key": "Shift"
+    },
+    {
+      "title": "เปิดหน้าจอพิมพ์บาร์โค้ดด้วยเครื่องพิมพ์ทั่วไป",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_barcode_laser_print"
+    },
+    {
+      "title": "ยังไม่มีรายการ ปุ่มพิมพ์ปิดอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] button:has(span:text-is(\"พิมพ์\"))[disabled]"
+    },
+    {
+      "title": "ยังไม่กรอกรหัส/ชื่อ ปุ่มบันทึกรูปแบบปิดอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] button:has(span:text-is(\"บันทึกรูปแบบ\"))[disabled]"
+    },
+    {
+      "title": "กรอกรหัสรูปแบบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] input[placeholder=\"รหัสรูปแบบ\"]",
+      "value": "{{bf}}"
+    },
+    {
+      "title": "กรอกชื่อรูปแบบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] input[placeholder=\"ชื่อรูปแบบ\"]",
+      "value": "{{bn}}"
+    },
+    {
+      "title": "กรอกเริ่มคอลัมน์ที่ = 2",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"เริ่มคอลัมน์ที่\")) input",
+      "value": "2"
+    },
+    {
+      "title": "Tab ออกจากช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"เริ่มคอลัมน์ที่\")) input",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกเริ่มแถวที่ = 3",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"เริ่มแถวที่\")) input",
+      "value": "3"
+    },
+    {
+      "title": "Tab ออกจากช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"เริ่มแถวที่\")) input",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกจำนวนคอลัมน์ = 4",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"จำนวนคอลัมน์\")) input",
+      "value": "4"
+    },
+    {
+      "title": "Tab ออกจากช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"จำนวนคอลัมน์\")) input",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกจำนวนแถว = 10",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"จำนวนแถว\")) input",
+      "value": "10"
+    },
+    {
+      "title": "Tab ออกจากช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"จำนวนแถว\")) input",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกความกว้างดวง = 4.5",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ความกว้างดวง\")) input",
+      "value": "4.5"
+    },
+    {
+      "title": "Tab ออกจากช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ความกว้างดวง\")) input",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกความสูงดวง = 2.5",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ความสูงดวง\")) input",
+      "value": "2.5"
+    },
+    {
+      "title": "Tab ออกจากช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ความสูงดวง\")) input",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกขอบซ้าย = 0.3",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ขอบซ้าย\")) input",
+      "value": "0.3"
+    },
+    {
+      "title": "Tab ออกจากช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ขอบซ้าย\")) input",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกขอบบน = 0.6",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ขอบบน\")) input",
+      "value": "0.6"
+    },
+    {
+      "title": "Tab ออกจากช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ขอบบน\")) input",
+      "key": "Tab"
+    },
+    {
+      "title": "เลือกหน่วยวัด = นิ้ว",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [role=\"radiogroup\"]:has(input[value=\"Inch\"]) input[type=\"radio\"][value=\"Inch\"]"
+    },
+    {
+      "title": "เลือกราคาที่แสดง = ราคาที่ 2",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [role=\"radiogroup\"]:has(input[value=\"4\"]) input[type=\"radio\"][value=\"1\"]"
+    },
+    {
+      "title": "กรอกชื่อบริษัทบนป้าย",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ชื่อบริษัท\")) input",
+      "value": "{{cn}}"
+    },
+    {
+      "title": "ปิด 'แสดงชื่อหน่วยนับ'",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has-text(\"แสดงชื่อหน่วยนับ\") input[type=\"checkbox\"]"
+    },
+    {
+      "title": "เปิด 'พิมพ์เส้นขอบ'",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has-text(\"พิมพ์เส้นขอบ\") input[type=\"checkbox\"]"
+    },
+    {
+      "title": "เปิด 'กำหนดขนาดกระดาษเอง'",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has-text(\"กำหนดขนาดกระดาษเอง\") input[type=\"checkbox\"]"
+    },
+    {
+      "title": "กรอกกว้าง = 10.5",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"กว้าง\")) input",
+      "value": "10.5"
+    },
+    {
+      "title": "Tab ออกจากช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"กว้าง\")) input",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกสูง = 15",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"สูง\")) input",
+      "value": "15"
+    },
+    {
+      "title": "Tab ออกจากช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"สูง\")) input",
+      "key": "Tab"
+    },
+    {
+      "title": "กดบันทึกรูปแบบ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] button:has(span:text-is(\"บันทึกรูปแบบ\"))"
+    },
+    {
+      "title": "แจ้งบันทึกรูปแบบของเราสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]",
+      "text": "บันทึกรูปแบบ {{bf}} แล้ว"
+    },
+    {
+      "title": "ปิดกล่องข้อความ",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"] button:has(span:text-is(\"ตกลง\"))"
+    },
+    {
+      "title": "ฐานข้อมูล sml_barcode_print_format: ทุกค่าใน formatdata ตรงกับที่กรอก",
+      "do": "db.query",
+      "sql": "select name, f->>'code' code, f->>'unit' unit, f->>'showPrice' sp, f->>'priceIndex' pi, f->>'topMargin' tm, f->>'leftMargin' lm, f->>'width' w, f->>'height' h, f->>'row' r, f->>'column' c, f->>'startRow' sr, f->>'startColumn' sc, f->>'companyName' cn, f->>'useUnitName' uu, f->>'showItemCode' sic, f->>'border' bd, f->>'customPaperSize' cps, f->>'customPaperWidth' cpw, f->>'customPaperHeight' cph from (select name, convert_from(formatdata, 'UTF8')::jsonb f from sml_barcode_print_format where upper(code) = :'bf') x",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name",
+          "op": "eq",
+          "value": "{{bn}}"
+        },
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "{{bf}}"
+        },
+        {
+          "col": "unit",
+          "op": "eq",
+          "value": "Inch"
+        },
+        {
+          "col": "sp",
+          "op": "eq",
+          "value": "true"
+        },
+        {
+          "col": "pi",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "tm",
+          "op": "eq",
+          "value": "0.6"
+        },
+        {
+          "col": "lm",
+          "op": "eq",
+          "value": "0.3"
+        },
+        {
+          "col": "w",
+          "op": "eq",
+          "value": "4.5"
+        },
+        {
+          "col": "h",
+          "op": "eq",
+          "value": "2.5"
+        },
+        {
+          "col": "r",
+          "op": "eq",
+          "value": "10"
+        },
+        {
+          "col": "c",
+          "op": "eq",
+          "value": "4"
+        },
+        {
+          "col": "sr",
+          "op": "eq",
+          "value": "3"
+        },
+        {
+          "col": "sc",
+          "op": "eq",
+          "value": "2"
+        },
+        {
+          "col": "cn",
+          "op": "eq",
+          "value": "{{cn}}"
+        },
+        {
+          "col": "uu",
+          "op": "eq",
+          "value": "false"
+        },
+        {
+          "col": "sic",
+          "op": "eq",
+          "value": "true"
+        },
+        {
+          "col": "bd",
+          "op": "eq",
+          "value": "true"
+        },
+        {
+          "col": "cps",
+          "op": "eq",
+          "value": "true"
+        },
+        {
+          "col": "cpw",
+          "op": "eq",
+          "value": "10.5"
+        },
+        {
+          "col": "cph",
+          "op": "eq",
+          "value": "15"
+        }
+      ]
+    },
+    {
+      "title": "กด Shift ปิดกล่องช่วยเหลือที่อาจลอยค้าง",
+      "do": "ui.press",
+      "key": "Shift"
+    },
+    {
+      "title": "เปิดหน้าจอใหม่ (ตรวจการโหลดกลับ)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_barcode_laser_print"
+    },
+    {
+      "title": "เลือกรูปแบบของเราจากรายการรูปแบบ",
+      "do": "ui.select",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] select:has(option:has-text(\"ค่าเริ่มต้น (A4 14x5)\"))",
+      "value": "{{bf}}"
+    },
+    {
+      "title": "โหลดกลับ: รหัสรูปแบบ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] input[placeholder=\"รหัสรูปแบบ\"]",
+      "value": "{{bf}}"
+    },
+    {
+      "title": "โหลดกลับ: ชื่อรูปแบบ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] input[placeholder=\"ชื่อรูปแบบ\"]",
+      "value": "{{bn}}"
+    },
+    {
+      "title": "โหลดกลับ: เริ่มคอลัมน์ที่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"เริ่มคอลัมน์ที่\")) input",
+      "value": "^2$",
+      "op": "matches"
+    },
+    {
+      "title": "โหลดกลับ: เริ่มแถวที่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"เริ่มแถวที่\")) input",
+      "value": "^3$",
+      "op": "matches"
+    },
+    {
+      "title": "โหลดกลับ: จำนวนคอลัมน์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"จำนวนคอลัมน์\")) input",
+      "value": "^4$",
+      "op": "matches"
+    },
+    {
+      "title": "โหลดกลับ: จำนวนแถว",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"จำนวนแถว\")) input",
+      "value": "^10$",
+      "op": "matches"
+    },
+    {
+      "title": "โหลดกลับ: ความกว้างดวง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ความกว้างดวง\")) input",
+      "value": "^4\\.50*$",
+      "op": "matches"
+    },
+    {
+      "title": "โหลดกลับ: ความสูงดวง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ความสูงดวง\")) input",
+      "value": "^2\\.50*$",
+      "op": "matches"
+    },
+    {
+      "title": "โหลดกลับ: ขอบซ้าย",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ขอบซ้าย\")) input",
+      "value": "^0\\.30*$",
+      "op": "matches"
+    },
+    {
+      "title": "โหลดกลับ: ขอบบน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ขอบบน\")) input",
+      "value": "^0\\.60*$",
+      "op": "matches"
+    },
+    {
+      "title": "โหลดกลับ: กว้าง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"กว้าง\")) input",
+      "value": "^10\\.50*$",
+      "op": "matches"
+    },
+    {
+      "title": "โหลดกลับ: สูง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"สูง\")) input",
+      "value": "^15(\\.0*)?$",
+      "op": "matches"
+    },
+    {
+      "title": "โหลดกลับ: หน่วยวัด = นิ้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [role=\"radiogroup\"]:has(input[value=\"Inch\"]) input[type=\"radio\"][value=\"Inch\"]:checked"
+    },
+    {
+      "title": "โหลดกลับ: ราคาที่แสดง = ราคาที่ 2",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [role=\"radiogroup\"]:has(input[value=\"4\"]) input[type=\"radio\"][value=\"1\"]:checked"
+    },
+    {
+      "title": "โหลดกลับ: ชื่อบริษัทบนป้าย",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has(> span:text-is(\"ชื่อบริษัท\")) input",
+      "value": "{{cn}}"
+    },
+    {
+      "title": "โหลดกลับ: แสดงราคา = เปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has-text(\"แสดงราคา\") input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "โหลดกลับ: แสดงรหัสสินค้า = เปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has-text(\"แสดงรหัสสินค้า\") input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "โหลดกลับ: แสดงชื่อหน่วยนับ = ปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has-text(\"แสดงชื่อหน่วยนับ\") input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "โหลดกลับ: พิมพ์เส้นขอบ = เปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has-text(\"พิมพ์เส้นขอบ\") input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "โหลดกลับ: กำหนดขนาดกระดาษเอง = เปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] label:has-text(\"กำหนดขนาดกระดาษเอง\") input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "ค้นหาบาร์โค้ดจริงที่เลือกไว้",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{bc}}"
+    },
+    {
+      "title": "กด Enter เพื่อค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "คลิกบาร์โค้ดในรายการด้านซ้ายเพื่อเพิ่มลงตารางพิมพ์",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] td:has-text(\"{{bc}}\")"
+    },
+    {
+      "title": "ตารางพิมพ์: รหัสสินค้าตรง",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [data-testid=\"print-grid\"] tr:has(td:text-is(\"{{bc}}\"))",
+      "text": "{{ic}}"
+    },
+    {
+      "title": "ตารางพิมพ์: ชื่อสินค้า (description ของบาร์โค้ด) ตรง",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [data-testid=\"print-grid\"] tr:has(td:text-is(\"{{bc}}\"))",
+      "text": "{{descr}}"
+    },
+    {
+      "title": "ตารางพิมพ์: หน่วยนับตรง",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [data-testid=\"print-grid\"] tr:has(td:text-is(\"{{bc}}\"))",
+      "text": "{{uname}}"
+    },
+    {
+      "title": "ตารางพิมพ์: ราคาตาม 'ราคาที่ 2' ตรงฐานข้อมูล",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [data-testid=\"print-grid\"] tr:has(td:text-is(\"{{bc}}\")) td.text-right",
+      "text": "{{pricef}}",
+      "op": "eq"
+    },
+    {
+      "title": "กำหนดจำนวนดวง = 3",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [data-testid=\"print-grid\"] tr:has(td:text-is(\"{{bc}}\")) input",
+      "value": "3"
+    },
+    {
+      "title": "Tab ออกจากช่องจำนวนดวง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [data-testid=\"print-grid\"] tr:has(td:text-is(\"{{bc}}\")) input",
+      "key": "Tab"
+    },
+    {
+      "title": "หัวตาราง: 1 รายการ 3 ดวง 1 หน้า (เริ่มแถว 3 คอลัมน์ 2 ยังพอใน 1 หน้า 4x10)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] header:has-text(\"หน้าจอบันทึก/แก้ไขข้อมูล\")",
+      "text": "1 รายการ \\S 3 ดวง \\S 1 หน้า",
+      "op": "matches"
+    },
+    {
+      "title": "ตัวอย่างก่อนพิมพ์: หัวป้าย = ชื่อบริษัท : รหัสสินค้า",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [data-testid=\"print-preview\"]",
+      "text": "{{cn}} : {{ic}}"
+    },
+    {
+      "title": "ตัวอย่างก่อนพิมพ์: แสดงบาร์โค้ด",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [data-testid=\"print-preview\"]",
+      "text": "{{bc}}"
+    },
+    {
+      "title": "ตัวอย่างก่อนพิมพ์: ราคาที่ 2 และไม่มี /ชื่อหน่วย (ปิดแสดงชื่อหน่วยนับ)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] [data-testid=\"print-preview\"]",
+      "text": "ราคา {{pricef}}(?!/)",
+      "op": "matches"
+    },
+    {
+      "title": "ปุ่มพิมพ์เปิดใช้งานเมื่อมีรายการ (ไม่กดพิมพ์จริง)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] button:has(span:text-is(\"พิมพ์\")):not([disabled])"
+    },
+    {
+      "title": "กดลบรูปแบบของเรา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] button:has(span:text-is(\"ลบรูปแบบ\"))"
+    },
+    {
+      "title": "ถามยืนยันลบรูปแบบของเรา",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]",
+      "text": "ลบรูปแบบ {{bf}} ?"
+    },
+    {
+      "title": "ปิดกล่องข้อความ",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"] button:has(span:text-is(\"ตกลง\"))"
+    },
+    {
+      "title": "ลบแล้วหน้าจอกลับเป็นรูปแบบเริ่มต้น",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_item_barcode_laser_print\"] input[placeholder=\"รหัสรูปแบบ\"]",
+      "value": ""
+    },
+    {
+      "title": "ฐานข้อมูลไม่เหลือรูปแบบของเรา",
+      "do": "db.query",
+      "sql": "select count(*)::text n from sml_barcode_print_format where upper(code) = :'bf'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ตรวจหน้าจอไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบรูปแบบทดสอบที่อาจค้าง (เฉพาะรหัสของเรา)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/barcode/format",
+      "body": {
+        "action": "delete",
+        "format": {
+          "code": "{{bf}}"
+        }
+      },
+      "expectStatus": [
+        200,
+        400,
+        404
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษรูปแบบทดสอบ",
+      "do": "db.query",
+      "sql": "select count(*)::text n from sml_barcode_print_format where upper(code) = :'bf'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1306 @@
+{
+  "id": "wf-sale-ui-quotation",
+  "title": "หน้าจอใบเสนอราคา: กรอกทุกช่อง ค้นหาลูกหนี้/พนักงาน/สินค้า บันทึก เปิดซ้ำ แก้ไข พิมพ์รายงาน PDF และลบผ่านหน้าจอ",
+  "module": "sales",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "ใช้หน้าจอ menu_so_quotation_order ทั้งหมด: ทดสอบเตือนเลขที่ว่าง, ค้นหาลูกหนี้ด้วยชื่อบางส่วนแล้วตรวจชื่อ/พนักงานตั้งต้น, ค้นหาพนักงานขาย, ผู้ติดต่อ, ประเภทรายการ/ภาษี/อัตรา, ค้นหาสินค้าแล้วตรวจชื่อ/หน่วย, จำนวน/ราคาจากบิลขายจริง, ยอดรวมท้ายจอ, หมายเหตุ, วันหมดอายุ/วันรับส่ง, เตือนปิดแท็บที่ยังไม่บันทึก, บันทึกแล้วตรวจฐานข้อมูลทุกช่อง, ค้นหาในรายการ (ไม่พบ/พบ) เปิดซ้ำตรวจทุกช่อง, เปิดหน้าต่างพิมพ์ฟอร์ม, แก้จำนวนแล้วตรวจยอดใหม่, รายงานใบเสนอราคา PDF, ลบผ่านหน้าจอแล้วพิสูจน์ 0 แถว",
+  "timeoutMs": 600000,
+  "steps": [
+    {
+      "title": "กำหนดเลขที่ใบเสนอราคาทดสอบ",
+      "do": "set",
+      "name": "qt",
+      "value": "UAT-{{run.short}}-UQT"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เลือกลูกค้าจริงที่เคยมีเอกสารขาย มีข้อมูลเพิ่มเติม (ไม่บังคับภาษี/ไม่บังคับขายสด) และชื่อบางส่วนค้นแล้วเจอแค่รายเดียว",
+      "do": "db.query",
+      "sql": "with c as (select distinct t.cust_code as code from ic_trans t where t.trans_flag in (30, 36, 44) and t.doc_no not like 'UAT%' and coalesce(t.last_status, 0) = 0 and coalesce(t.cust_code, '') <> ''),\ncand as (select a.code, a.name_1, substr(a.name_1, 2) as frag, coalesce(trim(d.sale_code), '') as dsale,\n  coalesce((select u.name_1 from erp_user u where u.code = trim(d.sale_code) limit 1), '') as dsale_name\n  from c join ar_customer a on a.code = c.code join ar_customer_detail d on d.ar_code = a.code\n  where length(coalesce(a.name_1, '')) >= 6 and coalesce(d.set_tax_type, 0) = 0 and coalesce(d.sale_type, 0) <> 1 and a.code ~ '^[A-Z0-9-]+$'\n  order by a.code limit 40)\nselect code as cust, name_1 as cname, frag as cfrag, dsale, dsale_name, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today, to_char((now() at time zone 'Asia/Bangkok')::date, 'DD/MM/') || (extract(year from (now() at time zone 'Asia/Bangkok')::date)::int + 543)::text as today_be,\n  to_char((now() at time zone 'Asia/Bangkok')::date + 15, 'DD/MM/') || (extract(year from (now() at time zone 'Asia/Bangkok')::date + 15)::int + 543)::text as exp_be, to_char((now() at time zone 'Asia/Bangkok')::date + 7, 'DD/MM/') || (extract(year from (now() at time zone 'Asia/Bangkok')::date + 7)::int + 543)::text as send_be\nfrom cand where (select count(*) from ar_customer x where x.name_1 ilike '%' || replace(replace(cand.frag, '%', '\\%'), '_', '\\_') || '%') = 1\norder by code limit 1",
+      "rows": 1,
+      "save": {
+        "cust": "cust",
+        "cname": "cname",
+        "cfrag": "cfrag",
+        "dsale": "dsale",
+        "dsale_name": "dsale_name",
+        "today": "today",
+        "today_be": "today_be",
+        "exp_be": "exp_be",
+        "send_be": "send_be"
+      }
+    },
+    {
+      "title": "อัตราภาษีขายจากบิลขายจริงล่าสุด (ภาษีแยกนอก)",
+      "do": "db.query",
+      "sql": "select vat_rate::text as rate from ic_trans where trans_flag = 44 and vat_type = 0 and vat_rate > 0 and doc_no not like 'UAT%' and coalesce(last_status, 0) = 0 order by doc_date desc, roworder desc limit 1",
+      "rows": 1,
+      "save": {
+        "rate": "rate"
+      }
+    },
+    {
+      "title": "เลือกพนักงานขายจริงคนแรกตามรหัส ที่ไม่ใช่พนักงานประจำลูกค้า (เพื่อพิสูจน์ว่าเปลี่ยนได้)",
+      "do": "db.query",
+      "sql": "select code as emp, name_1 as emp_name from erp_user where coalesce(name_1, '') <> '' and code ~ '^[A-Za-z0-9_-]+$' and code <> :'dsale' order by code limit 1",
+      "rows": 1,
+      "save": {
+        "emp": "emp",
+        "emp_name": "emp_name"
+      }
+    },
+    {
+      "title": "เลือกสินค้าจริงตัวแรกตามรหัสที่มีบิลขายจริง หน่วยนับ 1:1 หน่วยขายเริ่มต้น = หน่วยมาตรฐาน ไม่ใช่สินค้าชุด/ห้ามขาย พร้อมราคาขายล่าสุด",
+      "do": "db.query",
+      "sql": "select i.code as item, i.name_1 as iname, i.unit_standard as unit, p.price::text as price from ic_inventory i\njoin ic_unit_use u on u.ic_code = i.code and u.code = i.unit_standard and u.stand_value = 1 and u.divide_value = 1\nleft join ic_inventory_detail dd on dd.ic_code = i.code\ncross join lateral (select d.price from ic_trans_detail d join ic_trans t on t.doc_no = d.doc_no and t.trans_flag = d.trans_flag where d.item_code = i.code and d.trans_flag = 44 and t.doc_no not like 'UAT%' and t.last_status = 0 and d.unit_code = i.unit_standard and d.price > 0 and coalesce(d.tax_type, 0) = 0 order by t.doc_date desc, t.roworder desc, d.line_number limit 1) p\nwhere coalesce(i.item_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0 and coalesce(i.tax_type, 0) = 0 and coalesce(i.name_1, '') <> '' and i.code ~ '^[A-Z0-9-]+$'\n  and coalesce(dd.is_hold_sale, 0) = 0 and coalesce(nullif(trim(dd.start_sale_unit), ''), i.unit_standard) = i.unit_standard and coalesce(nullif(trim(dd.start_unit_code), ''), i.unit_standard) = i.unit_standard\norder by i.code limit 1",
+      "rows": 1,
+      "save": {
+        "item": "item",
+        "iname": "iname",
+        "unit": "unit",
+        "price": "price"
+      }
+    },
+    {
+      "title": "คำนวณยอดที่คาดหวังของจำนวน 3 (ราคา × จำนวน, ภาษีแยกนอกตามอัตราจริง)",
+      "do": "db.query",
+      "sql": "select round(3 * :'price'::numeric, 2)::text as q3_sum, round(round(3 * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as q3_vat, (round(3 * :'price'::numeric, 2) + round(round(3 * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as q3_total, to_char(round(3 * :'price'::numeric, 2) + round(round(3 * :'price'::numeric, 2) * :'rate'::numeric / 100, 2), 'FM999,999,999,990.00') as q3_total_fmt, to_char(round(3 * :'price'::numeric, 2), 'FM999,999,999,990.00') as q3_sum_fmt",
+      "rows": 1,
+      "save": {
+        "q3_sum": "q3_sum",
+        "q3_vat": "q3_vat",
+        "q3_total": "q3_total",
+        "q3_total_fmt": "q3_total_fmt",
+        "q3_sum_fmt": "q3_sum_fmt"
+      }
+    },
+    {
+      "title": "คำนวณยอดที่คาดหวังของจำนวน 2 (ราคา × จำนวน, ภาษีแยกนอกตามอัตราจริง)",
+      "do": "db.query",
+      "sql": "select round(2 * :'price'::numeric, 2)::text as q2_sum, round(round(2 * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as q2_vat, (round(2 * :'price'::numeric, 2) + round(round(2 * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as q2_total, to_char(round(2 * :'price'::numeric, 2) + round(round(2 * :'price'::numeric, 2) * :'rate'::numeric / 100, 2), 'FM999,999,999,990.00') as q2_total_fmt, to_char(round(2 * :'price'::numeric, 2), 'FM999,999,999,990.00') as q2_sum_fmt",
+      "rows": 1,
+      "save": {
+        "q2_sum": "q2_sum",
+        "q2_vat": "q2_vat",
+        "q2_total": "q2_total",
+        "q2_total_fmt": "q2_total_fmt",
+        "q2_sum_fmt": "q2_sum_fmt"
+      }
+    },
+    {
+      "title": "เปิดหน้าจอใบเสนอราคา",
+      "do": "ui.openMenu",
+      "key": "menu_so_quotation_order"
+    },
+    {
+      "title": "กดปุ่มเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] button:text-is(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "อยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "วันที่เอกสารตั้งต้น = วันนี้ (พ.ศ.)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:has-text(\"วันที่เอกสาร\")) input",
+      "value": "{{today_be}}",
+      "op": "eq"
+    },
+    {
+      "title": "เลขที่เอกสารรันอัตโนมัติไม่ว่าง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "",
+      "op": "ne"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดก่อนทดสอบข้อความเตือน",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "ล้างเลขที่เอกสารให้ว่าง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": ""
+    },
+    {
+      "title": "กดบันทึกทั้งที่เลขที่เอกสารว่าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] button:text-is(\"บันทึก\")"
+    },
+    {
+      "title": "ต้องเตือนเป็นภาษาไทย: กรุณาระบุเลขที่เอกสาร",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] span.whitespace-pre-line",
+      "text": "กรุณาระบุเลขที่เอกสาร",
+      "op": "contains"
+    },
+    {
+      "title": "ยังอยู่ในโหมดเพิ่มรายการใหม่ (ไม่ได้บันทึก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "กรอกเลขที่เอกสารทดสอบ (ตัวพิมพ์เล็กเพื่อทดสอบแปลงเป็นตัวใหญ่)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "uat-{{run.short}}-uqt"
+    },
+    {
+      "title": "เลขที่เอกสารถูกแปลงเป็นตัวพิมพ์ใหญ่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{qt}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาลูกหนี้ (ด้วยชื่อบางส่วน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] button[title=\"ค้นหา\"]"
+    },
+    {
+      "title": "หน้าต่างค้นหาลูกหนี้ (ด้วยชื่อบางส่วน)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาลูกหนี้ (ด้วยชื่อบางส่วน): {{cfrag}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{cfrag}}"
+    },
+    {
+      "title": "ผลค้นหามีแถวรหัส {{cust}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{cust}}\"))"
+    },
+    {
+      "title": "คลิกเลือกแถวรหัส {{cust}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{cust}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาลูกหนี้ (ด้วยชื่อบางส่วน)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสลูกหนี้ = รหัสที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{cust}}",
+      "op": "eq"
+    },
+    {
+      "title": "ชื่อลูกหนี้เติมอัตโนมัติ = ชื่อในทะเบียนลูกหนี้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] textarea[placeholder=\"ชื่อเจ้าหนี้ / ลูกหนี้...\"]",
+      "value": "{{cname}}",
+      "op": "eq"
+    },
+    {
+      "title": "พนักงานขายตั้งต้น = พนักงานประจำลูกค้า (ar_customer_detail.sale_code)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] input[placeholder=\"พนักงาน...\"]",
+      "value": "{{dsale}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาพนักงานขาย (ด้วยรหัส)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] button[title=\"ค้นหาพนักงาน\"]"
+    },
+    {
+      "title": "หน้าต่างค้นหาพนักงานขาย (ด้วยรหัส)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาพนักงานขาย (ด้วยรหัส): {{emp}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{emp}}"
+    },
+    {
+      "title": "ผลค้นหามีแถวรหัส {{emp}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{emp}}\"))"
+    },
+    {
+      "title": "คลิกเลือกแถวรหัส {{emp}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{emp}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาพนักงานขาย (ด้วยรหัส)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสพนักงานขาย = ที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] input[placeholder=\"พนักงาน...\"]",
+      "value": "{{emp}}",
+      "op": "eq"
+    },
+    {
+      "title": "ชื่อพนักงานขายเติมอัตโนมัติ = ชื่อในทะเบียนผู้ใช้ (แสดงเป็นคำอธิบายของช่องพนักงาน)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] input[placeholder=\"พนักงาน...\"][title=\"{{emp_name}}\"]"
+    },
+    {
+      "title": "กรอกผู้ติดต่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:text-is(\"ผู้ติดต่อ:\")) > input",
+      "value": "UAT ผู้ติดต่อ {{run.short}}"
+    },
+    {
+      "title": "เลือกประเภทรายการ: ขายเชื่อ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [role=\"radiogroup\"] span:has-text(\"0: ขายเชื่อ (เครดิต)\")"
+    },
+    {
+      "title": "ประเภทรายการ ขายเชื่อ ถูกเลือก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [role=\"radiogroup\"] span:has-text(\"0: ขายเชื่อ (เครดิต)\") input:checked"
+    },
+    {
+      "title": "เลือกประเภทภาษี: แยกนอก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [role=\"radiogroup\"] span:has-text(\"0: แยกนอก\")"
+    },
+    {
+      "title": "ประเภทภาษี แยกนอก ถูกเลือก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [role=\"radiogroup\"] span:has-text(\"0: แยกนอก\") input:checked"
+    },
+    {
+      "title": "กรอกอัตราภาษีตามบิลขายจริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] input[title=\"อัตราภาษี (%)\"]",
+      "value": "{{rate}}"
+    },
+    {
+      "title": "ออกจากช่องอัตราภาษี",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] input[title=\"อัตราภาษี (%)\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาสินค้า (ด้วยรหัส)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] button[title=\"ค้นหาสินค้า\"]"
+    },
+    {
+      "title": "หน้าต่างค้นหาสินค้า (ด้วยรหัส)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาสินค้า (ด้วยรหัส): {{item}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{item}}"
+    },
+    {
+      "title": "ผลค้นหามีแถวรหัส {{item}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{item}}\"))"
+    },
+    {
+      "title": "คลิกเลือกแถวรหัส {{item}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{item}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาสินค้า (ด้วยรหัส)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสสินค้าแถว 1 = ที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//input",
+      "value": "{{item}}",
+      "op": "eq"
+    },
+    {
+      "title": "ชื่อสินค้าแถว 1 = ชื่อในทะเบียนสินค้า",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"ชื่อสินค้า / รายละเอียด\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ชื่อสินค้า / รายละเอียด\"]/preceding-sibling::th)+1]//textarea",
+      "value": "{{iname}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน่วยนับแถว 1 = หน่วยขายเริ่มต้นของสินค้า",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"หน่วยนับ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"หน่วยนับ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{unit}}",
+      "op": "eq"
+    },
+    {
+      "title": "กรอกจำนวน 3",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "3"
+    },
+    {
+      "title": "Enter ยืนยันจำนวน",
+      "do": "ui.press",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "key": "Enter"
+    },
+    {
+      "title": "กรอกราคา/หน่วย ตามบิลขายจริงล่าสุด",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"ราคา/หน่วย\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ราคา/หน่วย\"]/preceding-sibling::th)+1]//input",
+      "value": "{{price}}"
+    },
+    {
+      "title": "Enter ยืนยันราคา",
+      "do": "ui.press",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"ราคา/หน่วย\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ราคา/หน่วย\"]/preceding-sibling::th)+1]//input",
+      "key": "Enter"
+    },
+    {
+      "title": "จำนวนแถว 1 แสดง 3",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "3",
+      "op": "eq"
+    },
+    {
+      "title": "ราคาแถว 1 แสดงตามที่กรอก",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"ราคา/หน่วย\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ราคา/หน่วย\"]/preceding-sibling::th)+1]//input",
+      "value": "{{price}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: รวมมูลค่าสินค้า = ราคา × จำนวน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] label:text-is(\"รวมมูลค่าสินค้า:\") + div",
+      "text": "{{q3_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: ยอดเงินก่อนภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] label:text-is(\"ยอดเงินก่อนภาษี:\") + div",
+      "text": "{{q3_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: ยอดภาษีมูลค่าเพิ่ม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] label:text-is(\"ยอดภาษีมูลค่าเพิ่ม:\") + div",
+      "text": "{{q3_vat}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: มูลค่าหลังคิดภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] label:text-is(\"มูลค่าหลังคิดภาษี:\") + div",
+      "text": "{{q3_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "กรอกหมายเหตุเอกสาร",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}}"
+    },
+    {
+      "title": "กรอกวันหมดอายุ 15 วัน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:text-is(\"วันหมดอายุ:\")) > input",
+      "value": "15"
+    },
+    {
+      "title": "วันที่หมดอายุคำนวณ = วันที่เอกสาร + 15",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:text-is(\"วันที่หมดอายุ:\")) input",
+      "value": "{{exp_be}}",
+      "op": "eq"
+    },
+    {
+      "title": "กรอกรับ/ส่งภายใน 7 วัน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:text-is(\"รับ/ส่ง (วัน):\")) > input",
+      "value": "7"
+    },
+    {
+      "title": "วันที่รับ/ส่งคำนวณ = วันที่เอกสาร + 7",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:text-is(\"วันที่รับ/ส่ง:\")) input",
+      "value": "{{send_be}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปิดแท็บขณะยังไม่บันทึก",
+      "do": "ui.click",
+      "selector": "[data-testid=\"workspace-tab-close-menu_so_quotation_order\"]"
+    },
+    {
+      "title": "ต้องมีหน้าต่างเตือนข้อมูลยังไม่บันทึก",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]"
+    },
+    {
+      "title": "เลือก อยู่ต่อ",
+      "do": "ui.click",
+      "selector": "[data-testid=\"tab-warning-keep-btn\"]"
+    },
+    {
+      "title": "หน้าต่างเตือนปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "visible": false
+    },
+    {
+      "title": "ข้อมูลยังอยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "ข้อมูลที่กรอกไว้ไม่หาย (รหัสลูกหนี้)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{cust}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปุ่มบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] button:text-is(\"บันทึก\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งบันทึกเอกสาร {{qt}} เรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] span.whitespace-pre-line",
+      "text": "บันทึกเอกสาร {{qt}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "หน้าต่างถามพิมพ์ฟอร์ม: กด ยังไม่พิมพ์",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")"
+    },
+    {
+      "title": "ปิดหน้าต่างถามพิมพ์แล้ว",
+      "do": "ui.expectVisible",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+      "visible": false
+    },
+    {
+      "title": "หลังบันทึกเป็นโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "ฐานข้อมูล: หัวใบเสนอราคาตรงทุกช่องที่กรอกบนหน้าจอ (จำนวน 3)",
+      "do": "db.query",
+      "sql": "select trans_flag::text, cust_code, sale_code, contactor, remark, coalesce(inquiry_type, 0)::text as inquiry_type, coalesce(vat_type, 0)::text as vat_type, vat_rate::text,\n      expire_day::text, send_day::text, to_char(doc_date, 'YYYY-MM-DD') as doc_date,\n      total_value::text, total_before_vat::text, total_vat_value::text, total_amount::text, coalesce(doc_format_code, '') as doc_format_code\n     from ic_trans where doc_no = :'qt'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "trans_flag",
+          "op": "eq",
+          "value": "30"
+        },
+        {
+          "col": "cust_code",
+          "op": "eq",
+          "value": "{{cust}}"
+        },
+        {
+          "col": "sale_code",
+          "op": "eq",
+          "value": "{{emp}}"
+        },
+        {
+          "col": "contactor",
+          "op": "eq",
+          "value": "UAT ผู้ติดต่อ {{run.short}}"
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "{{run.tag}}"
+        },
+        {
+          "col": "inquiry_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "vat_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "vat_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "expire_day",
+          "op": "eq",
+          "value": "15"
+        },
+        {
+          "col": "send_day",
+          "op": "eq",
+          "value": "7"
+        },
+        {
+          "col": "doc_date",
+          "op": "eq",
+          "value": "{{today}}"
+        },
+        {
+          "col": "doc_format_code",
+          "op": "exists"
+        },
+        {
+          "col": "total_value",
+          "op": "eq",
+          "value": "{{q3_sum}}"
+        },
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{q3_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{q3_vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{q3_total}}"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: วันหมดอายุ = วันที่เอกสาร + 15 และวันที่รับ/ส่ง = วันที่เอกสาร + 7",
+      "do": "db.query",
+      "sql": "select (expire_date = doc_date + 15)::text as exp_ok, (send_date = doc_date + 7)::text as send_ok from ic_trans where doc_no = :'qt'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "exp_ok",
+          "op": "eq",
+          "value": "true"
+        },
+        {
+          "col": "send_ok",
+          "op": "eq",
+          "value": "true"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: บรรทัดสินค้า 1 บรรทัด รหัส/ชื่อ/หน่วย/จำนวน 3/ราคา/จำนวนเงินตรงกับหน้าจอ",
+      "do": "db.query",
+      "sql": "select item_code, item_name, unit_code, qty::text, price::text, sum_amount::text, trans_flag::text from ic_trans_detail where doc_no = :'qt' order by line_number",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "item_code",
+          "op": "eq",
+          "value": "{{item}}"
+        },
+        {
+          "col": "item_name",
+          "op": "eq",
+          "value": "{{iname}}"
+        },
+        {
+          "col": "unit_code",
+          "op": "eq",
+          "value": "{{unit}}"
+        },
+        {
+          "col": "qty",
+          "op": "eq",
+          "value": "3"
+        },
+        {
+          "col": "price",
+          "op": "eq",
+          "value": "{{price}}"
+        },
+        {
+          "col": "sum_amount",
+          "op": "eq",
+          "value": "{{q3_sum}}"
+        },
+        {
+          "col": "trans_flag",
+          "op": "eq",
+          "value": "30"
+        }
+      ]
+    },
+    {
+      "title": "หน้าจอไม่มีข้อผิดพลาดแฝงหลังบันทึก (ยกเว้นคำเตือนเลขที่ว่างที่ตั้งใจทดสอบ)",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "เปิดหน้าจอใหม่ (ล้างแท็บเดิม)",
+      "do": "ui.openMenu",
+      "key": "menu_so_quotation_order"
+    },
+    {
+      "title": "ค้นหาในรายการเอกสารด้วยเลขที่ที่ไม่มีอยู่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{qt}}-NONE"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ไม่พบเอกสาร: ตัวนับ 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "แสดงข้อความ ไม่พบข้อมูลที่ค้นหา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] td:has-text(\"ไม่พบข้อมูลที่ค้นหา\")"
+    },
+    {
+      "title": "ค้นหาในรายการเอกสารด้วยเลขที่ {{qt}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{qt}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบเอกสารของเรา 1 ใบ: ตัวนับ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถวเอกสาร {{qt}} ในรายการ (คลิกแถว = เปิดดู, ปุ่มดินสอ = เปิดแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] tr:has(button[title=\"แก้ไขรายการ {{qt}}\"]) td:has-text(\"{{qt}}\")"
+    },
+    {
+      "title": "เปิดในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารที่เปิดตรงกับของเรา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{qt}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: รหัสลูกหนี้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{cust}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ชื่อลูกหนี้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] textarea[placeholder=\"ชื่อเจ้าหนี้ / ลูกหนี้...\"]",
+      "value": "{{cname}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: พนักงานขาย",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] input[placeholder=\"พนักงาน...\"]",
+      "value": "{{emp}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ผู้ติดต่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:text-is(\"ผู้ติดต่อ:\")) > input",
+      "value": "UAT ผู้ติดต่อ {{run.short}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: หมายเหตุ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ประเภทรายการ ขายเชื่อ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [role=\"radiogroup\"] span:has-text(\"0: ขายเชื่อ (เครดิต)\") input:checked"
+    },
+    {
+      "title": "เปิดซ้ำ: ภาษีแยกนอก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [role=\"radiogroup\"] span:has-text(\"0: แยกนอก\") input:checked"
+    },
+    {
+      "title": "เปิดซ้ำ: อัตราภาษี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] input[title=\"อัตราภาษี (%)\"]",
+      "value": "{{rate}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: วันหมดอายุ 15",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:text-is(\"วันหมดอายุ:\")) > input",
+      "value": "15",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: วันที่หมดอายุ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:text-is(\"วันที่หมดอายุ:\")) input",
+      "value": "{{exp_be}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: รับ/ส่ง 7 วัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:text-is(\"รับ/ส่ง (วัน):\")) > input",
+      "value": "7",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: รหัสสินค้า",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//input",
+      "value": "{{item}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: หน่วยนับ",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"หน่วยนับ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"หน่วยนับ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{unit}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: จำนวน 3",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "3",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ราคา",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"ราคา/หน่วย\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ราคา/หน่วย\"]/preceding-sibling::th)+1]//input",
+      "value": "{{price}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: รวมมูลค่าสินค้า = ราคา × จำนวน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] label:text-is(\"รวมมูลค่าสินค้า:\") + div",
+      "text": "{{q3_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: ยอดเงินก่อนภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] label:text-is(\"ยอดเงินก่อนภาษี:\") + div",
+      "text": "{{q3_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: ยอดภาษีมูลค่าเพิ่ม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] label:text-is(\"ยอดภาษีมูลค่าเพิ่ม:\") + div",
+      "text": "{{q3_vat}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: มูลค่าหลังคิดภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] label:text-is(\"มูลค่าหลังคิดภาษี:\") + div",
+      "text": "{{q3_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดหน้าต่างพิมพ์ฟอร์ม (ไม่สั่งพิมพ์ เพราะสั่งพิมพ์จะบันทึกประวัติลงฐาน)",
+      "do": "ui.click",
+      "selector": "[data-testid=\"trans-open-doc-form-print-btn\"]"
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มเปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มอยู่ในโหมดข้อมูลที่บันทึกแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"doc-form-mode-badge-saved\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "ปิดหน้าต่างพิมพ์ฟอร์ม",
+      "do": "ui.click",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] button:has(span:text-is(\"ปิด\"))"
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "visible": false
+    },
+    {
+      "title": "กดแก้ไข",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] button:text-is(\"แก้ไข\")"
+    },
+    {
+      "title": "อยู่ในโหมดแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] header span:text-is(\"โหมดแก้ไข\")"
+    },
+    {
+      "title": "แก้จำนวนเป็น 2",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "2"
+    },
+    {
+      "title": "Enter ยืนยันจำนวน",
+      "do": "ui.press",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "key": "Enter"
+    },
+    {
+      "title": "กรอกราคา/หน่วยอีกครั้ง (เปลี่ยนจำนวนแล้วระบบดึงราคาจากตารางราคาใหม่ตาม C#)",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"ราคา/หน่วย\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ราคา/หน่วย\"]/preceding-sibling::th)+1]//input",
+      "value": "{{price}}"
+    },
+    {
+      "title": "Enter ยืนยันราคา",
+      "do": "ui.press",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_quotation_order\"]//table[thead//th[normalize-space()=\"ราคา/หน่วย\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ราคา/หน่วย\"]/preceding-sibling::th)+1]//input",
+      "key": "Enter"
+    },
+    {
+      "title": "หน้าจอ: รวมมูลค่าสินค้า = ราคา × จำนวน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] label:text-is(\"รวมมูลค่าสินค้า:\") + div",
+      "text": "{{q2_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: ยอดเงินก่อนภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] label:text-is(\"ยอดเงินก่อนภาษี:\") + div",
+      "text": "{{q2_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: ยอดภาษีมูลค่าเพิ่ม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] label:text-is(\"ยอดภาษีมูลค่าเพิ่ม:\") + div",
+      "text": "{{q2_vat}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: มูลค่าหลังคิดภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] label:text-is(\"มูลค่าหลังคิดภาษี:\") + div",
+      "text": "{{q2_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปุ่มบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] button:text-is(\"บันทึก\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งบันทึกเอกสาร {{qt}} เรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] span.whitespace-pre-line",
+      "text": "บันทึกเอกสาร {{qt}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "หน้าต่างถามพิมพ์ฟอร์ม: กด ยังไม่พิมพ์",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")"
+    },
+    {
+      "title": "ปิดหน้าต่างถามพิมพ์แล้ว",
+      "do": "ui.expectVisible",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+      "visible": false
+    },
+    {
+      "title": "ฐานข้อมูล: หัวใบเสนอราคาตรงทุกช่องที่กรอกบนหน้าจอ (จำนวน 2)",
+      "do": "db.query",
+      "sql": "select trans_flag::text, cust_code, sale_code, contactor, remark, coalesce(inquiry_type, 0)::text as inquiry_type, coalesce(vat_type, 0)::text as vat_type, vat_rate::text,\n      expire_day::text, send_day::text, to_char(doc_date, 'YYYY-MM-DD') as doc_date,\n      total_value::text, total_before_vat::text, total_vat_value::text, total_amount::text, coalesce(doc_format_code, '') as doc_format_code\n     from ic_trans where doc_no = :'qt'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "trans_flag",
+          "op": "eq",
+          "value": "30"
+        },
+        {
+          "col": "cust_code",
+          "op": "eq",
+          "value": "{{cust}}"
+        },
+        {
+          "col": "sale_code",
+          "op": "eq",
+          "value": "{{emp}}"
+        },
+        {
+          "col": "contactor",
+          "op": "eq",
+          "value": "UAT ผู้ติดต่อ {{run.short}}"
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "{{run.tag}}"
+        },
+        {
+          "col": "inquiry_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "vat_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "vat_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "expire_day",
+          "op": "eq",
+          "value": "15"
+        },
+        {
+          "col": "send_day",
+          "op": "eq",
+          "value": "7"
+        },
+        {
+          "col": "doc_date",
+          "op": "eq",
+          "value": "{{today}}"
+        },
+        {
+          "col": "doc_format_code",
+          "op": "exists"
+        },
+        {
+          "col": "total_value",
+          "op": "eq",
+          "value": "{{q2_sum}}"
+        },
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{q2_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{q2_vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{q2_total}}"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: บรรทัดสินค้า 1 บรรทัด รหัส/ชื่อ/หน่วย/จำนวน 2/ราคา/จำนวนเงินตรงกับหน้าจอ",
+      "do": "db.query",
+      "sql": "select item_code, item_name, unit_code, qty::text, price::text, sum_amount::text, trans_flag::text from ic_trans_detail where doc_no = :'qt' order by line_number",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "item_code",
+          "op": "eq",
+          "value": "{{item}}"
+        },
+        {
+          "col": "item_name",
+          "op": "eq",
+          "value": "{{iname}}"
+        },
+        {
+          "col": "unit_code",
+          "op": "eq",
+          "value": "{{unit}}"
+        },
+        {
+          "col": "qty",
+          "op": "eq",
+          "value": "2"
+        },
+        {
+          "col": "price",
+          "op": "eq",
+          "value": "{{price}}"
+        },
+        {
+          "col": "sum_amount",
+          "op": "eq",
+          "value": "{{q2_sum}}"
+        },
+        {
+          "col": "trans_flag",
+          "op": "eq",
+          "value": "30"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: ยังมีใบเสนอราคาใบเดียว ไม่เกิดใบซ้ำจากการแก้ไข",
+      "do": "db.query",
+      "sql": "select count(*)::text as n from ic_trans where doc_no = :'qt'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "หน้าจอไม่มีข้อผิดพลาดแฝงหลังแก้ไข",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "เปิดรายงานใบเสนอราคา",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_quotation"
+    },
+    {
+      "title": "กรองรายงานด้วยเลขที่ใบเสนอราคาของเรา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_report_quotation\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+      "value": "{{qt}}"
+    },
+    {
+      "title": "กดประมวลผลรายงาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_report_quotation\"] button:has-text(\"ประมวลผลรายงาน\")"
+    },
+    {
+      "title": "ตารางรายงานแสดงใบเสนอราคาของเรา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_report_quotation\"]",
+      "text": "{{qt}}",
+      "op": "contains",
+      "timeout": 60000
+    },
+    {
+      "title": "กดพิมพ์รายงาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_report_quotation\"] button:has-text(\"พิมพ์รายงาน\")"
+    },
+    {
+      "title": "ดาวน์โหลด PDF รายงาน มีเลขที่ รหัสลูกหนี้ และยอดก่อนภาษีหลังแก้ไขของใบเสนอราคา",
+      "do": "ui.pdf",
+      "selector": "button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+      "contains": [
+        "{{qt}}",
+        "{{cust}}",
+        "{{q2_sum_fmt}}"
+      ],
+      "timeout": 120000
+    },
+    {
+      "title": "เปิดหน้าจอใหม่ (ล้างแท็บเดิม)",
+      "do": "ui.openMenu",
+      "key": "menu_so_quotation_order"
+    },
+    {
+      "title": "ค้นหาในรายการเอกสารด้วยเลขที่ที่ไม่มีอยู่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{qt}}-NONE"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ไม่พบเอกสาร: ตัวนับ 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "แสดงข้อความ ไม่พบข้อมูลที่ค้นหา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] td:has-text(\"ไม่พบข้อมูลที่ค้นหา\")"
+    },
+    {
+      "title": "ค้นหาในรายการเอกสารด้วยเลขที่ {{qt}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{qt}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบเอกสารของเรา 1 ใบ: ตัวนับ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถวเอกสาร {{qt}} ในรายการ (คลิกแถว = เปิดดู, ปุ่มดินสอ = เปิดแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] tr:has(button[title=\"แก้ไขรายการ {{qt}}\"]) td:has-text(\"{{qt}}\")"
+    },
+    {
+      "title": "เปิดในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารที่เปิดตรงกับของเรา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{qt}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดลบเอกสาร (ยืนยันกล่องถามอัตโนมัติ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] button:text-is(\"ลบ\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งลบเอกสารเรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] span.whitespace-pre-line",
+      "text": "ลบเอกสาร {{qt}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ฐานข้อมูล: ลบผ่านหน้าจอแล้วไม่เหลือหัว/บรรทัด",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ic_trans where doc_no = :'qt') + (select count(*) from ic_trans_detail where doc_no = :'qt'))::text as n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ค้นหาเลขที่ที่ลบแล้วในรายการ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{qt}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "รายการเอกสารไม่พบใบที่ลบแล้ว: ตัวนับ 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_quotation_order\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอไม่มีข้อผิดพลาดแฝงหลังลบ",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบใบเสนอราคาทดสอบผ่าน API (สำรอง กรณีขั้นลบผ่านหน้าจอไม่ผ่าน)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{qt}}",
+        "transFlag": 30
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo (หัว/บรรทัด/ลูกหนี้/การเงิน/GL/ภาษีขาย)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'qt')) + (select count(*) from ic_trans_detail where doc_no in (:'qt')) + (select count(*) from ap_ar_trans where doc_no in (:'qt')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'qt')) + (select count(*) from cb_trans where doc_no in (:'qt')) + (select count(*) from cb_trans_detail where doc_no in (:'qt')) + (select count(*) from gl_journal where doc_no in (:'qt')) + (select count(*) from gl_journal_detail where doc_no in (:'qt')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'qt')) as left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

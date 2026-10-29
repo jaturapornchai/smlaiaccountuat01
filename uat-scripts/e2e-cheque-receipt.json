@@ -1,0 +1,929 @@
+{
+  "id": "e2e-cheque-receipt",
+  "title": "E2E ขายเชื่อ → รับชำระด้วยเช็ครับ → นำฝาก → เช็คผ่าน: สถานะเช็คเปลี่ยนทีละขั้น GL สมดุลทุกขั้น แล้วลบคืนไม่เหลือเศษ",
+  "module": "gl",
+  "lens": "api",
+  "severityOnFail": "S1",
+  "description": "ทำงานแบบผู้ใช้ Demo ผ่าน API ตัวเดียวกับหน้าจอ: ขายเชื่อ (44) → รับชำระ (239) ด้วยเช็คที่รับมา (แท็บรับชำระ/ตารางเช็ค) → เช็คต้องขึ้นทะเบียนเช็ครับ (cb_chq_list) สถานะ 0 เช็คในมือ และขึ้นในรายงานทะเบียนเช็ค → บันทึกนำฝากเช็ครับ (410) สถานะ 1 เช็คนำฝาก → บันทึกเช็ครับผ่าน (411) สถานะ 2 เช็คผ่าน · ทุกขั้นตรวจ GL เดบิต = เครดิต = ยอดเช็ค · ลูกค้า/สินค้า/จำนวน/ราคา/VAT/ธนาคาร/สมุดเงินฝาก ดึงจากเอกสารจริงใน smldemo ตอนรัน (ไม่ได้พิมพ์ค่าลงสคริปต์) ยอดคาดหวังคำนวณใน SQL จากค่าที่ดึงมา · เลขเอกสาร/เลขเช็คเป็นของรอบนี้ (UAT-<รอบ>) · cleanup ลบกลับย้อนลำดับ 411 → 410 → 239 → 44 ผ่าน API แล้วตรวจว่าไม่เหลือแถวในตารางเอกสาร GL ภาษี และทะเบียนเช็ค",
+  "steps": [
+    {
+      "title": "กำหนดเลขบิลขายทดสอบ",
+      "do": "set",
+      "name": "si",
+      "value": "UAT-{{run.short}}-SI"
+    },
+    {
+      "title": "กำหนดเลขใบรับชำระทดสอบ",
+      "do": "set",
+      "name": "ee",
+      "value": "UAT-{{run.short}}-EE"
+    },
+    {
+      "title": "กำหนดเลขบันทึกนำฝากเช็ค (410) ทดสอบ",
+      "do": "set",
+      "name": "dp",
+      "value": "UAT-{{run.short}}-DP"
+    },
+    {
+      "title": "กำหนดเลขบันทึกเช็คผ่าน (411) ทดสอบ",
+      "do": "set",
+      "name": "pp",
+      "value": "UAT-{{run.short}}-PP"
+    },
+    {
+      "title": "กำหนดเลขเช็คที่รับมาในรอบนี้",
+      "do": "set",
+      "name": "chq",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ดึงลูกค้า/สินค้า/จำนวน/ราคา/VAT จากบิลขายเชื่อจริงล่าสุด (VAT แยกนอก ไม่มีส่วนลด)",
+      "do": "db.query",
+      "sql": "select t.cust_code as cust, coalesce(t.doc_format_code, '') as sifmt, d.item_code as item, d.unit_code as unit, d.wh_code as wh, d.shelf_code as shelf, d.stand_value::text as stand, d.divide_value::text as divide, d.qty::text as qty, d.price::text as price, t.vat_rate::text as vat_rate, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag where t.trans_flag = 44 and t.inquiry_type = 0 and t.vat_type = 0 and t.vat_rate > 0 and d.tax_type = 0 and coalesce(d.discount, '') = '' and coalesce(d.discount_amount, 0) = 0 and d.qty > 0 and d.price > 0 and d.sum_amount = round(d.qty * d.price, 2) and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 order by t.doc_date desc, t.roworder desc limit 1",
+      "rows": 1,
+      "save": {
+        "cust": "cust",
+        "sifmt": "sifmt",
+        "item": "item",
+        "unit": "unit",
+        "wh": "wh",
+        "shelf": "shelf",
+        "stand": "stand",
+        "divide": "divide",
+        "qty": "qty",
+        "price": "price",
+        "vat_rate": "vat_rate",
+        "today": "today"
+      }
+    },
+    {
+      "title": "ดึงรูปแบบเอกสารรับชำระ (239) และธนาคาร/สาขาของเช็คลูกค้าจากทะเบียนเช็ครับจริงล่าสุด",
+      "do": "db.query",
+      "sql": "select (select doc_format_code from ap_ar_trans where trans_flag = 239 and doc_no not like 'UAT%' and coalesce(doc_format_code, '') <> '' order by roworder desc limit 1) as eefmt, c.bank_code as chq_bank, c.bank_branch as chq_branch from cb_chq_list c where c.chq_type = 1 and c.chq_number not like 'UAT%' and coalesce(c.bank_code, '') <> '' and coalesce(c.bank_branch, '') <> '' order by c.roworder desc limit 1",
+      "rows": 1,
+      "save": {
+        "eefmt": "eefmt",
+        "chq_bank": "chq_bank",
+        "chq_branch": "chq_branch"
+      }
+    },
+    {
+      "title": "ดึงสมุดเงินฝากและรูปแบบบรรทัด จากบันทึกนำฝากเช็คจริงล่าสุด (410)",
+      "do": "db.query",
+      "sql": "select t.trans_type::text as dp_type, t.inquiry_type::text as dp_inq, d.item_code as book, d.unit_code as dp_unit, d.wh_code as dp_wh, d.shelf_code as dp_shelf, d.qty::text as dp_qty, d.stand_value::text as dp_stand, d.divide_value::text as dp_divide from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag where t.trans_flag = 410 and t.doc_no not like 'UAT%' and exists (select 1 from erp_pass_book b where b.code = d.item_code) and coalesce(t.last_status, 0) = 0 order by t.doc_date desc, t.roworder desc limit 1",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "dp_type",
+          "op": "eq",
+          "value": "4"
+        },
+        {
+          "col": "dp_inq",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "save": {
+        "book": "book",
+        "dp_unit": "dp_unit",
+        "dp_wh": "dp_wh",
+        "dp_shelf": "dp_shelf",
+        "dp_qty": "dp_qty",
+        "dp_stand": "dp_stand",
+        "dp_divide": "dp_divide"
+      }
+    },
+    {
+      "title": "ดึงรูปแบบเอกสารของหน้านำฝากเช็ค (CHD) และเช็คผ่าน (CHP) จาก erp_doc_format",
+      "do": "db.query",
+      "sql": "select (select code from erp_doc_format where screen_code = 'CHD' order by roworder limit 1) as dpfmt, (select code from erp_doc_format where screen_code = 'CHP' order by roworder limit 1) as ppfmt",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "dpfmt",
+          "op": "exists"
+        },
+        {
+          "col": "ppfmt",
+          "op": "exists"
+        }
+      ],
+      "save": {
+        "dpfmt": "dpfmt",
+        "ppfmt": "ppfmt"
+      }
+    },
+    {
+      "title": "คำนวณยอดคาดหวังใน SQL จากจำนวน × ราคา และอัตรา VAT ที่ดึงมา",
+      "do": "db.query",
+      "sql": "select round(:'qty'::numeric * :'price'::numeric, 2)::text as base, round(:'qty'::numeric * :'price'::numeric * :'vat_rate'::numeric / 100, 2)::text as vat, (round(:'qty'::numeric * :'price'::numeric, 2) + round(:'qty'::numeric * :'price'::numeric * :'vat_rate'::numeric / 100, 2))::text as total",
+      "rows": 1,
+      "save": {
+        "base": "base",
+        "vat": "vat",
+        "total": "total"
+      }
+    },
+    {
+      "title": "บันทึกขายเชื่อ (จำนวน × ราคา จากบิลจริง VAT แยกนอก)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{si}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 44,
+        "inquiryType": 0,
+        "custCode": "{{cust}}",
+        "docFormatCode": "{{sifmt}}",
+        "taxDocNo": "{{si}}",
+        "taxDocDate": "{{today}}",
+        "vatType": 0,
+        "vatRate": "{{vat_rate}}",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "{{stand}}",
+            "divideValue": "{{divide}}",
+            "qty": "{{qty}}",
+            "price": "{{price}}",
+            "sumAmount": "{{base}}",
+            "taxType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{si}}"
+        }
+      ]
+    },
+    {
+      "title": "หัวบิลขาย: ก่อนภาษี/ภาษี/รวม ตรงกับที่คำนวณ",
+      "do": "db.query",
+      "sql": "select total_before_vat, total_vat_value, total_amount from ic_trans where doc_no = :'si' and trans_flag = 44",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{base}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    },
+    {
+      "title": "รับชำระบิลขายด้วยเช็คที่รับมา เต็มจำนวน (เลขเช็ค/ธนาคาร/สาขา/วันที่บนเช็ค)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/save",
+      "body": {
+        "kind": "ap_ar_trans",
+        "isNew": true,
+        "docNo": "{{ee}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 239,
+        "custCode": "{{cust}}",
+        "docFormatCode": "{{eefmt}}",
+        "remark": "{{run.tag}}",
+        "bills": [
+          {
+            "billingNo": "{{si}}",
+            "billingDate": "{{today}}",
+            "billType": 44,
+            "sumDebtAmount": "{{total}}",
+            "balanceRef": "{{total}}",
+            "sumPayMoney": "{{total}}"
+          }
+        ],
+        "pay": {
+          "cheques": [
+            {
+              "chqNumber": "{{chq}}",
+              "bankCode": "{{chq_bank}}",
+              "bankBranch": "{{chq_branch}}",
+              "chqDueDate": "{{today}}",
+              "amount": "{{total}}"
+            }
+          ]
+        }
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{ee}}"
+        }
+      ]
+    },
+    {
+      "title": "ใบรับชำระ: ยอดเช็คในแท็บรับชำระ (cb_trans) = ยอดบิล",
+      "do": "db.query",
+      "sql": "select chq_amount, cash_amount, total_amount_pay from cb_trans where doc_no = :'ee' and trans_flag = 239",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "chq_amount",
+          "op": "eq",
+          "value": "{{total}}"
+        },
+        {
+          "col": "cash_amount",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "total_amount_pay",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    },
+    {
+      "title": "ทะเบียนเช็ครับ (cb_chq_list): เช็คใหม่ 1 ใบ สถานะ 0 เช็คในมือ อ้างใบรับชำระ ยอด/ลูกค้า/ธนาคาร/สาขาตรง",
+      "do": "db.query",
+      "sql": "select chq_type, status, amount, doc_ref, doc_line_number, trans_flag, ap_ar_code, bank_code, bank_branch from cb_chq_list where chq_number = :'chq'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "chq_type",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{total}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "eq",
+          "value": "{{ee}}"
+        },
+        {
+          "col": "doc_line_number",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "trans_flag",
+          "op": "eq",
+          "value": "239"
+        },
+        {
+          "col": "ap_ar_code",
+          "op": "eq",
+          "value": "{{cust}}"
+        },
+        {
+          "col": "bank_code",
+          "op": "eq",
+          "value": "{{chq_bank}}"
+        },
+        {
+          "col": "bank_branch",
+          "op": "eq",
+          "value": "{{chq_branch}}"
+        }
+      ]
+    },
+    {
+      "title": "GL ใบรับชำระด้วยเช็ค: เดบิต = เครดิต = ยอดเช็ค",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit), 0) as debit from gl_journal_detail where doc_no = :'ee'",
+      "expect": [
+        {
+          "col": "n",
+          "op": "gt",
+          "value": "0"
+        },
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "debit",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    },
+    {
+      "title": "รายงานทะเบียนเช็ครับ (เมนูจริง) แสดงเช็คนี้ สถานะเช็คในมือ ยอดตรง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_cb_report_chq_in_receive_by_date",
+        "mode": "summary",
+        "dateFrom": "{{today}}",
+        "dateTo": "{{today}}",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "{{chq}}",
+        "viewDetail": false
+      },
+      "expect": [
+        {
+          "path": "data.rows.0.เลขที่เช็ค",
+          "op": "eq",
+          "value": "{{chq}}"
+        },
+        {
+          "path": "data.rows.0.สถานะเช็ค",
+          "op": "eq",
+          "value": "เช็คในมือ"
+        },
+        {
+          "path": "data.rows.0.เอกสารอ้างอิง",
+          "op": "eq",
+          "value": "{{ee}}"
+        },
+        {
+          "path": "data.rows.0.จำนวนเงิน",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    },
+    {
+      "title": "ตัวเลือกเช็คของหน้านำฝาก (410) เห็นเช็คนี้ อ้างใบรับชำระบรรทัด 1 ยอดตรง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/cheque/candidates",
+      "body": {
+        "transFlag": 410,
+        "custCode": "",
+        "passBookCode": "",
+        "search": "{{chq}}"
+      },
+      "expect": [
+        {
+          "path": "data.0.chqNumber",
+          "op": "eq",
+          "value": "{{chq}}"
+        },
+        {
+          "path": "data.0.docRef",
+          "op": "eq",
+          "value": "{{ee}}"
+        },
+        {
+          "path": "data.0.docLineNumber",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "path": "data.0.amount",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    },
+    {
+      "title": "ตัวเลือกเช็คของหน้าเช็คผ่าน (411) ต้องยังไม่เห็นเช็คนี้ (ยังไม่นำฝาก)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/cheque/candidates",
+      "body": {
+        "transFlag": 411,
+        "custCode": "",
+        "passBookCode": "",
+        "search": "{{chq}}"
+      },
+      "expect": [
+        {
+          "path": "data.0",
+          "op": "empty"
+        }
+      ]
+    },
+    {
+      "title": "บันทึกนำฝากเช็ครับ (410) เข้าสมุดเงินฝากจริง อ้างเช็คใบนี้เต็มจำนวน",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{dp}}",
+        "docDate": "{{today}}",
+        "transType": 4,
+        "transFlag": 410,
+        "inquiryType": 1,
+        "custCode": "{{cust}}",
+        "passBookCode": "{{book}}",
+        "docFormatCode": "{{dpfmt}}",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{book}}",
+            "unitCode": "{{dp_unit}}",
+            "whCode": "{{dp_wh}}",
+            "shelfCode": "{{dp_shelf}}",
+            "standValue": "{{dp_stand}}",
+            "divideValue": "{{dp_divide}}",
+            "qty": "{{dp_qty}}",
+            "price": "{{total}}",
+            "sumAmount": "{{total}}",
+            "taxType": 0,
+            "chqNumber": "{{chq}}",
+            "docRef": "{{ee}}",
+            "refRow": 1
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{dp}}"
+        }
+      ]
+    },
+    {
+      "title": "บันทึกนำฝาก (410): ยอดรวมหัวเอกสาร = ยอดเช็ค และบรรทัดอ้างเช็ค/ใบรับชำระ/บรรทัด 1/สมุดเงินฝาก",
+      "do": "db.query",
+      "sql": "select h.total_amount, h.last_status, d.chq_number, d.doc_ref, d.ref_row, d.item_code, d.sum_amount from ic_trans h join ic_trans_detail d on d.doc_no = h.doc_no and d.trans_flag = h.trans_flag where h.doc_no = :'dp' and h.trans_flag = 410",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{total}}"
+        },
+        {
+          "col": "last_status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "chq_number",
+          "op": "eq",
+          "value": "{{chq}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "eq",
+          "value": "{{ee}}"
+        },
+        {
+          "col": "ref_row",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "item_code",
+          "op": "eq",
+          "value": "{{book}}"
+        },
+        {
+          "col": "sum_amount",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    },
+    {
+      "title": "หลังนำฝาก: สถานะเช็คในทะเบียน = 1 เช็คนำฝาก (เลขเช็ค ยอด ใบรับชำระ ไม่เปลี่ยน)",
+      "do": "db.query",
+      "sql": "select status, amount, doc_ref from cb_chq_list where chq_number = :'chq'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{total}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "eq",
+          "value": "{{ee}}"
+        }
+      ]
+    },
+    {
+      "title": "GL บันทึกนำฝาก (410): มีรายการ เดบิต = เครดิต = ยอดเช็ค",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit), 0) as debit from gl_journal_detail where doc_no = :'dp'",
+      "expect": [
+        {
+          "col": "n",
+          "op": "gt",
+          "value": "0"
+        },
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "debit",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    },
+    {
+      "title": "รายงานทะเบียนเช็ครับ: เช็คใบนี้เปลี่ยนเป็น เช็คนำฝาก",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_cb_report_chq_in_receive_by_date",
+        "mode": "summary",
+        "dateFrom": "{{today}}",
+        "dateTo": "{{today}}",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "{{chq}}",
+        "viewDetail": false
+      },
+      "expect": [
+        {
+          "path": "data.rows.0.เลขที่เช็ค",
+          "op": "eq",
+          "value": "{{chq}}"
+        },
+        {
+          "path": "data.rows.0.สถานะเช็ค",
+          "op": "eq",
+          "value": "เช็คนำฝาก"
+        },
+        {
+          "path": "data.rows.0.จำนวนเงิน",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    },
+    {
+      "title": "ตัวเลือกเช็คหน้านำฝาก (410) ไม่เห็นเช็คนี้อีก (นำฝากแล้ว)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/cheque/candidates",
+      "body": {
+        "transFlag": 410,
+        "custCode": "",
+        "passBookCode": "",
+        "search": "{{chq}}"
+      },
+      "expect": [
+        {
+          "path": "data.0",
+          "op": "empty"
+        }
+      ]
+    },
+    {
+      "title": "ตัวเลือกเช็คหน้าเช็คผ่าน (411) ของสมุดที่นำฝาก เห็นเช็คนี้ ยอดตรง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/cheque/candidates",
+      "body": {
+        "transFlag": 411,
+        "custCode": "",
+        "passBookCode": "{{book}}",
+        "search": "{{chq}}"
+      },
+      "expect": [
+        {
+          "path": "data.0.chqNumber",
+          "op": "eq",
+          "value": "{{chq}}"
+        },
+        {
+          "path": "data.0.docRef",
+          "op": "eq",
+          "value": "{{ee}}"
+        },
+        {
+          "path": "data.0.amount",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    },
+    {
+      "title": "บันทึกเช็ครับผ่าน (411) เช็คใบเดียวกัน เต็มจำนวน เข้าสมุดเงินฝากเดียวกัน",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{pp}}",
+        "docDate": "{{today}}",
+        "transType": 4,
+        "transFlag": 411,
+        "inquiryType": 1,
+        "custCode": "{{cust}}",
+        "passBookCode": "{{book}}",
+        "docFormatCode": "{{ppfmt}}",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{book}}",
+            "unitCode": "{{dp_unit}}",
+            "whCode": "{{dp_wh}}",
+            "shelfCode": "{{dp_shelf}}",
+            "standValue": "{{dp_stand}}",
+            "divideValue": "{{dp_divide}}",
+            "qty": "{{dp_qty}}",
+            "price": "{{total}}",
+            "sumAmount": "{{total}}",
+            "taxType": 0,
+            "chqNumber": "{{chq}}",
+            "docRef": "{{ee}}",
+            "refRow": 1,
+            "dateDue": "{{today}}"
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{pp}}"
+        }
+      ]
+    },
+    {
+      "title": "เช็คผ่าน (411): ยอดรวมหัวเอกสาร = ยอดเช็ค และบรรทัดอ้างเช็ค/ใบรับชำระ/บรรทัด 1",
+      "do": "db.query",
+      "sql": "select h.total_amount, h.last_status, d.chq_number, d.doc_ref, d.ref_row, d.item_code, d.sum_amount from ic_trans h join ic_trans_detail d on d.doc_no = h.doc_no and d.trans_flag = h.trans_flag where h.doc_no = :'pp' and h.trans_flag = 411",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{total}}"
+        },
+        {
+          "col": "last_status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "chq_number",
+          "op": "eq",
+          "value": "{{chq}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "eq",
+          "value": "{{ee}}"
+        },
+        {
+          "col": "ref_row",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "item_code",
+          "op": "eq",
+          "value": "{{book}}"
+        },
+        {
+          "col": "sum_amount",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    },
+    {
+      "title": "หลังเช็คผ่าน: สถานะเช็คในทะเบียน = 2 เช็คผ่าน",
+      "do": "db.query",
+      "sql": "select status, amount, doc_ref from cb_chq_list where chq_number = :'chq'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "2"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{total}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "eq",
+          "value": "{{ee}}"
+        }
+      ]
+    },
+    {
+      "title": "GL เช็คผ่าน (411): มีรายการ เดบิต = เครดิต = ยอดเช็ค",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit), 0) as debit from gl_journal_detail where doc_no = :'pp'",
+      "expect": [
+        {
+          "col": "n",
+          "op": "gt",
+          "value": "0"
+        },
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "debit",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    },
+    {
+      "title": "รายงานทะเบียนเช็ครับ: เช็คใบนี้เปลี่ยนเป็น เช็คผ่าน",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_cb_report_chq_in_receive_by_date",
+        "mode": "summary",
+        "dateFrom": "{{today}}",
+        "dateTo": "{{today}}",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "{{chq}}",
+        "viewDetail": false
+      },
+      "expect": [
+        {
+          "path": "data.rows.0.เลขที่เช็ค",
+          "op": "eq",
+          "value": "{{chq}}"
+        },
+        {
+          "path": "data.rows.0.สถานะเช็ค",
+          "op": "eq",
+          "value": "เช็คผ่าน"
+        },
+        {
+          "path": "data.rows.0.จำนวนเงิน",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    },
+    {
+      "title": "หลักฐาน: รายการ GL ทุกบรรทัดของใบรับชำระ นำฝาก เช็คผ่าน (บัญชี เดบิต เครดิต)",
+      "do": "db.query",
+      "sql": "select doc_no, trans_flag, line_number, account_code, debit, credit from gl_journal_detail where doc_no in (:'ee', :'dp', :'pp') order by trans_flag, line_number, roworder"
+    },
+    {
+      "title": "บัญชีหลังครบวงจร 239 → 410 → 411: บัญชีเช็ครับในมือสุทธิ 0 (เช็คออกจากมือหมดแล้ว)",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit - credit), 0) as chq_net from gl_journal_detail where doc_no in (:'ee', :'dp', :'pp') and account_code = (select account_code from gl_journal_detail where doc_no = :'ee' and debit > 0 order by roworder limit 1)",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "chq_net",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "บัญชีหลังครบวงจร: บัญชีเงินฝากของสมุดธนาคารได้รับเดบิตสุทธิ = ยอดเช็ค 1 ครั้ง (ไม่ซ้ำ)",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit - credit), 0) as bank_net from gl_journal_detail where doc_no in (:'dp', :'pp') and account_code = (select account_code_1 from erp_pass_book where code = :'book')",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "bank_net",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบบันทึกเช็คผ่าน (411) ทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{pp}}",
+        "transFlag": 411
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบบันทึกนำฝากเช็ค (410) ทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{dp}}",
+        "transFlag": 410
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบรับชำระทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/delete",
+      "body": {
+        "kind": "ap_ar_trans",
+        "docNo": "{{ee}}",
+        "transFlag": 239
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบบิลขายทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{si}}",
+        "transFlag": 44
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'si', :'dp', :'pp')) + (select count(*) from ic_trans_detail where doc_no in (:'si', :'dp', :'pp')) + (select count(*) from ap_ar_trans where doc_no = :'ee') + (select count(*) from ap_ar_trans_detail where doc_no = :'ee') + (select count(*) from cb_trans where doc_no in (:'si', :'ee', :'dp', :'pp')) + (select count(*) from cb_trans_detail where doc_no in (:'si', :'ee', :'dp', :'pp')) + (select count(*) from cb_chq_list where chq_number = :'chq' or doc_ref in (:'si', :'ee', :'dp', :'pp')) + (select count(*) from gl_journal where doc_no in (:'si', :'ee', :'dp', :'pp')) + (select count(*) from gl_journal_detail where doc_no in (:'si', :'ee', :'dp', :'pp')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'si', :'ee', :'dp', :'pp')) as left_rows",
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1210 @@
+{
+  "id": "ui-mst-unit",
+  "module": "master",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "title": "ทะเบียนหน่วยนับ: เพิ่ม ค้นหา กรอง เรียง แก้ไข กันลบเมื่อถูกใช้งาน ลบ ตรวจ DB ครบ",
+  "description": "UnitScreen บนจอ menu_setup_ic_unit: เพิ่มหน่วยนับกรอกครบทุกช่อง (รหัสแปลงเป็นตัวพิมพ์ใหญ่ ชื่อถูกตัดช่องว่าง) ตรวจ DB ทุกคอลัมน์ validation รหัส/ชื่อว่าง รหัสซ้ำ เตือนปิดแท็บ ค้นหา เรียง ตัวกรองขั้นสูง เปิดดู แก้ไขด้วยปุ่มแก้ไขและปุ่มดินสอ สลับรายการ/ยกเลิก กันลบเมื่อหน่วยนับถูกใช้ใน ic_unit_use ลบทีละรายการและลบจากรายการซ้ายแล้วพิสูจน์ 0 แถว",
+  "timeoutMs": 600000,
+  "steps": [
+    {
+      "title": "เลือกหน่วยนับจริงที่มีอยู่ใน smldemo ไว้ทดสอบการค้นหา",
+      "do": "db.query",
+      "sql": "select code as real_code, name_1 as real_name from ic_unit where code !~ '^UAT' and coalesce(name_1,'') <> '' and code !~ '[\"\\\\]' order by code limit 1",
+      "rows": 1,
+      "save": {
+        "real_code": "real_code",
+        "real_name": "real_name"
+      },
+      "expect": [
+        {
+          "col": "real_code",
+          "op": "ne",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ก่อนเริ่มยังไม่มีหน่วยนับที่ขึ้นต้น UAT ของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_unit where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true,
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดจอกำหนดหน่วยนับสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_unit"
+    },
+    {
+      "title": "เปิดจอแล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นช่องค้นหาและตัวนับรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-search-input\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นปุ่มเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"เพิ่มรายการใหม่\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นหัวข้อ กำหนดหน่วยนับสินค้า",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] h1:has-text(\"กำหนดหน่วยนับสินค้า\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพจอเริ่มต้น",
+      "do": "ui.screenshot",
+      "name": "unit-open"
+    },
+    {
+      "title": "ค้นหาหน่วยนับจริงด้วยชื่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{real_name}}"
+    },
+    {
+      "title": "ค้นหาหน่วยนับจริงด้วยชื่อ (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "เห็นแถวหน่วยนับจริงในรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ {{real_code}}\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดูหน่วยนับจริง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ {{real_code}}\"])"
+    },
+    {
+      "title": "ช่องรหัสแสดงรหัสหน่วยนับจริง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] input[placeholder=\"รหัสหน่วยนับ\"]",
+      "value": "{{real_code}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องชื่อแสดงชื่อหน่วยนับจริง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"]",
+      "value": "{{real_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องรหัสถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] input[placeholder=\"รหัสหน่วยนับ\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องชื่อถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ล้างคำค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"ล้างคำค้นหา\"]"
+    },
+    {
+      "title": "กดเพิ่มรายการใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"เพิ่มรายการใหม่\"]"
+    },
+    {
+      "title": "ปุ่มบันทึกกดไม่ได้เพราะยังไม่มีการแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"บันทึกข้อมูล\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องรหัสพร้อมให้กรอก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] input[placeholder=\"รหัสหน่วยนับ\"]:not([disabled])",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกเฉพาะชื่อ (เว้นรหัสว่าง)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"]",
+      "value": "ทดสอบ ไม่มีรหัส"
+    },
+    {
+      "title": "หัวจอแสดง แก้ไขแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] header span:has-text(\"แก้ไขแล้ว\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดบันทึกทั้งที่ไม่มีรหัส",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบเตือนข้อมูลไม่สมบูรณ์ รหัสหน่วยนับ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ข้อมูลไม่สมบูรณ์ : รหัสหน่วยนับ",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพเตือนไม่มีรหัส",
+      "do": "ui.screenshot",
+      "name": "unit-warn-code"
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "คำเตือนปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกรหัสตัวพิมพ์เล็ก (ระบบต้องแปลงเป็นตัวพิมพ์ใหญ่)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] input[placeholder=\"รหัสหน่วยนับ\"]",
+      "value": "uat{{run.short}}u1"
+    },
+    {
+      "title": "ช่องรหัสแสดงตัวพิมพ์ใหญ่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] input[placeholder=\"รหัสหน่วยนับ\"]",
+      "value": "UAT{{run.short}}U1",
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบชื่อให้ว่าง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"]",
+      "value": "   "
+    },
+    {
+      "title": "กดบันทึกทั้งที่ชื่อเป็นช่องว่าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบเตือนข้อมูลไม่สมบูรณ์ ชื่อหน่วยนับ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ข้อมูลไม่สมบูรณ์ : ชื่อหน่วยนับ",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน (ชื่อ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: ยังไม่มีแถวถูกบันทึกจากการกดบันทึกที่ไม่ครบ",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_unit where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปิดแท็บขณะกำลังเพิ่มรายการ",
+      "do": "ui.click",
+      "selector": "[data-testid=\"workspace-tab-close-menu_setup_ic_unit\"]"
+    },
+    {
+      "title": "ระบบเตือนว่ามีข้อมูลที่ยังไม่บันทึก",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกอยู่ต่อ",
+      "do": "ui.click",
+      "selector": "[data-testid=\"tab-warning-keep-btn\"]"
+    },
+    {
+      "title": "หน้าต่างเตือนปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "รหัสที่กรอกไว้ยังอยู่ครบ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] input[placeholder=\"รหัสหน่วยนับ\"]",
+      "value": "UAT{{run.short}}U1",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกชื่อภาษาไทย (มีช่องว่างหน้าหลัง)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"]",
+      "value": "  หน่วยทดสอบ ALPHA {{run.short}}  "
+    },
+    {
+      "title": "กรอกชื่อภาษาอังกฤษ (มีช่องว่างหน้าหลัง)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อภาษาอังกฤษ\"]",
+      "value": "  UAT UNIT ALPHA {{run.short}}  "
+    },
+    {
+      "title": "ภาพก่อนบันทึก A",
+      "do": "ui.screenshot",
+      "name": "unit-before-save-a"
+    },
+    {
+      "title": "กดบันทึก A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบแจ้งบันทึกสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "บันทึกข้อมูลเสร็จเรียบร้อย",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "หัวจอแสดง บันทึกล่าสุด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] header span:has-text(\"บันทึกล่าสุด\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "บันทึก A แล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: A ครบทุกคอลัมน์ ชื่อถูกตัดช่องว่างหน้าหลัง",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, coalesce(status,0) as status from ic_unit where code = 'UAT' || :'run_short' || 'U1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}U1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "หน่วยทดสอบ ALPHA {{run.short}}"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT UNIT ALPHA {{run.short}}"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกเป็นโหมดดู ช่องรหัสถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] input[placeholder=\"รหัสหน่วยนับ\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องชื่อหลังบันทึกไม่มีช่องว่างหน้าหลัง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"]",
+      "value": "หน่วยทดสอบ ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดเพิ่มรายการใหม่ (ทดสอบรหัสซ้ำ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"เพิ่มรายการใหม่\"]"
+    },
+    {
+      "title": "กรอกรหัสซ้ำกับ A",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] input[placeholder=\"รหัสหน่วยนับ\"]",
+      "value": "UAT{{run.short}}U1"
+    },
+    {
+      "title": "กรอกชื่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"]",
+      "value": "รหัสซ้ำ ไม่ควรถูกบันทึก"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบแจ้งว่ารหัสมีอยู่ในระบบแล้ว",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "มีอยู่ในระบบแล้ว",
+      "continueOnFail": true
+    },
+    {
+      "title": "ข้อความบอกรหัส A",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "UAT{{run.short}}U1",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพแจ้งรหัสซ้ำ",
+      "do": "ui.screenshot",
+      "name": "unit-warn-dup"
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: รหัสซ้ำไม่ทำให้ชื่อ A ถูกทับ",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, coalesce(status,0) as status from ic_unit where code = 'UAT' || :'run_short' || 'U1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "หน่วยทดสอบ ALPHA {{run.short}}"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปลี่ยนเป็นรหัส B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] input[placeholder=\"รหัสหน่วยนับ\"]",
+      "value": "UAT{{run.short}}U2"
+    },
+    {
+      "title": "กรอกชื่อ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"]",
+      "value": "หน่วยสองทดสอบ BETA {{run.short}}"
+    },
+    {
+      "title": "กรอกชื่ออังกฤษ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อภาษาอังกฤษ\"]",
+      "value": "UAT UNIT BETA {{run.short}}"
+    },
+    {
+      "title": "กดบันทึก B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง (บันทึก B)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: B ครบทุกคอลัมน์",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, coalesce(status,0) as status from ic_unit where code = 'UAT' || :'run_short' || 'U2'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "หน่วยสองทดสอบ BETA {{run.short}}"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT UNIT BETA {{run.short}}"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: มี 2 รายการของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_unit where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "2"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยตัวนำหน้ารหัส UAT ของรอบนี้",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "ค้นหาด้วยตัวนำหน้ารหัส UAT ของรอบนี้ (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ตัวนับรายการเป็น 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว A",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว B",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยชื่ออังกฤษ ALPHA",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "ALPHA {{run.short}}"
+    },
+    {
+      "title": "ค้นหาด้วยชื่ออังกฤษ ALPHA (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ตัวนับเป็น 1/1 (ชื่ออังกฤษ)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว A (ค้นจากชื่ออังกฤษ)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยชื่อไทยของ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "หน่วยสองทดสอบ BETA"
+    },
+    {
+      "title": "ค้นหาด้วยชื่อไทยของ B (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "เห็นแถว B (ค้นจากชื่อไทย)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่เห็นแถว A (ค้นจากชื่อไทยของ B)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาคำที่ไม่มีอยู่จริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "ZZNOHITXYZ"
+    },
+    {
+      "title": "ค้นหาคำที่ไม่มีอยู่จริง (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "แสดงข้อความ ไม่พบข้อมูลที่ค้นหา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] >> text=ไม่พบข้อมูลที่ค้นหา",
+      "continueOnFail": true
+    },
+    {
+      "title": "ตัวนับเป็น 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปุ่มล้างคำค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"ล้างคำค้นหา\"]"
+    },
+    {
+      "title": "ค้นหาใหม่ด้วย UAT ของรอบนี้",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "ค้นหาใหม่ด้วย UAT ของรอบนี้ (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "กลับมาเห็น 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกหัวคอลัมน์รหัส (น้อยไปมาก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "แถวแรกเป็น A",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr td[data-col-key=\"code\"]",
+      "text": "UAT{{run.short}}U1",
+      "nth": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกหัวคอลัมน์รหัสอีกครั้ง (มากไปน้อย)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "แถวแรกเป็น B",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr td[data-col-key=\"code\"]",
+      "text": "UAT{{run.short}}U2",
+      "nth": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกครั้งที่สามเพื่อยกเลิกการเรียง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "ช่วงรหัสจาก = B",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP01\"]",
+      "value": "UAT{{run.short}}U2"
+    },
+    {
+      "title": "ช่วงรหัสถึง = B",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP99\"]",
+      "value": "UAT{{run.short}}U2"
+    },
+    {
+      "title": "กดกรองข้อมูล",
+      "do": "ui.click",
+      "selector": "button:has-text(\"กรองข้อมูล\")"
+    },
+    {
+      "title": "กรองช่วงรหัสแล้วเหลือ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เหลือเฉพาะแถว B",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว A ถูกกรองออก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูงเพื่อล้าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "กดล้างตัวกรอง",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ล้างตัวกรอง\")"
+    },
+    {
+      "title": "ล้างตัวกรองแล้วกลับเป็น 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกแถว A เพื่อเปิดดู",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U1\"])"
+    },
+    {
+      "title": "รหัสแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] input[placeholder=\"รหัสหน่วยนับ\"]",
+      "value": "UAT{{run.short}}U1",
+      "continueOnFail": true
+    },
+    {
+      "title": "ชื่อแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"]",
+      "value": "หน่วยทดสอบ ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ชื่ออังกฤษแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อภาษาอังกฤษ\"]",
+      "value": "UAT UNIT ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องชื่อถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพเปิดดู A",
+      "do": "ui.screenshot",
+      "name": "unit-view-a"
+    },
+    {
+      "title": "กดแก้ไขข้อมูล A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันก่อนแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการแก้ไขข้อมูลใช่หรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงเข้าโหมดแก้ไข",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ช่องชื่อพร้อมแก้ไข (ไม่ถูกล็อก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"]:not([disabled])",
+      "continueOnFail": true
+    },
+    {
+      "title": "รหัสแก้ไขไม่ได้ในโหมดแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] input[placeholder=\"รหัสหน่วยนับ\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "แก้ชื่อไทย",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"]",
+      "value": "หน่วยทดสอบ ALPHA {{run.short}} แก้ไข"
+    },
+    {
+      "title": "แก้ชื่ออังกฤษ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อภาษาอังกฤษ\"]",
+      "value": "UAT UNIT ALPHA {{run.short}} EDIT"
+    },
+    {
+      "title": "กดบันทึกการแก้ไข",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง (บันทึกการแก้ไข)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: ชื่อไทยและชื่ออังกฤษของ A เปลี่ยนตามที่แก้",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, coalesce(status,0) as status from ic_unit where code = 'UAT' || :'run_short' || 'U1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}U1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "หน่วยทดสอบ ALPHA {{run.short}} แก้ไข"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT UNIT ALPHA {{run.short}} EDIT"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "หน้าจอแสดงชื่อที่แก้แล้ว",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"]",
+      "value": "หน่วยทดสอบ ALPHA {{run.short}} แก้ไข",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปุ่มดินสอแก้ไขแถว B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"แก้ไขรายการ UAT{{run.short}}U2\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันก่อนแก้ไข (ดินสอ)",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการแก้ไขข้อมูลใช่หรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงเข้าโหมดแก้ไข B",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "หน้าจอโหลดข้อมูล B",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] input[placeholder=\"รหัสหน่วยนับ\"]",
+      "value": "UAT{{run.short}}U2",
+      "continueOnFail": true
+    },
+    {
+      "title": "แก้ชื่ออังกฤษ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อภาษาอังกฤษ\"]",
+      "value": "UAT UNIT BETA {{run.short}} EDIT"
+    },
+    {
+      "title": "กดบันทึก B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง (บันทึก B)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: ชื่ออังกฤษของ B เปลี่ยน ชื่อไทยคงเดิม",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, coalesce(status,0) as status from ic_unit where code = 'UAT' || :'run_short' || 'U2'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "หน่วยสองทดสอบ BETA {{run.short}}"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT UNIT BETA {{run.short}} EDIT"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกแถว A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U1\"])"
+    },
+    {
+      "title": "กดแก้ไขข้อมูล A อีกครั้ง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันก่อนแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการแก้ไขข้อมูลใช่หรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงเข้าโหมดแก้ไข",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ช่องชื่อพร้อมแก้ไข (ไม่ถูกล็อก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อหน่วยนับ\"]:not([disabled])",
+      "continueOnFail": true
+    },
+    {
+      "title": "แก้ชื่ออังกฤษแต่ยังไม่บันทึก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อภาษาอังกฤษ\"]",
+      "value": "ต้องไม่ถูกบันทึก"
+    },
+    {
+      "title": "คลิกแถว B ขณะมีข้อมูลค้าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U2\"])"
+    },
+    {
+      "title": "ระบบถามก่อนเปลี่ยนรายการ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "มีการแก้ไขข้อมูลอยู่",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกยกเลิก (อยู่ที่เดิม)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ยกเลิก\")"
+    },
+    {
+      "title": "ข้อความที่แก้ค้างไว้ยังอยู่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อภาษาอังกฤษ\"]",
+      "value": "ต้องไม่ถูกบันทึก",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปิดหน้าจอ (ยกเลิกการแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"ปิดหน้าจอ / ยกเลิกการแก้ไข (Esc)\"]"
+    },
+    {
+      "title": "ระบบถามก่อนทิ้งการแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "มีการแก้ไขข้อมูลอยู่",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกเปลี่ยนรายการ (ทิ้งการแก้ไข)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"เปลี่ยนรายการ\")"
+    },
+    {
+      "title": "ชื่ออังกฤษกลับเป็นค่าที่บันทึกไว้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] textarea[placeholder^=\"ชื่อภาษาอังกฤษ\"]",
+      "value": "UAT UNIT ALPHA {{run.short}} EDIT",
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: ชื่ออังกฤษของ A ไม่ถูกเปลี่ยนโดยการแก้ค้าง",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, coalesce(status,0) as status from ic_unit where code = 'UAT' || :'run_short' || 'U1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT UNIT ALPHA {{run.short}} EDIT"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "สร้างแถวอ้างอิงการใช้งานหน่วยนับ A (รหัสสินค้า UAT ของรอบนี้) เพื่อทดสอบการกันลบ",
+      "do": "db.exec",
+      "sql": "insert into ic_unit_use (code, ic_code) values ('UAT' || :'run_short' || 'U1', 'UAT' || :'run_short' || 'ITEM')",
+      "affected": 1
+    },
+    {
+      "title": "คลิกแถว A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U1\"])"
+    },
+    {
+      "title": "กดลบรายการ A ที่ถูกใช้งานอยู่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "ระบบไม่ให้ลบเพราะมีการใช้งานแล้ว",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "มีการใช้งานรหัสดังกล่าวไปแล้ว",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพกันลบหน่วยนับที่ถูกใช้งาน",
+      "do": "ui.screenshot",
+      "name": "unit-delete-blocked"
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: A ยังอยู่หลังถูกกันลบ",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, coalesce(status,0) as status from ic_unit where code = 'UAT' || :'run_short' || 'U1'",
+      "rows": 1,
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบแถวอ้างอิงการใช้งานที่สร้างไว้",
+      "do": "db.exec",
+      "sql": "delete from ic_unit_use where ic_code = 'UAT' || :'run_short' || 'ITEM'",
+      "affected": 1
+    },
+    {
+      "title": "DB: ไม่เหลือแถวอ้างอิงการใช้งาน",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_unit_use where ic_code = 'UAT' || :'run_short' || 'ITEM'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกแถว B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U2\"])"
+    },
+    {
+      "title": "กดลบรายการ B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันการลบ B",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการลบ [UAT{{run.short}}U2] จริงหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดยกเลิกการลบก่อน",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ยกเลิก\")"
+    },
+    {
+      "title": "DB: ยกเลิกการลบแล้ว B ยังอยู่",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, coalesce(status,0) as status from ic_unit where code = 'UAT' || :'run_short' || 'U2'",
+      "rows": 1,
+      "continueOnFail": true
+    },
+    {
+      "title": "กดลบรายการ B อีกครั้ง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "กดตกลงยืนยันการลบ",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ระบบแจ้งลบสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ลบข้อมูลเสร็จเรียบร้อย",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง (ลบ B สำเร็จ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: B ถูกลบ ไม่เหลือแถว",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, coalesce(status,0) as status from ic_unit where code = 'UAT' || :'run_short' || 'U2'",
+      "rows": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว B หายจากรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U2\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ติ๊กเลือกแถว A ในรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U1\"]) td[data-col-key=\"__check__\"]"
+    },
+    {
+      "title": "กดปุ่มลบรายการที่เลือกในรายการซ้าย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-testid=\"sml-nav-delete-btn\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันการลบ A",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการลบ [UAT{{run.short}}U1] จริงหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงยืนยันการลบ",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "กดตกลง (ลบ A สำเร็จ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: A ถูกลบ ไม่เหลือแถวของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_unit where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว A หายจากรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_unit\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}U1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบแล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบแถวอ้างอิงการใช้งานหน่วยนับที่ค้าง (รหัสสินค้า UAT ของรอบนี้)",
+      "do": "db.exec",
+      "sql": "delete from ic_unit_use where ic_code = 'UAT' || :'run_short' || 'ITEM'"
+    },
+    {
+      "title": "ลบหน่วยนับของสคริปต์นี้ที่ค้างจากรอบนี้หรือรอบที่ถูกขัดจังหวะ (รหัสรูปแบบ UAT+6 ตัว+U1/U2 เท่านั้น)",
+      "do": "db.exec",
+      "sql": "delete from ic_unit where code ~ '^UAT[0-9A-Z]{6}U[12]$'"
+    },
+    {
+      "title": "DB: ไม่เหลือหน่วยนับของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_unit where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "DB: ไม่เหลือแถวอ้างอิงการใช้งานของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_unit_use where ic_code = 'UAT' || :'run_short' || 'ITEM'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

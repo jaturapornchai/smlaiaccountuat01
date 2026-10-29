@@ -1,0 +1,1377 @@
+{
+ "id": "glx-ui-jv-tax",
+ "title": "หน้าจอสมุดรายวันทั่วไป แท็บภาษีซื้อ + ภาษีหัก ณ ที่จ่าย: กรอกทุกช่องผ่านหน้าจอ คำนวณภาษีอัตโนมัติ บันทึกตรง DB เปิดซ้ำ/แก้ไข/ลบผ่านหน้าจอ",
+ "module": "gl",
+ "lens": "screen",
+ "severityOnFail": "S1",
+ "description": "menu_gl_journal (JournalTaxTabs.tsx) · รายวันเดบิตค่าใช้จ่าย+ภาษีซื้อ เครดิตภาษีหัก ณ ที่จ่าย+เจ้าหนี้ (บัญชีตามกฎ resolveChartAccount service.go:1505-1579) · แท็บภาษีซื้อ: ใบกำกับ 1 ใบ กรอกเลขที่/รายละเอียด/ฐาน (ภาษี 7% คำนวณเอง) ชื่อผู้ขาย/เลขภาษี/สาขา/ประเภท/เลขออกใหม่/ยื่นเพิ่มเติม · แท็บภาษีหัก ณ ที่จ่าย: ใบ 1 ใบ เจ้าหนี้จริงเลือกผ่านหน้าต่างค้นหา (ชื่อ/เลขภาษีดึงจากทะเบียน) เงินได้ 1 บรรทัด อัตรา 3% · ตรวจ gl_journal_vat_buy / gl_wht_list / gl_wht_list_detail ทุกช่อง (journaltax.go) → เปิดซ้ำจากรายการ ค่าบนแท็บตรง → แก้รายละเอียด/ประเภท/เงินได้ บันทึกแล้วยังเป็น 1 แถว → ลบผ่านหน้าจอ 0 แถวทั้ง 6 ตาราง · วันที่/บัญชี/ยอด/เจ้าหนี้เลือกจากข้อมูลจริงตอนรัน",
+ "timeoutMs": 600000,
+ "steps": [
+  {
+   "title": "กำหนดเลขเอกสารทดสอบ",
+   "do": "set",
+   "name": "jv",
+   "value": "UAT-{{run.short}}-UT"
+  },
+  {
+   "title": "กำหนดเลขที่ใบกำกับภาษีทดสอบ",
+   "do": "set",
+   "name": "vno",
+   "value": "UAT{{run.short}}V"
+  },
+  {
+   "title": "กำหนดเลขที่ใบหัก ณ ที่จ่ายทดสอบ",
+   "do": "set",
+   "name": "wdoc",
+   "value": "UAT{{run.short}}W"
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "เลือกวันที่ว่าง (งวดเปิด) บัญชีค่าใช้จ่าย/ภาษีซื้อ/ภาษีหัก ณ ที่จ่าย/เจ้าหนี้ ยอดเงิน สมุดรายวัน และเจ้าหนี้จริงจากข้อมูลจริง",
+   "do": "db.query",
+   "sql": "select p.qd, p.exp, p.expname, p.liab, p.liabname, p.amt, p.book, to_char(p.qd::date, 'DD/MM/') || (extract(year from p.qd::date)::int + 543)::text qdth,\n extract(month from p.qd::date)::int::text pm, yy.y yce,\n '^(' || left(yy.y, 1) || ',?' || substr(yy.y, 2) || '|' || left(yy.yb, 1) || ',?' || substr(yy.yb, 2) || ')$' yre,\n '^' || to_char(p.qd::date, 'DD/MM/') || '(' || yy.y || '|' || yy.yb || ')$' dre,\n x.vat::text vat, x.wht::text wht, (p.amt::numeric + x.vat)::text tot, (p.amt::numeric + x.vat - x.wht)::text cr,\n to_char(p.amt::numeric, 'FM999,999,999,990.00') amtc, to_char(x.wht, 'FM999,999,999,990.00') whtc,\n i.code inv, i.nm invname, w.code wacc, w.nm wname, s.code sup, s.nm supname, s.addr supaddr, s.st supst, s.tax suptax, s.card supcard\nfrom (with qd as (\n select g::date as qd from generate_series((now() at time zone 'Asia/Bangkok')::date - 40, (now() at time zone 'Asia/Bangkok')::date - 3, interval '1 day') g\n where not exists (select 1 from gl_journal_detail x where x.doc_date = g::date)\n   and exists (select 1 from erp_account_period p where g::date between p.date_start and p.date_end and coalesce(p.status, 0) = 0)\n order by g desc limit 1),\nleaf as (select c.code, coalesce(c.name_1, '') nm, c.account_type t from gl_chart_of_account c where not exists (select 1 from gl_chart_of_account k where k.main_code = c.code)),\nused as (select l.code, l.nm, l.t, count(*) n, (array_agg(d.debit order by d.doc_date desc, d.roworder desc) filter (where d.debit > 0))[1] lastdr\n from leaf l join gl_journal_detail d on d.account_code = l.code and d.doc_no not like 'UAT%' group by 1, 2, 3)\nselect to_char(q.qd, 'YYYY-MM-DD') qd, e.code exp, e.nm expname, a.code liab, a.nm liabname, round(e.lastdr, 2)::text amt, (round(e.lastdr, 2) + 1)::text bad, b.code book\nfrom qd q,\n (select * from used where t = 4 and lastdr > 0 order by n desc, code limit 1) e,\n (select code, coalesce(name_1, '') nm from gl_chart_of_account, (values (0, '2111'), (1, '2110'), (2, '2100')) p(o, c)\n where code = p.c or code like p.c || '-%' order by p.o, (code = p.c) desc, code limit 1) a,\n (select code from gl_journal_book order by code limit 1) b) p\n cross join lateral (select extract(year from p.qd::date)::int::text y, (extract(year from p.qd::date)::int + 543)::text yb) yy\n cross join lateral (select round(p.amt::numeric * 7 / 100, 2) vat, round(p.amt::numeric * 3 / 100, 2) wht) x\n cross join (select code, coalesce(name_1, '') nm from gl_chart_of_account, (values (0, '1154'), (1, '1151'), (2, '1155'), (3, '1190')) p(o, c)\n where code = p.c or code like p.c || '-%' order by p.o, (code = p.c) desc, code limit 1) i\n cross join (select code, coalesce(name_1, '') nm from gl_chart_of_account, (values (0, '2122'), (1, '2123'), (2, '2120')) p(o, c)\n where code = p.c or code like p.c || '-%' order by p.o, (code = p.c) desc, code limit 1) w\n cross join (select m.code, coalesce(m.name_1, '') nm, coalesce(m.address, '') addr, coalesce(m.ap_status, 0)::text st, coalesce(d.tax_id, '') tax, coalesce(d.card_id, '') card\n  from ap_supplier m left join ap_supplier_detail d on d.ap_code = m.code\n  where m.code not like 'UAT%' and coalesce(m.name_1, '') <> '' and (select count(*) from ap_supplier_detail k where k.ap_code = m.code) <= 1\n  order by (coalesce(m.status, 0) = 0) desc, (coalesce(d.tax_id, '') <> '') desc, m.code limit 1) s",
+   "rows": 1,
+   "save": {
+    "qd": "qd",
+    "exp": "exp",
+    "expname": "expname",
+    "liab": "liab",
+    "liabname": "liabname",
+    "amt": "amt",
+    "book": "book",
+    "qdth": "qdth",
+    "pm": "pm",
+    "yce": "yce",
+    "yre": "yre",
+    "dre": "dre",
+    "vat": "vat",
+    "wht": "wht",
+    "tot": "tot",
+    "cr": "cr",
+    "amtc": "amtc",
+    "whtc": "whtc",
+    "inv": "inv",
+    "invname": "invname",
+    "wacc": "wacc",
+    "wname": "wname",
+    "sup": "sup",
+    "supname": "supname",
+    "supaddr": "supaddr",
+    "supst": "supst",
+    "suptax": "suptax",
+    "supcard": "supcard"
+   }
+  },
+  {
+   "title": "ยังไม่มีเอกสาร/ใบกำกับ/ใบหัก ณ ที่จ่ายเลขนี้ในฐานข้อมูล",
+   "do": "db.query",
+   "sql": "select ((select count(*) from gl_journal where doc_no = :'jv') + (select count(*) from gl_journal_detail where doc_no = :'jv') + (select count(*) from gl_journal_vat_buy where doc_no = :'jv') + (select count(*) from gl_journal_vat_sale where doc_no = :'jv') + (select count(*) from gl_wht_list where doc_no = :'jv') + (select count(*) from gl_wht_list_detail where doc_no = :'jv') + (select count(*) from gl_wht_list where tax_doc_no = :'wdoc') + (select count(*) from gl_journal_vat_buy where vat_doc_no = :'vno'))::text n",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "เปิดเมนูสมุดรายวันทั่วไป",
+   "do": "ui.openMenu",
+   "key": "menu_gl_journal"
+  },
+  {
+   "title": "ล้างตัวนับข้อผิดพลาดก่อนเริ่ม",
+   "do": "ui.expectClean",
+   "reset": true
+  },
+  {
+   "title": "กดปุ่มเพิ่มใหม่",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] [data-testid=\"sml-nav-new-btn\"]"
+  },
+  {
+   "title": "แถบดึงรายการรายวันประจำแสดงและเลือกได้ในโหมดเพิ่ม",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] [data-testid=\"gl-recurring-bar\"] select:enabled"
+  },
+  {
+   "title": "กรอกเลขที่เอกสาร",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input",
+   "value": "{{jv}}"
+  },
+  {
+   "title": "กรอกวันที่เอกสาร (พ.ศ.)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:has-text(\"วันที่เอกสาร\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{qdth}}"
+  },
+  {
+   "title": "ออกจากช่องวันที่",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:has-text(\"วันที่เอกสาร\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "key": "Tab"
+  },
+  {
+   "title": "กรอกหมายเหตุเอกสาร",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] textarea[placeholder=\"ระบุรายละเอียดหมายเหตุเอกสาร...\"]",
+   "value": "UAT{{run.short}} รายวันภาษีทดสอบหน้าจอ"
+  },
+  {
+   "title": "กรอกรหัสสมุดรายวัน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:has-text(\"สมุดรายวัน\")) > input",
+   "value": "{{book}}"
+  },
+  {
+   "title": "บรรทัด 1: กดปุ่มค้นหาผังบัญชี → หน้าต่างค้นหาเปิด",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=0 >> td >> nth=1 >> button"
+  },
+  {
+   "title": "หน้าต่าง \"ค้นหาผังบัญชี\" แสดง",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]"
+  },
+  {
+   "title": "ค้นหาด้วยรหัสบัญชี exp",
+   "do": "ui.fill",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "value": "{{exp}}"
+  },
+  {
+   "title": "ผลค้นหาด้วยรหัสบัญชี expมีแถวบัญชี {{exp}}",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") tr[data-row-index]:has(td:text-is(\"{{exp}}\"))"
+  },
+  {
+   "title": "เลือกแถวบัญชี {{exp}} → หน้าต่างปิด",
+   "do": "ui.click",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") tr[data-row-index]:has(td:text-is(\"{{exp}}\"))"
+  },
+  {
+   "title": "หน้าต่างค้นหาปิดแล้ว",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "visible": false
+  },
+  {
+   "title": "บรรทัด 1: รหัสบัญชี = {{exp}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=0 >> td >> nth=1 >> input",
+   "value": "{{exp}}"
+  },
+  {
+   "title": "บรรทัด 1: กรอกคำอธิบาย",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=0 >> td >> nth=3 >> input",
+   "value": "UAT{{run.short}} ค่าใช้จ่าย"
+  },
+  {
+   "title": "บรรทัด 1: กรอกเดบิต",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=0 >> td >> nth=4 >> input",
+   "value": "{{amt}}"
+  },
+  {
+   "title": "ออกจากช่องยอดเงิน",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=0 >> td >> nth=4 >> input",
+   "key": "Tab"
+  },
+  {
+   "title": "กดปุ่มเพิ่มผังบัญชี",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button:has-text(\"เพิ่มผังบัญชี\")"
+  },
+  {
+   "title": "ตารางมี 2 บรรทัด",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=1"
+  },
+  {
+   "title": "บรรทัด 2: กดปุ่มค้นหาผังบัญชี → หน้าต่างค้นหาเปิด",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=1 >> td >> nth=1 >> button"
+  },
+  {
+   "title": "หน้าต่าง \"ค้นหาผังบัญชี\" แสดง",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]"
+  },
+  {
+   "title": "ค้นหาด้วยรหัสบัญชี inv",
+   "do": "ui.fill",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "value": "{{inv}}"
+  },
+  {
+   "title": "ผลค้นหาด้วยรหัสบัญชี invมีแถวบัญชี {{inv}}",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") tr[data-row-index]:has(td:text-is(\"{{inv}}\"))"
+  },
+  {
+   "title": "เลือกแถวบัญชี {{inv}} → หน้าต่างปิด",
+   "do": "ui.click",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") tr[data-row-index]:has(td:text-is(\"{{inv}}\"))"
+  },
+  {
+   "title": "หน้าต่างค้นหาปิดแล้ว",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "visible": false
+  },
+  {
+   "title": "บรรทัด 2: รหัสบัญชี = {{inv}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=1 >> td >> nth=1 >> input",
+   "value": "{{inv}}"
+  },
+  {
+   "title": "บรรทัด 2: กรอกคำอธิบาย",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=1 >> td >> nth=3 >> input",
+   "value": "UAT{{run.short}} ภาษีซื้อ"
+  },
+  {
+   "title": "บรรทัด 2: กรอกเดบิต",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=1 >> td >> nth=4 >> input",
+   "value": "{{vat}}"
+  },
+  {
+   "title": "ออกจากช่องยอดเงิน",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=1 >> td >> nth=4 >> input",
+   "key": "Tab"
+  },
+  {
+   "title": "กดปุ่มเพิ่มผังบัญชี",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button:has-text(\"เพิ่มผังบัญชี\")"
+  },
+  {
+   "title": "ตารางมี 3 บรรทัด",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=2"
+  },
+  {
+   "title": "บรรทัด 3: กดปุ่มค้นหาผังบัญชี → หน้าต่างค้นหาเปิด",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=2 >> td >> nth=1 >> button"
+  },
+  {
+   "title": "หน้าต่าง \"ค้นหาผังบัญชี\" แสดง",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]"
+  },
+  {
+   "title": "ค้นหาด้วยรหัสบัญชี wacc",
+   "do": "ui.fill",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "value": "{{wacc}}"
+  },
+  {
+   "title": "ผลค้นหาด้วยรหัสบัญชี waccมีแถวบัญชี {{wacc}}",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") tr[data-row-index]:has(td:text-is(\"{{wacc}}\"))"
+  },
+  {
+   "title": "เลือกแถวบัญชี {{wacc}} → หน้าต่างปิด",
+   "do": "ui.click",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") tr[data-row-index]:has(td:text-is(\"{{wacc}}\"))"
+  },
+  {
+   "title": "หน้าต่างค้นหาปิดแล้ว",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "visible": false
+  },
+  {
+   "title": "บรรทัด 3: รหัสบัญชี = {{wacc}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=2 >> td >> nth=1 >> input",
+   "value": "{{wacc}}"
+  },
+  {
+   "title": "บรรทัด 3: กรอกคำอธิบาย",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=2 >> td >> nth=3 >> input",
+   "value": "UAT{{run.short}} ภาษีหัก ณ ที่จ่าย"
+  },
+  {
+   "title": "บรรทัด 3: กรอกเครดิต",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=2 >> td >> nth=5 >> input",
+   "value": "{{wht}}"
+  },
+  {
+   "title": "ออกจากช่องยอดเงิน",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=2 >> td >> nth=5 >> input",
+   "key": "Tab"
+  },
+  {
+   "title": "กดปุ่มเพิ่มผังบัญชี",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button:has-text(\"เพิ่มผังบัญชี\")"
+  },
+  {
+   "title": "ตารางมี 4 บรรทัด",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=3"
+  },
+  {
+   "title": "บรรทัด 4: กดปุ่มค้นหาผังบัญชี → หน้าต่างค้นหาเปิด",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=3 >> td >> nth=1 >> button"
+  },
+  {
+   "title": "หน้าต่าง \"ค้นหาผังบัญชี\" แสดง",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]"
+  },
+  {
+   "title": "ค้นหาด้วยรหัสบัญชี liab",
+   "do": "ui.fill",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "value": "{{liab}}"
+  },
+  {
+   "title": "ผลค้นหาด้วยรหัสบัญชี liabมีแถวบัญชี {{liab}}",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") tr[data-row-index]:has(td:text-is(\"{{liab}}\"))"
+  },
+  {
+   "title": "เลือกแถวบัญชี {{liab}} → หน้าต่างปิด",
+   "do": "ui.click",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") tr[data-row-index]:has(td:text-is(\"{{liab}}\"))"
+  },
+  {
+   "title": "หน้าต่างค้นหาปิดแล้ว",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "visible": false
+  },
+  {
+   "title": "บรรทัด 4: รหัสบัญชี = {{liab}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=3 >> td >> nth=1 >> input",
+   "value": "{{liab}}"
+  },
+  {
+   "title": "บรรทัด 4: กรอกคำอธิบาย",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=3 >> td >> nth=3 >> input",
+   "value": "UAT{{run.short}} เจ้าหนี้"
+  },
+  {
+   "title": "บรรทัด 4: กรอกเครดิต",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=3 >> td >> nth=5 >> input",
+   "value": "{{cr}}"
+  },
+  {
+   "title": "ออกจากช่องยอดเงิน",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tbody tr >> nth=3 >> td >> nth=5 >> input",
+   "key": "Tab"
+  },
+  {
+   "title": "ท้ายตาราง: ดุลบัญชีถูกต้อง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"รหัสบัญชี\")) tfoot",
+   "text": "ดุลบัญชีถูกต้อง (Dr = Cr)"
+  },
+  {
+   "title": "เปิดแท็บภาษีซื้อ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button:text-is(\"ภาษีซื้อ\")"
+  },
+  {
+   "title": "แท็บภาษีซื้อยังไม่มีรายการ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) td:has-text(\"ไม่มีรายการ\")"
+  },
+  {
+   "title": "กดเพิ่มบรรทัดใบกำกับภาษี",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button:has-text(\"เพิ่มบรรทัด\")"
+  },
+  {
+   "title": "ช่วยบันทึก: วันที่ใบกำกับ = วันที่เอกสาร",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=1 >> input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{dre}}",
+   "op": "matches"
+  },
+  {
+   "title": "ช่วยบันทึก: เดือนภาษี = เดือนของวันที่เอกสาร",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=3 >> input >> nth=0",
+   "value": "{{pm}}"
+  },
+  {
+   "title": "ช่วยบันทึก: ปีภาษี = ปีของวันที่เอกสาร",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=3 >> input >> nth=1",
+   "value": "{{yre}}",
+   "op": "matches"
+  },
+  {
+   "title": "ช่วยบันทึก: อัตราภาษีเริ่มต้น 7",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=7 >> input >> nth=0",
+   "value": "7"
+  },
+  {
+   "title": "กรอกเลขที่ใบกำกับ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=2 >> input >> nth=0",
+   "value": "{{vno}}"
+  },
+  {
+   "title": "กรอกรายละเอียด",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=4 >> input >> nth=0",
+   "value": "UAT{{run.short}} ใบกำกับทดสอบ"
+  },
+  {
+   "title": "กรอกฐานภาษี",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=6 >> input >> nth=0",
+   "value": "{{amt}}"
+  },
+  {
+   "title": "ออกจากช่องฐานภาษี",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=6 >> input >> nth=0",
+   "key": "Tab"
+  },
+  {
+   "title": "คำนวณอัตโนมัติ: เงินภาษี = ฐาน x 7%",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=8 >> input >> nth=0",
+   "value": "{{vat}}"
+  },
+  {
+   "title": "คำนวณอัตโนมัติ: ยอดรวม = ฐาน + ภาษี",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) div.flex:has(> span:text-is(\"ยอดรวม:\")) input",
+   "value": "{{tot}}"
+  },
+  {
+   "title": "กรอกชื่อผู้ขาย",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) input[placeholder=\"ชื่อผู้ขายสินค้า/ผู้ให้บริการ\"]",
+   "value": "UAT{{run.short}} ผู้ขายทดสอบ"
+  },
+  {
+   "title": "กรอกเลขผู้เสียภาษี 13 หลัก",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) input[placeholder=\"13 หลัก\"]",
+   "value": "0105599999999"
+  },
+  {
+   "title": "เลือกสถานประกอบการ = สาขา",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) select:has(option:text-is(\"สำนักงานใหญ่\"))",
+   "value": "สาขา"
+  },
+  {
+   "title": "กรอกเลขที่สาขา",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) input[placeholder=\"เลขที่สาขา\"]",
+   "value": "00001"
+  },
+  {
+   "title": "เลือกประเภทภาษี = ขอคืนไม่ได้",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) select:has(option:text-is(\"ขอคืนไม่ได้\"))",
+   "value": "ขอคืนไม่ได้"
+  },
+  {
+   "title": "ยอดยกเว้นเริ่มต้น 0 (ช่องตัวเลขแสดงศูนย์เป็นช่องว่าง numeric.ts:599)",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) div.flex:has(> span:text-is(\"ยอดยกเว้น:\")) input",
+   "value": "",
+   "op": "empty"
+  },
+  {
+   "title": "กรอกเลขที่ออกใหม่",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) div.flex:has(> span:text-is(\"เลขที่ออกใหม่:\")) input",
+   "value": "UAT{{run.short}}N"
+  },
+  {
+   "title": "ติ๊กยื่นเพิ่มเติม",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) label:has-text(\"ยื่นเพิ่มเติม\") input[type=\"checkbox\"]"
+  },
+  {
+   "title": "ก่อนบันทึก: เลขที่ใบกำกับ",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=2 >> input >> nth=0",
+   "value": "{{vno}}",
+   "op": "same"
+  },
+  {
+   "title": "ก่อนบันทึก: วันที่ใบกำกับ = วันที่เอกสาร",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=1 >> input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{dre}}",
+   "op": "matches"
+  },
+  {
+   "title": "ก่อนบันทึก: เดือนภาษี",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=3 >> input >> nth=0",
+   "value": "{{pm}}"
+  },
+  {
+   "title": "ก่อนบันทึก: ปีภาษี (ค.ศ./พ.ศ. ตามตั้งค่า)",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=3 >> input >> nth=1",
+   "value": "{{yre}}",
+   "op": "matches"
+  },
+  {
+   "title": "ก่อนบันทึก: รายละเอียด",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=4 >> input >> nth=0",
+   "value": "UAT{{run.short}} ใบกำกับทดสอบ",
+   "op": "same"
+  },
+  {
+   "title": "ก่อนบันทึก: ฐานภาษี",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=6 >> input >> nth=0",
+   "value": "{{amt}}"
+  },
+  {
+   "title": "ก่อนบันทึก: อัตราภาษี 7",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=7 >> input >> nth=0",
+   "value": "7"
+  },
+  {
+   "title": "ก่อนบันทึก: เงินภาษี = ฐาน x 7%",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=8 >> input >> nth=0",
+   "value": "{{vat}}"
+  },
+  {
+   "title": "ก่อนบันทึก: ยอดรวม = ฐาน + ภาษี",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) div.flex:has(> span:text-is(\"ยอดรวม:\")) input",
+   "value": "{{tot}}"
+  },
+  {
+   "title": "ก่อนบันทึก: ชื่อผู้ขาย",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) input[placeholder=\"ชื่อผู้ขายสินค้า/ผู้ให้บริการ\"]",
+   "value": "UAT{{run.short}} ผู้ขายทดสอบ",
+   "op": "same"
+  },
+  {
+   "title": "ก่อนบันทึก: เลขผู้เสียภาษี",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) input[placeholder=\"13 หลัก\"]",
+   "value": "0105599999999",
+   "op": "same"
+  },
+  {
+   "title": "ก่อนบันทึก: สถานประกอบการ = สาขา",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) select:has(option:text-is(\"สำนักงานใหญ่\"))",
+   "value": "1",
+   "op": "same"
+  },
+  {
+   "title": "ก่อนบันทึก: เลขที่สาขา",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) input[placeholder=\"เลขที่สาขา\"]",
+   "value": "00001",
+   "op": "same"
+  },
+  {
+   "title": "ก่อนบันทึก: ประเภทภาษี",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) select:has(option:text-is(\"ขอคืนไม่ได้\"))",
+   "value": "1",
+   "op": "same"
+  },
+  {
+   "title": "ก่อนบันทึก: เลขที่ออกใหม่",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) div.flex:has(> span:text-is(\"เลขที่ออกใหม่:\")) input",
+   "value": "UAT{{run.short}}N",
+   "op": "same"
+  },
+  {
+   "title": "ก่อนบันทึก: ติ๊กยื่นเพิ่มเติม",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) label:has-text(\"ยื่นเพิ่มเติม\") input[type=\"checkbox\"]:checked"
+  },
+  {
+   "title": "เปิดแท็บภาษีหัก ณ ที่จ่าย",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button:text-is(\"ภาษีหัก ณ. ที่จ่าย\")"
+  },
+  {
+   "title": "แท็บภาษีหัก ณ ที่จ่ายยังไม่มีรายการ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) td:has-text(\"ไม่มีรายการ\")"
+  },
+  {
+   "title": "กดเพิ่มใบหัก ณ ที่จ่าย",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> span:has-text(\"คลิกแถวเพื่อแก้ไขรายละเอียดด้านล่าง\")) button:has-text(\"เพิ่ม\")"
+  },
+  {
+   "title": "วันที่หัก ณ ที่จ่ายเริ่มต้น = วันที่เอกสาร",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:text-is(\"วันที่หัก ณ ที่จ่าย\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{dre}}",
+   "op": "matches"
+  },
+  {
+   "title": "กรอกเลขที่เอกสารหัก ณ ที่จ่าย",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:text-is(\"เอกสารเลขที่\")) input",
+   "value": "{{wdoc}}"
+  },
+  {
+   "title": "กดปุ่มค้นหาเจ้าหนี้",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) button[title=\"ค้นหาเจ้าหนี้\"]"
+  },
+  {
+   "title": "หน้าต่าง \"ค้นหาเจ้าหนี้\" แสดง",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาเจ้าหนี้\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]"
+  },
+  {
+   "title": "ค้นหาด้วยรหัสเจ้าหนี้",
+   "do": "ui.fill",
+   "selector": "div.fixed:has-text(\"ค้นหาเจ้าหนี้\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "value": "{{sup}}"
+  },
+  {
+   "title": "ผลค้นหามีแถวเจ้าหนี้ {{sup}}",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาเจ้าหนี้\") tr[data-row-index]:has(td:text-is(\"{{sup}}\"))"
+  },
+  {
+   "title": "เลือกแถวเจ้าหนี้ → หน้าต่างปิด",
+   "do": "ui.click",
+   "selector": "div.fixed:has-text(\"ค้นหาเจ้าหนี้\") tr[data-row-index]:has(td:text-is(\"{{sup}}\"))"
+  },
+  {
+   "title": "หน้าต่างค้นหาเจ้าหนี้ปิดแล้ว",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาเจ้าหนี้\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "visible": false
+  },
+  {
+   "title": "กรอกรายละเอียดเงินได้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=1 >> input",
+   "value": "ค่าบริการ UAT{{run.short}}"
+  },
+  {
+   "title": "กรอกฐานภาษี",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=2 >> input",
+   "value": "{{amt}}"
+  },
+  {
+   "title": "ออกจากช่องฐานภาษี",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=2 >> input",
+   "key": "Tab"
+  },
+  {
+   "title": "กรอกอัตราภาษี 3%",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=3 >> input",
+   "value": "3"
+  },
+  {
+   "title": "ออกจากช่องอัตราภาษี",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=3 >> input",
+   "key": "Tab"
+  },
+  {
+   "title": "ก่อนบันทึก: แถวใบหัก ณ ที่จ่าย เลขที่เอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) tbody tr >> nth=0 >> td >> nth=0",
+   "text": "{{wdoc}}",
+   "op": "eq"
+  },
+  {
+   "title": "ก่อนบันทึก: แถวใบหัก รหัสเจ้าหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) tbody tr >> nth=0 >> td >> nth=1",
+   "text": "{{sup}}",
+   "op": "eq"
+  },
+  {
+   "title": "ก่อนบันทึก: แถวใบหัก ชื่อเจ้าหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) tbody tr >> nth=0 >> td >> nth=2",
+   "text": "{{supname}}",
+   "op": "contains"
+  },
+  {
+   "title": "ก่อนบันทึก: แถวใบหัก วันที่หัก = วันที่เอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) tbody tr >> nth=0 >> td >> nth=3",
+   "text": "{{dre}}",
+   "op": "matches"
+  },
+  {
+   "title": "ก่อนบันทึก: แถวใบหัก จำนวนเงิน {{amtc}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) tbody tr >> nth=0 >> td >> nth=4",
+   "text": "{{amt}}",
+   "op": "eq"
+  },
+  {
+   "title": "ก่อนบันทึก: แถวใบหัก ภาษีหัก {{whtc}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) tbody tr >> nth=0 >> td >> nth=5",
+   "text": "{{wht}}",
+   "op": "eq"
+  },
+  {
+   "title": "ก่อนบันทึก: ช่องเอกสารเลขที่",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:text-is(\"เอกสารเลขที่\")) input",
+   "value": "{{wdoc}}",
+   "op": "same"
+  },
+  {
+   "title": "ก่อนบันทึก: ช่องรหัสเจ้าหนี้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) input",
+   "value": "{{sup}}",
+   "op": "same"
+  },
+  {
+   "title": "ก่อนบันทึก: ชื่อเจ้าหนี้แสดงข้างรหัส",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) span.truncate",
+   "text": "{{supname}}",
+   "op": "contains"
+  },
+  {
+   "title": "ก่อนบันทึก: เลขประจำตัวผู้เสียภาษีจากทะเบียนเจ้าหนี้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:text-is(\"เลขประจำตัวผู้เสียภาษี\")) input",
+   "value": "{{suptax}}",
+   "op": "same"
+  },
+  {
+   "title": "ก่อนบันทึก: เลขที่บัตรประชาชนจากทะเบียนเจ้าหนี้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:text-is(\"เลขที่บัตรประชาชน\")) input",
+   "value": "{{supcard}}",
+   "op": "same"
+  },
+  {
+   "title": "ก่อนบันทึก: รายละเอียดเงินได้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=1 >> input",
+   "value": "ค่าบริการ UAT{{run.short}}",
+   "op": "same"
+  },
+  {
+   "title": "ก่อนบันทึก: ฐานภาษี",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=2 >> input",
+   "value": "{{amt}}"
+  },
+  {
+   "title": "ก่อนบันทึก: อัตราภาษี 3",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=3 >> input",
+   "value": "3"
+  },
+  {
+   "title": "ก่อนบันทึก: ภาษีหัก ณ ที่จ่าย = ฐาน x 3%",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=4 >> input",
+   "value": "{{wht}}"
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝงก่อนบันทึก",
+   "do": "ui.expectClean"
+  },
+  {
+   "title": "กดบันทึก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button:text-is(\"บันทึก\")"
+  },
+  {
+   "title": "ข้อความบันทึกสำเร็จ → เลือกยังไม่พิมพ์",
+   "do": "ui.click",
+   "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+   "timeout": 30000
+  },
+  {
+   "title": "สถานะบนหัวฟอร์ม: บันทึกเอกสารเรียบร้อย",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"]",
+   "text": "บันทึกเอกสาร {{jv}} เรียบร้อยแล้ว"
+  },
+  {
+   "title": "หัวรายวันใน DB: วันที่ สมุด เดบิต = เครดิต = ค่าใช้จ่าย + ภาษีซื้อ",
+   "do": "db.query",
+   "sql": "select to_char(doc_date, 'YYYY-MM-DD') dd, book_code, debit::text dr, credit::text cr, description from gl_journal where doc_no = :'jv'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "dd",
+     "op": "eq",
+     "value": "{{qd}}"
+    },
+    {
+     "col": "book_code",
+     "op": "eq",
+     "value": "{{book}}"
+    },
+    {
+     "col": "dr",
+     "op": "eq",
+     "value": "{{tot}}"
+    },
+    {
+     "col": "cr",
+     "op": "eq",
+     "value": "{{tot}}"
+    },
+    {
+     "col": "description",
+     "op": "same",
+     "value": "UAT{{run.short}} รายวันภาษีทดสอบหน้าจอ"
+    }
+   ]
+  },
+  {
+   "title": "บรรทัดรายวันใน DB: 4 บรรทัด รหัส/ชื่อ/เดบิต/เครดิต/คำอธิบายตรงที่กรอก",
+   "do": "db.query",
+   "sql": "select string_agg(line_number || '|' || account_code || '|' || account_name || '|' || round(debit, 2)::text || '|' || round(credit, 2)::text || '|' || coalesce(description, ''), ' ; ' order by line_number) l, count(*)::text n from gl_journal_detail where doc_no = :'jv'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "4"
+    },
+    {
+     "col": "l",
+     "op": "same",
+     "value": "1|{{exp}}|{{expname}}|{{amt}}|0.00|UAT{{run.short}} ค่าใช้จ่าย ; 2|{{inv}}|{{invname}}|{{vat}}|0.00|UAT{{run.short}} ภาษีซื้อ ; 3|{{wacc}}|{{wname}}|0.00|{{wht}}|UAT{{run.short}} ภาษีหัก ณ ที่จ่าย ; 4|{{liab}}|{{liabname}}|0.00|{{cr}}|UAT{{run.short}} เจ้าหนี้"
+    }
+   ]
+  },
+  {
+   "title": "หลังบันทึก: ภาษีซื้อ (gl_journal_vat_buy) 1 แถว ตรงทุกช่องที่กรอก — trans_flag 1999, ปี ค.ศ., manual_add 1",
+   "do": "db.query",
+   "sql": "select string_agg(concat_ws('|', coalesce((line_number)::text, '~'), coalesce((trans_flag)::text, '~'), coalesce((to_char(doc_date, 'YYYY-MM-DD'))::text, '~'), coalesce((to_char(vat_date, 'YYYY-MM-DD'))::text, '~'), coalesce((vat_doc_no)::text, '~'), coalesce((vat_effective_period)::text, '~'), coalesce((vat_effective_year)::text, '~'), coalesce((vat_description)::text, '~'), coalesce((vat_group)::text, '~'), coalesce((round(vat_base_amount, 2))::text, '~'), coalesce((round(vat_rate, 2))::text, '~'), coalesce((round(vat_amount, 2))::text, '~'), coalesce((round(vat_except_amount_1, 2))::text, '~'), coalesce((vat_type)::text, '~'), coalesce((is_add)::text, '~'), coalesce((ap_name)::text, '~'), coalesce((tax_no)::text, '~'), coalesce((branch_type)::text, '~'), coalesce((branch_code)::text, '~'), coalesce((vat_new_number)::text, '~'), coalesce((round(vat_total_amount, 2))::text, '~'), coalesce((vat_average)::text, '~'), coalesce((manual_add)::text, '~'), coalesce((ap_code)::text, '~'), coalesce((vat_calc)::text, '~'), coalesce((trans_type)::text, '~')), ' ; ' order by line_number) l, count(*)::text n from gl_journal_vat_buy where doc_no = :'jv'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "1"
+    },
+    {
+     "col": "l",
+     "op": "same",
+     "value": "0|1999|{{qd}}|{{qd}}|{{vno}}|{{pm}}|{{yce}}|UAT{{run.short}} ใบกำกับทดสอบ||{{amt}}|7.00|{{vat}}|0.00|1|1|UAT{{run.short}} ผู้ขายทดสอบ|0105599999999|1|00001|UAT{{run.short}}N|{{tot}}|0|1||1|1"
+    }
+   ]
+  },
+  {
+   "title": "หลังบันทึก: ใบหัก ณ ที่จ่าย (gl_wht_list) 1 ใบ trans_flag 1502 ยอดรวม = บรรทัด ชื่อ/ที่อยู่/เลขภาษีจากทะเบียนเจ้าหนี้",
+   "do": "db.query",
+   "sql": "select string_agg(concat_ws('|', coalesce((trans_flag)::text, '~'), coalesce((to_char(doc_date, 'YYYY-MM-DD'))::text, '~'), coalesce((tax_doc_no)::text, '~'), coalesce((to_char(due_date, 'YYYY-MM-DD'))::text, '~'), coalesce((round(amount, 2))::text, '~'), coalesce((round(tax_value, 2))::text, '~'), coalesce((cust_code)::text, '~'), coalesce((cust_name)::text, '~'), coalesce((cust_address)::text, '~'), coalesce((cust_tax_type)::text, '~'), coalesce((card_number)::text, '~'), coalesce((tax_number)::text, '~')), ' ; ') l, count(*)::text n from gl_wht_list where doc_no = :'jv'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "1"
+    },
+    {
+     "col": "l",
+     "op": "same",
+     "value": "1502|{{qd}}|{{wdoc}}|{{qd}}|{{amt}}|{{wht}}|{{sup}}|{{supname}}|{{supaddr}}|{{supst}}|{{supcard}}|{{suptax}}"
+    }
+   ]
+  },
+  {
+   "title": "หลังบันทึก: รายละเอียดหัก ณ ที่จ่าย (gl_wht_list_detail) 1 บรรทัด ตรงที่กรอก",
+   "do": "db.query",
+   "sql": "select string_agg(concat_ws('|', coalesce((line_number)::text, '~'), coalesce((trans_flag)::text, '~'), coalesce((tax_doc_no)::text, '~'), coalesce((income_type)::text, '~'), coalesce((round(amount, 2))::text, '~'), coalesce((round(tax_rate, 2))::text, '~'), coalesce((round(tax_value, 2))::text, '~'), coalesce((to_char(due_date, 'YYYY-MM-DD'))::text, '~'), coalesce((cust_code)::text, '~')), ' ; ' order by line_number) l, count(*)::text n from gl_wht_list_detail where doc_no = :'jv'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "1"
+    },
+    {
+     "col": "l",
+     "op": "same",
+     "value": "1|1502|{{wdoc}}|ค่าบริการ UAT{{run.short}}|{{amt}}|3.00|{{wht}}|{{qd}}|{{sup}}"
+    }
+   ]
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝงหลังบันทึก",
+   "do": "ui.expectClean"
+  },
+  {
+   "title": "เปิดเมนูใหม่ (แท็บสด)",
+   "do": "ui.openMenu",
+   "key": "menu_gl_journal"
+  },
+  {
+   "title": "รายการซ้าย: ค้นหาด้วยเลขที่เอกสาร",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] [data-testid=\"sml-datalist-search-input\"]",
+   "value": "{{jv}}"
+  },
+  {
+   "title": "กด Enter ค้นหา",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] [data-testid=\"sml-datalist-search-input\"]",
+   "key": "Enter"
+  },
+  {
+   "title": "กดปุ่มแก้ไขรายการของเอกสาร",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button[title=\"แก้ไขรายการ {{jv}}\"]"
+  },
+  {
+   "title": "เปิดเอกสารในโหมดแก้ไข",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] span:has-text(\"โหมดแก้ไข\")",
+   "text": "โหมดแก้ไข"
+  },
+  {
+   "title": "เปิดแท็บภาษีซื้อของเอกสารที่บันทึก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button:text-is(\"ภาษีซื้อ\")"
+  },
+  {
+   "title": "เปิดซ้ำ: เลขที่ใบกำกับ",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=2 >> input >> nth=0",
+   "value": "{{vno}}",
+   "op": "same"
+  },
+  {
+   "title": "เปิดซ้ำ: วันที่ใบกำกับ = วันที่เอกสาร",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=1 >> input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{dre}}",
+   "op": "matches"
+  },
+  {
+   "title": "เปิดซ้ำ: เดือนภาษี",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=3 >> input >> nth=0",
+   "value": "{{pm}}"
+  },
+  {
+   "title": "เปิดซ้ำ: ปีภาษี (ค.ศ./พ.ศ. ตามตั้งค่า)",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=3 >> input >> nth=1",
+   "value": "{{yre}}",
+   "op": "matches"
+  },
+  {
+   "title": "เปิดซ้ำ: รายละเอียด",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=4 >> input >> nth=0",
+   "value": "UAT{{run.short}} ใบกำกับทดสอบ",
+   "op": "same"
+  },
+  {
+   "title": "เปิดซ้ำ: ฐานภาษี",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=6 >> input >> nth=0",
+   "value": "{{amt}}"
+  },
+  {
+   "title": "เปิดซ้ำ: อัตราภาษี 7",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=7 >> input >> nth=0",
+   "value": "7"
+  },
+  {
+   "title": "เปิดซ้ำ: เงินภาษี = ฐาน x 7%",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=8 >> input >> nth=0",
+   "value": "{{vat}}"
+  },
+  {
+   "title": "เปิดซ้ำ: ยอดรวม = ฐาน + ภาษี",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) div.flex:has(> span:text-is(\"ยอดรวม:\")) input",
+   "value": "{{tot}}"
+  },
+  {
+   "title": "เปิดซ้ำ: ชื่อผู้ขาย",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) input[placeholder=\"ชื่อผู้ขายสินค้า/ผู้ให้บริการ\"]",
+   "value": "UAT{{run.short}} ผู้ขายทดสอบ",
+   "op": "same"
+  },
+  {
+   "title": "เปิดซ้ำ: เลขผู้เสียภาษี",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) input[placeholder=\"13 หลัก\"]",
+   "value": "0105599999999",
+   "op": "same"
+  },
+  {
+   "title": "เปิดซ้ำ: สถานประกอบการ = สาขา",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) select:has(option:text-is(\"สำนักงานใหญ่\"))",
+   "value": "1",
+   "op": "same"
+  },
+  {
+   "title": "เปิดซ้ำ: เลขที่สาขา",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) input[placeholder=\"เลขที่สาขา\"]",
+   "value": "00001",
+   "op": "same"
+  },
+  {
+   "title": "เปิดซ้ำ: ประเภทภาษี",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) select:has(option:text-is(\"ขอคืนไม่ได้\"))",
+   "value": "1",
+   "op": "same"
+  },
+  {
+   "title": "เปิดซ้ำ: เลขที่ออกใหม่",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) div.flex:has(> span:text-is(\"เลขที่ออกใหม่:\")) input",
+   "value": "UAT{{run.short}}N",
+   "op": "same"
+  },
+  {
+   "title": "เปิดซ้ำ: ติ๊กยื่นเพิ่มเติม",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) label:has-text(\"ยื่นเพิ่มเติม\") input[type=\"checkbox\"]:checked"
+  },
+  {
+   "title": "เปิดแท็บภาษีหัก ณ ที่จ่ายของเอกสารที่บันทึก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button:text-is(\"ภาษีหัก ณ. ที่จ่าย\")"
+  },
+  {
+   "title": "เปิดซ้ำ: แถวใบหัก ณ ที่จ่าย เลขที่เอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) tbody tr >> nth=0 >> td >> nth=0",
+   "text": "{{wdoc}}",
+   "op": "eq"
+  },
+  {
+   "title": "เปิดซ้ำ: แถวใบหัก รหัสเจ้าหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) tbody tr >> nth=0 >> td >> nth=1",
+   "text": "{{sup}}",
+   "op": "eq"
+  },
+  {
+   "title": "เปิดซ้ำ: แถวใบหัก ชื่อเจ้าหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) tbody tr >> nth=0 >> td >> nth=2",
+   "text": "{{supname}}",
+   "op": "contains"
+  },
+  {
+   "title": "เปิดซ้ำ: แถวใบหัก วันที่หัก = วันที่เอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) tbody tr >> nth=0 >> td >> nth=3",
+   "text": "{{dre}}",
+   "op": "matches"
+  },
+  {
+   "title": "เปิดซ้ำ: แถวใบหัก จำนวนเงิน {{amtc}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) tbody tr >> nth=0 >> td >> nth=4",
+   "text": "{{amt}}",
+   "op": "eq"
+  },
+  {
+   "title": "เปิดซ้ำ: แถวใบหัก ภาษีหัก {{whtc}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) tbody tr >> nth=0 >> td >> nth=5",
+   "text": "{{wht}}",
+   "op": "eq"
+  },
+  {
+   "title": "เปิดซ้ำ: ช่องเอกสารเลขที่",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:text-is(\"เอกสารเลขที่\")) input",
+   "value": "{{wdoc}}",
+   "op": "same"
+  },
+  {
+   "title": "เปิดซ้ำ: ช่องรหัสเจ้าหนี้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) input",
+   "value": "{{sup}}",
+   "op": "same"
+  },
+  {
+   "title": "เปิดซ้ำ: ชื่อเจ้าหนี้แสดงข้างรหัส",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) span.truncate",
+   "text": "{{supname}}",
+   "op": "contains"
+  },
+  {
+   "title": "เปิดซ้ำ: เลขประจำตัวผู้เสียภาษีจากทะเบียนเจ้าหนี้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:text-is(\"เลขประจำตัวผู้เสียภาษี\")) input",
+   "value": "{{suptax}}",
+   "op": "same"
+  },
+  {
+   "title": "เปิดซ้ำ: เลขที่บัตรประชาชนจากทะเบียนเจ้าหนี้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] div:has(> label:text-is(\"เลขที่บัตรประชาชน\")) input",
+   "value": "{{supcard}}",
+   "op": "same"
+  },
+  {
+   "title": "เปิดซ้ำ: รายละเอียดเงินได้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=1 >> input",
+   "value": "ค่าบริการ UAT{{run.short}}",
+   "op": "same"
+  },
+  {
+   "title": "เปิดซ้ำ: ฐานภาษี",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=2 >> input",
+   "value": "{{amt}}"
+  },
+  {
+   "title": "เปิดซ้ำ: อัตราภาษี 3",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=3 >> input",
+   "value": "3"
+  },
+  {
+   "title": "เปิดซ้ำ: ภาษีหัก ณ ที่จ่าย = ฐาน x 3%",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=4 >> input",
+   "value": "{{wht}}"
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝงตอนเปิดเอกสาร",
+   "do": "ui.expectClean"
+  },
+  {
+   "title": "แก้รายละเอียดเงินได้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:text-is(\"ภาษีหัก ณ ที่จ่าย\")) tbody tr >> nth=0 >> td >> nth=1 >> input",
+   "value": "ค่าขนส่ง UAT{{run.short}}"
+  },
+  {
+   "title": "กลับแท็บภาษีซื้อ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button:text-is(\"ภาษีซื้อ\")"
+  },
+  {
+   "title": "แก้รายละเอียดใบกำกับ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) tbody tr >> nth=0 >> td >> nth=4 >> input >> nth=0",
+   "value": "UAT{{run.short}} ใบกำกับแก้ไข"
+  },
+  {
+   "title": "แก้ประเภทภาษี = ปรกติ",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] table:has(th:has-text(\"เดือน/ปีภาษี\")) select:has(option:text-is(\"ขอคืนไม่ได้\"))",
+   "value": "ปรกติ"
+  },
+  {
+   "title": "กดบันทึกการแก้ไข",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button:text-is(\"บันทึก\")"
+  },
+  {
+   "title": "ข้อความบันทึกสำเร็จ → เลือกยังไม่พิมพ์",
+   "do": "ui.click",
+   "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+   "timeout": 30000
+  },
+  {
+   "title": "สถานะบนหัวฟอร์ม: บันทึกเอกสารเรียบร้อย",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"]",
+   "text": "บันทึกเอกสาร {{jv}} เรียบร้อยแล้ว"
+  },
+  {
+   "title": "หลังแก้ไข: ภาษีซื้อ (gl_journal_vat_buy) 1 แถว ตรงทุกช่องที่กรอก — trans_flag 1999, ปี ค.ศ., manual_add 1",
+   "do": "db.query",
+   "sql": "select string_agg(concat_ws('|', coalesce((line_number)::text, '~'), coalesce((trans_flag)::text, '~'), coalesce((to_char(doc_date, 'YYYY-MM-DD'))::text, '~'), coalesce((to_char(vat_date, 'YYYY-MM-DD'))::text, '~'), coalesce((vat_doc_no)::text, '~'), coalesce((vat_effective_period)::text, '~'), coalesce((vat_effective_year)::text, '~'), coalesce((vat_description)::text, '~'), coalesce((vat_group)::text, '~'), coalesce((round(vat_base_amount, 2))::text, '~'), coalesce((round(vat_rate, 2))::text, '~'), coalesce((round(vat_amount, 2))::text, '~'), coalesce((round(vat_except_amount_1, 2))::text, '~'), coalesce((vat_type)::text, '~'), coalesce((is_add)::text, '~'), coalesce((ap_name)::text, '~'), coalesce((tax_no)::text, '~'), coalesce((branch_type)::text, '~'), coalesce((branch_code)::text, '~'), coalesce((vat_new_number)::text, '~'), coalesce((round(vat_total_amount, 2))::text, '~'), coalesce((vat_average)::text, '~'), coalesce((manual_add)::text, '~'), coalesce((ap_code)::text, '~'), coalesce((vat_calc)::text, '~'), coalesce((trans_type)::text, '~')), ' ; ' order by line_number) l, count(*)::text n from gl_journal_vat_buy where doc_no = :'jv'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "1"
+    },
+    {
+     "col": "l",
+     "op": "same",
+     "value": "0|1999|{{qd}}|{{qd}}|{{vno}}|{{pm}}|{{yce}}|UAT{{run.short}} ใบกำกับแก้ไข||{{amt}}|7.00|{{vat}}|0.00|0|1|UAT{{run.short}} ผู้ขายทดสอบ|0105599999999|1|00001|UAT{{run.short}}N|{{tot}}|0|1||1|1"
+    }
+   ]
+  },
+  {
+   "title": "หลังแก้ไข: ใบหัก ณ ที่จ่าย (gl_wht_list) 1 ใบ trans_flag 1502 ยอดรวม = บรรทัด ชื่อ/ที่อยู่/เลขภาษีจากทะเบียนเจ้าหนี้",
+   "do": "db.query",
+   "sql": "select string_agg(concat_ws('|', coalesce((trans_flag)::text, '~'), coalesce((to_char(doc_date, 'YYYY-MM-DD'))::text, '~'), coalesce((tax_doc_no)::text, '~'), coalesce((to_char(due_date, 'YYYY-MM-DD'))::text, '~'), coalesce((round(amount, 2))::text, '~'), coalesce((round(tax_value, 2))::text, '~'), coalesce((cust_code)::text, '~'), coalesce((cust_name)::text, '~'), coalesce((cust_address)::text, '~'), coalesce((cust_tax_type)::text, '~'), coalesce((card_number)::text, '~'), coalesce((tax_number)::text, '~')), ' ; ') l, count(*)::text n from gl_wht_list where doc_no = :'jv'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "1"
+    },
+    {
+     "col": "l",
+     "op": "same",
+     "value": "1502|{{qd}}|{{wdoc}}|{{qd}}|{{amt}}|{{wht}}|{{sup}}|{{supname}}|{{supaddr}}|{{supst}}|{{supcard}}|{{suptax}}"
+    }
+   ]
+  },
+  {
+   "title": "หลังแก้ไข: รายละเอียดหัก ณ ที่จ่าย (gl_wht_list_detail) 1 บรรทัด ตรงที่กรอก",
+   "do": "db.query",
+   "sql": "select string_agg(concat_ws('|', coalesce((line_number)::text, '~'), coalesce((trans_flag)::text, '~'), coalesce((tax_doc_no)::text, '~'), coalesce((income_type)::text, '~'), coalesce((round(amount, 2))::text, '~'), coalesce((round(tax_rate, 2))::text, '~'), coalesce((round(tax_value, 2))::text, '~'), coalesce((to_char(due_date, 'YYYY-MM-DD'))::text, '~'), coalesce((cust_code)::text, '~')), ' ; ' order by line_number) l, count(*)::text n from gl_wht_list_detail where doc_no = :'jv'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "1"
+    },
+    {
+     "col": "l",
+     "op": "same",
+     "value": "1|1502|{{wdoc}}|ค่าขนส่ง UAT{{run.short}}|{{amt}}|3.00|{{wht}}|{{qd}}|{{sup}}"
+    }
+   ]
+  },
+  {
+   "title": "หลังแก้ไข: บรรทัดรายวันยังเป็น 4 บรรทัดเดิม",
+   "do": "db.query",
+   "sql": "select string_agg(line_number || '|' || account_code || '|' || account_name || '|' || round(debit, 2)::text || '|' || round(credit, 2)::text || '|' || coalesce(description, ''), ' ; ' order by line_number) l, count(*)::text n from gl_journal_detail where doc_no = :'jv'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "4"
+    },
+    {
+     "col": "l",
+     "op": "same",
+     "value": "1|{{exp}}|{{expname}}|{{amt}}|0.00|UAT{{run.short}} ค่าใช้จ่าย ; 2|{{inv}}|{{invname}}|{{vat}}|0.00|UAT{{run.short}} ภาษีซื้อ ; 3|{{wacc}}|{{wname}}|0.00|{{wht}}|UAT{{run.short}} ภาษีหัก ณ ที่จ่าย ; 4|{{liab}}|{{liabname}}|0.00|{{cr}}|UAT{{run.short}} เจ้าหนี้"
+    }
+   ]
+  },
+  {
+   "title": "หลังบันทึกเป็นโหมดดูข้อมูล (มีปุ่มลบ)",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button:text-is(\"ลบ\")"
+  },
+  {
+   "title": "กดลบเอกสาร (ยืนยันอัตโนมัติ)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"] button:text-is(\"ลบ\")"
+  },
+  {
+   "title": "สถานะบนหัวฟอร์ม: ลบเอกสารเรียบร้อย",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_journal\"]",
+   "text": "ลบเอกสาร {{jv}} เรียบร้อยแล้ว"
+  },
+  {
+   "title": "ลบผ่านหน้าจอแล้วไม่เหลือแถวทั้งรายวัน/ภาษีซื้อ/ภาษีขาย/หัก ณ ที่จ่าย",
+   "do": "db.query",
+   "sql": "select ((select count(*) from gl_journal where doc_no = :'jv') + (select count(*) from gl_journal_detail where doc_no = :'jv') + (select count(*) from gl_journal_vat_buy where doc_no = :'jv') + (select count(*) from gl_journal_vat_sale where doc_no = :'jv') + (select count(*) from gl_wht_list where doc_no = :'jv') + (select count(*) from gl_wht_list_detail where doc_no = :'jv'))::text n",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "ข้อมูลประกอบ: ต้นแบบรายการรายวันประจำที่มีใน gl_recurring (ไม่ตรวจ)",
+   "do": "db.query",
+   "sql": "select count(*)::text n, coalesce(string_agg(code || '/' || coalesce(gl_desc, ''), ', ' order by code), '') codes from gl_recurring"
+  },
+  {
+   "title": "ข้อมูลประกอบ: API ต้นแบบรายวันประจำที่แถบดึงรายการใช้ตอบสำเร็จ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/gl/recurring",
+   "body": {}
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบรายวันทดสอบ (ถ้ายังค้าง)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/delete",
+   "body": {
+    "kind": "gl_journal",
+    "docNo": "{{jv}}"
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือเศษเอกสารทดสอบ",
+   "do": "db.query",
+   "sql": "select ((select count(*) from gl_journal where doc_no = :'jv') + (select count(*) from gl_journal_detail where doc_no = :'jv') + (select count(*) from gl_journal_vat_buy where doc_no = :'jv') + (select count(*) from gl_journal_vat_sale where doc_no = :'jv') + (select count(*) from gl_wht_list where doc_no = :'jv') + (select count(*) from gl_wht_list_detail where doc_no = :'jv'))::text left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}

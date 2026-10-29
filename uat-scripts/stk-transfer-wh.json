@@ -1,0 +1,286 @@
+{
+  "module": "inventory",
+  "lens": "api",
+  "severityOnFail": "S1",
+  "timeoutMs": 420000,
+  "id": "stk-transfer-wh",
+  "title": "โอนย้ายสินค้าข้ามคลังและข้ามที่เก็บ: ต้นทางลด ปลายทางเพิ่ม ยอดรวมและมูลค่าไม่เปลี่ยน แล้วลบคืนไม่เหลือเศษ",
+  "description": "ผ่าน API เดียวกับหน้าจอโอนย้ายสินค้า (transFlag 72 + ขาเข้า 70): เลือกสินค้าจริงใน smldemo (เรียงรหัสจากมากไปน้อย, ยอด/ต้นทุนเฉลี่ยตรงกับรายการเคลื่อนไหว) โอนจากที่เก็บที่มีของมากสุด 2 หน่วยไปคลังอื่น และ 1 หน่วยไปที่เก็บอื่นในคลังเดิม · ตรวจขาออก/ขาเข้า ยอดแต่ละที่เก็บ ยอดรวมสินค้าและต้นทุนเฉลี่ยไม่เปลี่ยน มูลค่าขาออก = ขาเข้า = จำนวน × ต้นทุนเฉลี่ย · GL ถ้ามีต้องสมดุล · cleanup ลบผ่าน API แล้วพิสูจน์ว่าไม่เหลือแถว และยอด/ต้นทุนสินค้ากลับเท่าเดิม",
+  "steps": [
+    {
+      "title": "กำหนดเลขใบโอนย้ายทดสอบ",
+      "do": "set",
+      "name": "im",
+      "value": "UAT-{{run.short}}-IM"
+    },
+    {
+      "title": "เลือกสินค้าและที่เก็บจริง + ปลายทางคลังอื่น/ที่เก็บอื่น และคำนวณค่าที่คาดหวัง",
+      "do": "db.query",
+      "sql": "with recursive o as (select coalesce(item_price_decimal, 2)::int as ps, coalesce(item_amount_decimal, 2)::int as pa from erp_option limit 1), sim_r as (select d.item_code, d.trans_flag, d.calc_flag, d.qty*(coalesce(nullif(d.stand_value,0),1)/coalesce(nullif(d.divide_value,0),1)) as b, d.qty, coalesce(d.price,0) price, coalesce(nullif(d.sum_amount_exclude_vat,0), d.sum_amount, 0) as amt, coalesce(d.sum_of_cost,0) as sc0, coalesce(d.average_cost,0) as ac0, row_number() over (partition by d.item_code order by coalesce(d.doc_date_calc,d.doc_date), coalesce(nullif(d.doc_time_calc,''),d.doc_time), case when d.trans_flag=70 then -2 else d.calc_flag end desc, d.trans_flag, d.doc_no, d.line_number, d.roworder) as rn from ic_trans_detail d where d.last_status=0 and coalesce(d.is_doc_copy,0)=0 and coalesce(d.item_type,0) in (0,4,6) and d.trans_flag in (12,44,54,56,60,70,72) and coalesce(d.is_lock_cost,0)=0 and not (d.trans_flag=44 and coalesce(d.doc_ref,'')<>'' and coalesce(d.is_pos,0)=1)), sim_s as ( select distinct item_code, 0::bigint as rn, 0::numeric rq, 0::numeric rv, 0::numeric ca, 0::numeric sc, 0::numeric ac, 0::numeric sc0, 0::numeric ac0 from sim_r union all select r.item_code, r.rn, n.rq, n.rv, m.ca, k.sc, case when r.calc_flag>0 and r.trans_flag not in (70,72) then m.ca else st.ca end, r.sc0, r.ac0 from sim_s st join sim_r r on r.item_code=st.item_code and r.rn=st.rn+1 cross join o, lateral (select case when r.trans_flag in (70,72) or r.calc_flag<0 then round(r.b*st.ca,o.pa) else round(case when r.amt<>0 then r.amt when r.sc0>0 then r.sc0 when r.price>0 then r.qty*r.price else 0 end, o.pa) end as sc) k, lateral (select case when r.trans_flag in (70,72) then st.rq when r.calc_flag>0 then case when r.b>0 then (case when st.rq<=0 then r.b else st.rq+r.b end) else st.rq end else st.rq-r.b end as rq, case when r.trans_flag in (70,72) then st.rv when r.calc_flag>0 then case when r.b>0 and st.rq<=0 then k.sc else st.rv+k.sc end else case when st.rq-r.b<=0 then 0 else st.rv-k.sc end end as rv) n, lateral (select case when r.trans_flag in (70,72) then st.ca when n.rq>0 then round(n.rv/n.rq,o.ps) else st.ca end as ca) m ), ok as (select item_code from sim_s where rn > 0 group by 1 having count(*) filter (where sc <> sc0 or ac <> ac0) = 0 and min(rq) > 0), tdy as (select (now() at time zone 'Asia/Bangkok')::date as d), mv as (select d.item_code, sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))) as q, sum(d.calc_flag * coalesce(d.sum_of_cost, 0)) as v, max(coalesce(d.doc_date_calc, d.doc_date)) as maxd, bool_and(d.trans_flag in (12,44,54,56,60,70,72) and coalesce(d.is_lock_cost, 0) = 0) as plain from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) group by d.item_code), loc as (select d.item_code, d.wh_code, d.shelf_code, sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))) as lq from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) group by 1, 2, 3), c as (select i.code as item, i.unit_cost as unit, l.wh_code as wh, l.shelf_code as shelf, l.lq as locbal, i.balance_qty as bal, i.average_cost as avg, mv.v as val, mv.q as q, o.ps, o.pa, to_char(tdy.d, 'YYYY-MM-DD') as today, (select coalesce(sum(coalesce(x.sum_of_cost, 0)), 0) + coalesce(sum(coalesce(x.average_cost, 0)), 0) from ic_trans_detail x where x.item_code = i.code) as cs, (select count(*) from ic_trans_detail x where x.item_code = i.code) as n from ic_inventory i join mv on mv.item_code = i.code join ok on ok.item_code = i.code join ic_unit_use u on u.ic_code = i.code and u.code = i.unit_cost and u.stand_value = 1 and u.divide_value = 1 join lateral (select * from loc where loc.item_code = i.code order by loc.lq desc, loc.wh_code, loc.shelf_code limit 1) l on true join ic_warehouse w on w.code = l.wh_code join ic_shelf s on s.code = l.shelf_code and coalesce(nullif(s.whcode, ''), s.wh_code) = l.wh_code cross join o cross join tdy where coalesce(i.item_type, 0) = 0 and coalesce(i.cost_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0 and i.code !~ '[:,]' and mv.plain and mv.q > 0 and i.balance_qty = mv.q and i.average_cost > 0 and i.average_cost = round(mv.v / mv.q, o.ps) and mv.maxd < tdy.d and l.lq >= 5 and mod(abs(hashtext(i.code)), 7) = 0), p as (select * from c order by item desc limit 1), dw as (select w.code as dwh, s.code as dshelf from ic_warehouse w join ic_shelf s on coalesce(nullif(s.whcode, ''), s.wh_code) = w.code, p where coalesce(s.status, 0) = 1 and w.code <> p.wh order by w.code desc, s.code desc limit 1), ds as (select s.code as dshelf2 from ic_shelf s, p where coalesce(nullif(s.whcode, ''), s.wh_code) = p.wh and coalesce(s.status, 0) = 1 and s.code <> p.shelf order by s.code desc limit 1) select p.*, dw.dwh, dw.dshelf, ds.dshelf2, (select coalesce(sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))), 0) from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) and d.item_code = p.item and d.wh_code = dw.dwh and d.shelf_code = dw.dshelf) as dbal, (select coalesce(sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))), 0) from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) and d.item_code = p.item and d.wh_code = p.wh and d.shelf_code = ds.dshelf2) as sbal, round(2 * p.avg, pa) + round(1 * p.avg, pa) as cost_exp from p, dw, ds",
+      "rows": 1,
+      "save": {
+        "item": "item",
+        "unit": "unit",
+        "wh": "wh",
+        "shelf": "shelf",
+        "locbal": "locbal",
+        "bal": "bal",
+        "avg": "avg",
+        "val": "val",
+        "q": "q",
+        "ps": "ps",
+        "today": "today",
+        "cs": "cs",
+        "n": "n",
+        "dwh": "dwh",
+        "dshelf": "dshelf",
+        "dshelf2": "dshelf2",
+        "dbal": "dbal",
+        "sbal": "sbal",
+        "cost_exp": "cost_exp"
+      }
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "บันทึกโอนย้าย: 2 หน่วยไปคลังอื่น + 1 หน่วยไปที่เก็บอื่นในคลังเดิม",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "timeout": 60000,
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "branchCode": "00000",
+        "exchangeRate": "1",
+        "remark": "{{run.tag}}",
+        "docNo": "{{im}}",
+        "docDate": "{{today}}",
+        "docTime": "10:00",
+        "transType": 3,
+        "transFlag": 72,
+        "inquiryType": 0,
+        "docFormatCode": "IM",
+        "vatType": 0,
+        "whFrom": "{{wh}}",
+        "locationFrom": "{{shelf}}",
+        "whTo": "{{dwh}}",
+        "locationTo": "{{dshelf}}",
+        "lines": [
+          {
+            "standValue": "1",
+            "divideValue": "1",
+            "ratio": "1",
+            "taxType": 0,
+            "itemType": 0,
+            "refRow": 0,
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "toWhCode": "{{dwh}}",
+            "toShelfCode": "{{dshelf}}",
+            "qty": "2",
+            "price": "0",
+            "sumAmount": "0"
+          },
+          {
+            "standValue": "1",
+            "divideValue": "1",
+            "ratio": "1",
+            "taxType": 0,
+            "itemType": 0,
+            "refRow": 0,
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "toWhCode": "{{wh}}",
+            "toShelfCode": "{{dshelf2}}",
+            "qty": "1",
+            "price": "0",
+            "sumAmount": "0"
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{im}}"
+        }
+      ]
+    },
+    {
+      "title": "ใบโอน: หัว 72+70, ขาออก 2 บรรทัด (3 หน่วยจากต้นทาง) ขาเข้า 2 บรรทัด (2 ไปคลังอื่น, 1 ไปที่เก็บอื่น)",
+      "do": "db.query",
+      "sql": "select count(*) filter (where trans_flag = 72) as n72, count(*) filter (where trans_flag = 70) as n70, coalesce(sum(qty) filter (where trans_flag = 72 and calc_flag = -1 and wh_code = :'wh' and shelf_code = :'shelf'), 0) as q_out, coalesce(sum(qty) filter (where trans_flag = 70 and calc_flag = 1 and wh_code = :'dwh' and shelf_code = :'dshelf'), 0) as q_in_wh, coalesce(sum(qty) filter (where trans_flag = 70 and calc_flag = 1 and wh_code = :'wh' and shelf_code = :'dshelf2'), 0) as q_in_shelf, (select count(*) from ic_trans where doc_no = :'im' and trans_flag in (70, 72)) as heads from ic_trans_detail where doc_no = :'im'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n72",
+          "op": "eq",
+          "value": "2"
+        },
+        {
+          "col": "n70",
+          "op": "eq",
+          "value": "2"
+        },
+        {
+          "col": "q_out",
+          "op": "eq",
+          "value": "3"
+        },
+        {
+          "col": "q_in_wh",
+          "op": "eq",
+          "value": "2"
+        },
+        {
+          "col": "q_in_shelf",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "heads",
+          "op": "eq",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "title": "ยอดแต่ละที่เก็บ: ต้นทาง −3, คลังปลายทาง +2, ที่เก็บปลายทาง +1",
+      "do": "db.query",
+      "sql": "select (select coalesce(sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))), 0) from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) and d.item_code = :'item' and d.wh_code = :'wh' and d.shelf_code = :'shelf') - :'locbal'::numeric as d_src, (select coalesce(sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))), 0) from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) and d.item_code = :'item' and d.wh_code = :'dwh' and d.shelf_code = :'dshelf') - :'dbal'::numeric as d_dst, (select coalesce(sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))), 0) from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) and d.item_code = :'item' and d.wh_code = :'wh' and d.shelf_code = :'dshelf2') - :'sbal'::numeric as d_shelf",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "d_src",
+          "op": "eq",
+          "value": "-3"
+        },
+        {
+          "col": "d_dst",
+          "op": "eq",
+          "value": "2"
+        },
+        {
+          "col": "d_shelf",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "ยอดคงเหลือรวมและต้นทุนเฉลี่ยของสินค้าไม่เปลี่ยน",
+      "do": "db.query",
+      "sql": "select balance_qty, average_cost from ic_inventory where code = :'item'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "balance_qty",
+          "op": "eq",
+          "value": "{{bal}}"
+        },
+        {
+          "col": "average_cost",
+          "op": "eq",
+          "value": "{{avg}}"
+        }
+      ]
+    },
+    {
+      "title": "มูลค่า: ขาออก = ขาเข้า = จำนวน × ต้นทุนเฉลี่ย (ปัด 2 ตำแหน่ง)",
+      "do": "db.query",
+      "sql": "select coalesce(sum(sum_of_cost) filter (where trans_flag = 72), 0) as cost_out, coalesce(sum(sum_of_cost) filter (where trans_flag = 70), 0) as cost_in from ic_trans_detail where doc_no = :'im'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cost_out",
+          "op": "eq",
+          "value": "{{cost_exp}}"
+        },
+        {
+          "col": "cost_in",
+          "op": "eq",
+          "value": "{{cost_exp}}"
+        }
+      ]
+    },
+    {
+      "title": "GL ของใบโอน (ถ้ามีการลงบัญชี) เดบิต = เครดิต",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff from gl_journal_detail where doc_no = :'im'",
+      "expect": [
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบใบโอนย้ายทดสอบผ่าน API",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "timeout": 60000,
+      "body": {
+        "docNo": "{{im}}",
+        "transFlag": 72
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือแถวของเอกสารทดสอบในทุกตาราง (หัว/รายการ/ล็อต/ลูกหนี้-เจ้าหนี้/เงิน/GL/ภาษี)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'im')) + (select count(*) from ic_trans_detail where doc_no in (:'im')) + (select count(*) from ic_trans_detail_lot where doc_no in (:'im')) + (select count(*) from ic_trans_serial_number where doc_no in (:'im')) + (select count(*) from ic_trans_shipment where doc_no in (:'im')) + (select count(*) from ap_ar_trans where doc_no in (:'im')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'im')) + (select count(*) from cb_trans where doc_no in (:'im')) + (select count(*) from cb_trans_detail where doc_no in (:'im')) + (select count(*) from cb_chq_list where doc_ref in (:'im')) + (select count(*) from gl_journal where doc_no in (:'im')) + (select count(*) from gl_journal_detail where doc_no in (:'im')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'im')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'im')) + (select count(*) from gl_wht_list where doc_no in (:'im')) as left_rows",
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ยอดคงเหลือ/ต้นทุนเฉลี่ย/ต้นทุนทุกบรรทัดของสินค้าทดสอบกลับเป็นค่าเริ่มต้น",
+      "do": "db.query",
+      "sql": "select i.balance_qty, i.average_cost, (select coalesce(sum(coalesce(x.sum_of_cost, 0)), 0) + coalesce(sum(coalesce(x.average_cost, 0)), 0) from ic_trans_detail x where x.item_code = i.code) as cs, (select count(*) from ic_trans_detail x where x.item_code = i.code) as n from ic_inventory i where i.code = :'item'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "balance_qty",
+          "op": "eq",
+          "value": "{{bal}}"
+        },
+        {
+          "col": "average_cost",
+          "op": "eq",
+          "value": "{{avg}}"
+        },
+        {
+          "col": "cs",
+          "op": "eq",
+          "value": "{{cs}}"
+        },
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "{{n}}"
+        }
+      ]
+    }
+  ]
+}

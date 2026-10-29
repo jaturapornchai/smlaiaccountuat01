@@ -1,0 +1,2391 @@
+{
+  "id": "glx-ui-asset-register",
+  "title": "หน้าจอทะเบียนสินทรัพย์: กรอกครบทุกช่องทุกส่วน+ค้นหาผ่านหน้าต่าง, ค่าเสื่อมเติมอัตโนมัติ, ตรวจห้ามบันทึก, บันทึกตรง DB, ค้นหา/เปิดซ้ำ/แก้ไข/ลบผ่านหน้าจอ",
+  "module": "gl",
+  "lens": "screen",
+  "severityOnFail": "S1",
+  "description": "menu_asset_lists (MasterDetailScreen) ทั้งหมดผ่านหน้าจอ · บัญชี/ราคาซื้อ/อายุ/ราคาซาก ลอกจากสินทรัพย์จริง รหัสอ้างอิงเลือกจากตารางจริงตอนรัน · ไม่ใช้ API บันทึก/ลบ ยกเว้น cleanup",
+  "timeoutMs": 900000,
+  "steps": [
+    {
+      "title": "กำหนดรหัสสินทรัพย์ทดสอบ",
+      "do": "set",
+      "name": "fa",
+      "value": "UAT{{run.short}}A1"
+    },
+    {
+      "title": "กำหนดรหัสเก่าทดสอบ",
+      "do": "set",
+      "name": "fao",
+      "value": "UAT{{run.short}}O1"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ลอกบัญชี/ราคา/อายุ/ซากจากสินทรัพย์จริง เลือกรหัสอ้างอิงจากตารางจริง และคำนวณอัตรา/วันสิ้นสุดที่คาด",
+      "do": "db.query",
+      "sql": "with src as (\n select upper(trim(a.account_code)) acc, upper(trim(a.depreciation_account_code)) dacc, upper(trim(a.depreciation_sum_account_code)) sacc,\n  round(d.as_buy_price, 2) buy, case when coalesce(d.as_dead_value, 0) <= 0 then 1.00 else round(d.as_dead_value, 2) end dead, d.as_age::int age,\n  coalesce(nullif(round(d.insure_money, 2), 0), round(d.as_buy_price / 100, 2)) ins\n from as_asset a join as_asset_detail d on d.as_code = a.code\n where a.code not like 'UAT%' and coalesce(d.as_buy_price, 0) > 100 and coalesce(d.as_age, 0) >= 2 and d.as_age = trunc(d.as_age)\n  and exists (select 1 from gl_chart_of_account c where c.code = upper(trim(a.account_code)))\n  and exists (select 1 from gl_chart_of_account c where c.code = upper(trim(a.depreciation_account_code)))\n  and exists (select 1 from gl_chart_of_account c where c.code = upper(trim(a.depreciation_sum_account_code)))\n order by a.code limit 1),\ndt as (select date_trunc('year', (now() at time zone 'Asia/Bangkok'))::date bd),\nv as (select src.*, dt.bd, (dt.bd + make_interval(years => src.age) - interval '1 day')::date sp, (dt.bd - 1) bad, (dt.bd + interval '1 year' - interval '1 day')::date ie,\n  round((src.buy - src.dead) / src.age, 2) svb, round((src.buy - src.dead) / src.age / 12, 2) cut from src, dt)\nselect v.acc, v.dacc, v.sacc, v.buy::text buy, v.dead::text dead, v.age::text age, round(v.age, 2)::text ager, v.ins::text ins,\n v.svb::text svb, (v.buy - v.svb)::text vb, v.cut::text cut, (extract(year from v.bd)::int + 543)::text bey,\n round(100.0 / v.age, 2)::text r1, round((1 - power(v.dead / v.buy, 1.0 / v.age)) * 100, 2)::text r2,\n v.bd::text bd, to_char(v.bd, 'DD/MM/') || (extract(year from v.bd)::int + 543)::text bdth, v.sp::text sp, to_char(v.sp, 'DD/MM/') || (extract(year from v.sp)::int + 543)::text spth, to_char(v.bad, 'DD/MM/') || (extract(year from v.bad)::int + 543)::text badth, v.ie::text ie, to_char(v.ie, 'DD/MM/') || (extract(year from v.ie)::int + 543)::text ieth,\n u.code u, u.shown ud, ty.code ty, ty.shown tyd, sd.code sd, sd.shown sdd, sd2.code sd2, sd2.shown sd2d, dp.code dp, dp.shown dpd, lc.code lc, lc.shown lcd, us.code us, us.shown usd, br.code br, br.shown brd, pv.code pv, pv.shown pvd, ac.shown accd, da.shown daccd, sa.shown saccd\nfrom v cross join lateral (select code, code || case when coalesce(name_1, '') <> '' then '~' || name_1 else '' end shown from ic_unit order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) u cross join lateral (select code, code || case when coalesce(name_1, '') <> '' then '~' || name_1 else '' end shown from as_asset_type order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) ty cross join lateral (select code, code || case when coalesce(name_1, '') <> '' then '~' || name_1 else '' end shown from erp_side_list order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) sd cross join lateral (select code, code || case when coalesce(name_1, '') <> '' then '~' || name_1 else '' end shown from erp_side_list order by (code !~ '^[A-Z0-9-]+$'), code offset 1 limit 1) sd2 cross join lateral (select code, code || case when coalesce(name_1, '') <> '' then '~' || name_1 else '' end shown from erp_department_list order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) dp cross join lateral (select code, code || case when coalesce(name_1, '') <> '' then '~' || name_1 else '' end shown from as_asset_location order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) lc cross join lateral (select code, code || case when coalesce(name_1, '') <> '' then '~' || name_1 else '' end shown from erp_user order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) us cross join lateral (select code, code || case when coalesce(name_1, '') <> '' then '~' || name_1 else '' end shown from erp_branch_list order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) br cross join lateral (select code, code || case when coalesce(name_1, '') <> '' then '~' || name_1 else '' end shown from erp_province order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) pv cross join lateral (select code, code || case when coalesce(name_1, '') <> '' then '~' || name_1 else '' end shown from gl_chart_of_account where code = v.acc) ac cross join lateral (select code, code || case when coalesce(name_1, '') <> '' then '~' || name_1 else '' end shown from gl_chart_of_account where code = v.dacc) da cross join lateral (select code, code || case when coalesce(name_1, '') <> '' then '~' || name_1 else '' end shown from gl_chart_of_account where code = v.sacc) sa",
+      "rows": 1,
+      "save": {
+        "acc": "acc",
+        "dacc": "dacc",
+        "sacc": "sacc",
+        "buy": "buy",
+        "dead": "dead",
+        "age": "age",
+        "ager": "ager",
+        "ins": "ins",
+        "svb": "svb",
+        "vb": "vb",
+        "cut": "cut",
+        "bey": "bey",
+        "r1": "r1",
+        "r2": "r2",
+        "bd": "bd",
+        "bdth": "bdth",
+        "sp": "sp",
+        "spth": "spth",
+        "badth": "badth",
+        "ie": "ie",
+        "ieth": "ieth",
+        "accd": "accd",
+        "daccd": "daccd",
+        "saccd": "saccd",
+        "u": "u",
+        "ud": "ud",
+        "ty": "ty",
+        "tyd": "tyd",
+        "sd": "sd",
+        "sdd": "sdd",
+        "sd2": "sd2",
+        "sd2d": "sd2d",
+        "dp": "dp",
+        "dpd": "dpd",
+        "lc": "lc",
+        "lcd": "lcd",
+        "us": "us",
+        "usd": "usd",
+        "br": "br",
+        "brd": "brd",
+        "pv": "pv",
+        "pvd": "pvd"
+      }
+    },
+    {
+      "title": "ยังไม่มีสินทรัพย์รหัสนี้",
+      "do": "db.query",
+      "sql": "select ((select count(*) from as_asset where code = :'fa') + (select count(*) from as_asset_detail where as_code = :'fa') + (select count(*) from as_asset_result where as_code = :'fa'))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "เปิดเมนูข้อมูลสินทรัพย์",
+      "do": "ui.openMenu",
+      "key": "menu_asset_lists"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดก่อนเริ่ม",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "หัวจอแสดงชื่อเมนู",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] h1",
+      "text": "ข้อมูลสินทรัพย์"
+    },
+    {
+      "title": "กดเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] button[title=\"เพิ่มรายการใหม่\"]"
+    },
+    {
+      "title": "อยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] header span:has-text(\"เพิ่มรายการใหม่\")",
+      "text": "เพิ่มรายการใหม่"
+    },
+    {
+      "title": "ค่าเริ่มต้น: สถานะ ปรกติ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"สถานะ:\")) label:has(> span:text-is(\"ปรกติ\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ค่าเริ่มต้น: วิธีคิดค่าเสื่อม เส้นตรง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วิธีคิดค่าเสื่อม:\")) label:has(> span:text-is(\"เส้นตรง\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ค่าเริ่มต้น: ราคาซาก 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"ราคาซาก:\")) > div input[inputmode]",
+      "value": "1"
+    },
+    {
+      "title": "ค่าเริ่มต้น: คิดค่าซาก ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"คิดค่าซาก:\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "ส่วนขายเป็นช่องแสดงผลอย่างเดียว (ไม่มีช่องกรอก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-4 div.flex.items-start:has(> label:text-is(\"ราคาขาย:\")) input",
+      "visible": false
+    },
+    {
+      "title": "กรอกรหัสสินทรัพย์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัส:\")) > div > input[type=\"text\"]",
+      "value": "{{fa}}"
+    },
+    {
+      "title": "กดบันทึก (ยังไม่กรอกชื่อ → ต้องไม่บันทึก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] button:has(> span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "หน้าจอแจ้ง \"กรุณาระบุชื่อสินทรัพย์\"",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] div.bg-rose-50[role=\"alert\"]",
+      "text": "กรุณาระบุชื่อสินทรัพย์"
+    },
+    {
+      "title": "ไม่มีแถวสินทรัพย์ถูกบันทึก",
+      "do": "db.query",
+      "sql": "select ((select count(*) from as_asset where code = :'fa') + (select count(*) from as_asset_detail where as_code = :'fa') + (select count(*) from as_asset_result where as_code = :'fa'))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "กรอกรหัสเก่า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสเก่า:\")) > div > input[type=\"text\"]",
+      "value": "{{fao}}"
+    },
+    {
+      "title": "กรอกชื่อ 1",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ 1:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} สินทรัพย์ทดสอบ"
+    },
+    {
+      "title": "กรอกชื่อ 2",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ 2:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ชื่อที่สอง"
+    },
+    {
+      "title": "กรอกชื่ออังกฤษ 1",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ (ภาษาอังกฤษ) 1:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} Test Asset"
+    },
+    {
+      "title": "กรอกชื่ออังกฤษ 2",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ (ภาษาอังกฤษ) 2:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} Second Name"
+    },
+    {
+      "title": "หน่วยนับ: พิมพ์รหัส {{u}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"หน่วยนับ:\")) textarea",
+      "value": "{{u}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"หน่วยนับ:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "หน่วยนับ: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"หน่วยนับ:\")) textarea",
+      "value": "{{ud}}",
+      "op": "same"
+    },
+    {
+      "title": "ประเภทสินทรัพย์: กดปุ่มค้นหา → หน้าต่าง \"ค้นหาประเภทสินทรัพย์\"",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ประเภทสินทรัพย์:\")) button[title=\"ค้นหาประเภทสินทรัพย์\"]"
+    },
+    {
+      "title": "หน้าต่าง \"ค้นหาประเภทสินทรัพย์\" แสดง",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหาประเภทสินทรัพย์\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]"
+    },
+    {
+      "title": "ค้นหา {{ty}}",
+      "do": "ui.fill",
+      "selector": "div.fixed:has-text(\"ค้นหาประเภทสินทรัพย์\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+      "value": "{{ty}}"
+    },
+    {
+      "title": "ผลค้นหามีแถว {{ty}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหาประเภทสินทรัพย์\") tr[data-row-index]:has(td:text-is(\"{{ty}}\"))"
+    },
+    {
+      "title": "เลือกแถว {{ty}}",
+      "do": "ui.click",
+      "selector": "div.fixed:has-text(\"ค้นหาประเภทสินทรัพย์\") tr[data-row-index]:has(td:text-is(\"{{ty}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหาประเภทสินทรัพย์\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+      "visible": false
+    },
+    {
+      "title": "ประเภทสินทรัพย์: แสดงรหัส~ชื่อที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ประเภทสินทรัพย์:\")) textarea",
+      "value": "{{tyd}}",
+      "op": "same"
+    },
+    {
+      "title": "รหัสหน่วยงาน: พิมพ์รหัส {{sd}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสหน่วยงาน:\")) textarea",
+      "value": "{{sd}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสหน่วยงาน:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "รหัสหน่วยงาน: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสหน่วยงาน:\")) textarea",
+      "value": "{{sdd}}",
+      "op": "same"
+    },
+    {
+      "title": "รหัสแผนก: พิมพ์รหัส {{dp}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสแผนก:\")) textarea",
+      "value": "{{dp}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสแผนก:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "รหัสแผนก: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสแผนก:\")) textarea",
+      "value": "{{dpd}}",
+      "op": "same"
+    },
+    {
+      "title": "ที่ตั้งสินทรัพย์: กดปุ่มค้นหา → หน้าต่าง \"ค้นหาที่ตั้งสินทรัพย์\"",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ที่ตั้งสินทรัพย์:\")) button[title=\"ค้นหาที่ตั้งสินทรัพย์\"]"
+    },
+    {
+      "title": "หน้าต่าง \"ค้นหาที่ตั้งสินทรัพย์\" แสดง",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหาที่ตั้งสินทรัพย์\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]"
+    },
+    {
+      "title": "ค้นหา {{lc}}",
+      "do": "ui.fill",
+      "selector": "div.fixed:has-text(\"ค้นหาที่ตั้งสินทรัพย์\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+      "value": "{{lc}}"
+    },
+    {
+      "title": "ผลค้นหามีแถว {{lc}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหาที่ตั้งสินทรัพย์\") tr[data-row-index]:has(td:text-is(\"{{lc}}\"))"
+    },
+    {
+      "title": "เลือกแถว {{lc}}",
+      "do": "ui.click",
+      "selector": "div.fixed:has-text(\"ค้นหาที่ตั้งสินทรัพย์\") tr[data-row-index]:has(td:text-is(\"{{lc}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหาที่ตั้งสินทรัพย์\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+      "visible": false
+    },
+    {
+      "title": "ที่ตั้งสินทรัพย์: แสดงรหัส~ชื่อที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ที่ตั้งสินทรัพย์:\")) textarea",
+      "value": "{{lcd}}",
+      "op": "same"
+    },
+    {
+      "title": "ผู้ใช้: พิมพ์รหัส {{us}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผู้ใช้:\")) textarea",
+      "value": "{{us}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผู้ใช้:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "ผู้ใช้: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผู้ใช้:\")) textarea",
+      "value": "{{usd}}",
+      "op": "same"
+    },
+    {
+      "title": "สาขา: พิมพ์รหัส {{br}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"สาขา:\")) textarea",
+      "value": "{{br}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"สาขา:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "สาขา: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"สาขา:\")) textarea",
+      "value": "{{brd}}",
+      "op": "same"
+    },
+    {
+      "title": "เลือกสถานะ ชำรุด",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"สถานะ:\")) label:has(> span:text-is(\"ชำรุด\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "รหัสผังบัญชี: กดปุ่มค้นหา → หน้าต่าง \"ค้นหาผังบัญชี\"",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสผังบัญชี:\")) button[title=\"ค้นหาผังบัญชี\"]"
+    },
+    {
+      "title": "หน้าต่าง \"ค้นหาผังบัญชี\" แสดง",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]"
+    },
+    {
+      "title": "ค้นหา {{acc}}",
+      "do": "ui.fill",
+      "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+      "value": "{{acc}}"
+    },
+    {
+      "title": "ผลค้นหามีแถว {{acc}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") tr[data-row-index]:has(td:text-is(\"{{acc}}\"))"
+    },
+    {
+      "title": "เลือกแถว {{acc}}",
+      "do": "ui.click",
+      "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") tr[data-row-index]:has(td:text-is(\"{{acc}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหาผังบัญชี\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสผังบัญชี: แสดงรหัส~ชื่อที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสผังบัญชี:\")) textarea",
+      "value": "{{accd}}",
+      "op": "same"
+    },
+    {
+      "title": "ผังบัญชีค่าเสื่อมราคา: พิมพ์รหัส {{dacc}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผังบัญชีค่าเสื่อมราคา:\")) textarea",
+      "value": "{{dacc}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผังบัญชีค่าเสื่อมราคา:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "ผังบัญชีค่าเสื่อมราคา: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผังบัญชีค่าเสื่อมราคา:\")) textarea",
+      "value": "{{daccd}}",
+      "op": "same"
+    },
+    {
+      "title": "ผังบัญชีค่าเสื่อมราคาสะสม: พิมพ์รหัส {{sacc}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผังบัญชีค่าเสื่อมราคาสะสม:\")) textarea",
+      "value": "{{sacc}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผังบัญชีค่าเสื่อมราคาสะสม:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "ผังบัญชีค่าเสื่อมราคาสะสม: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผังบัญชีค่าเสื่อมราคาสะสม:\")) textarea",
+      "value": "{{saccd}}",
+      "op": "same"
+    },
+    {
+      "title": "กรอกหมายเหตุ (ทั่วไป)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"หมายเหตุ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} หมายเหตุสินทรัพย์"
+    },
+    {
+      "title": "ไปส่วน ได้มา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [role=\"tablist\"] button:text-is(\"ได้มา\")"
+    },
+    {
+      "title": "กรอกวันที่ซื้อเข้า (พ.ศ.)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วันที่ซื้อเข้า:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วันที่ซื้อเข้า:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกราคาซื้อเข้า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ราคาซื้อเข้า:\")) > div input[inputmode]",
+      "value": "{{buy}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ราคาซื้อเข้า:\")) > div input[inputmode]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกซื้อจาก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ซื้อจาก:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ผู้ขายสินทรัพย์"
+    },
+    {
+      "title": "กรอกวิธีได้มา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วิธีได้มา:\")) > div > input[type=\"text\"]",
+      "value": "ซื้อเงินสด UAT{{run.short}}"
+    },
+    {
+      "title": "กรอกปี (พ.ศ.)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ปี:\")) > div input[inputmode]",
+      "value": "{{bey}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ปี:\")) > div input[inputmode]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกเอกสารอ้างอิงซื้อ (ตัวเล็ก → ต้องเป็นตัวใหญ่)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"เอกสารอ้างอิงซื้อ:\")) > div > input[type=\"text\"]",
+      "value": "uat{{run.short}}-buy"
+    },
+    {
+      "title": "เอกสารอ้างอิงซื้อแปลงเป็นตัวพิมพ์ใหญ่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"เอกสารอ้างอิงซื้อ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}}-BUY",
+      "op": "same"
+    },
+    {
+      "title": "กรอกวันที่เอกสารซื้อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วันที่เอกสารซื้อ:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วันที่เอกสารซื้อ:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกรายละเอียดการซื้อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"รายละเอียดการซื้อ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} รายละเอียดการซื้อ"
+    },
+    {
+      "title": "กรอกเลขที่กรมธรรม์ 26 ตัว (เกินคอลัมน์ 25)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เลขที่กรมธรรม์:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}}-INSURE-NO-123456"
+    },
+    {
+      "title": "กรอกเลขประกัน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เลขประกัน:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}}-SAFE"
+    },
+    {
+      "title": "กรอกบริษัทประกัน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"บริษัทประกัน:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ประกันภัย"
+    },
+    {
+      "title": "กรอกเบี้ยประกัน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เบี้ยประกัน:\")) > div input[inputmode]",
+      "value": "{{ins}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เบี้ยประกัน:\")) > div input[inputmode]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกอายุกรมธรรม์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"อายุกรมธรรม์:\")) > div input[inputmode]",
+      "value": "1"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"อายุกรมธรรม์:\")) > div input[inputmode]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกเริ่มการคุ้มครอง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เริ่มการคุ้มครอง:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เริ่มการคุ้มครอง:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกสิ้นสุดการคุ้มครอง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"สิ้นสุดการคุ้มครอง:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{ieth}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"สิ้นสุดการคุ้มครอง:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกหมายเหตุ (ประกัน)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"หมายเหตุ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} หมายเหตุรายละเอียด"
+    },
+    {
+      "title": "กรอกมูลค่าที่คิดค่าเสื่อม",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"มูลค่าที่คิดค่าเสื่อม:\")) > div input[inputmode]",
+      "value": "{{buy}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"มูลค่าที่คิดค่าเสื่อม:\")) > div input[inputmode]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกราคาซาก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"ราคาซาก:\")) > div input[inputmode]",
+      "value": "{{dead}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"ราคาซาก:\")) > div input[inputmode]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกอายุการใช้งาน แล้วออกจากช่อง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"อายุการใช้งาน:\")) > div input[inputmode]",
+      "value": "{{age}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"อายุการใช้งาน:\")) > div input[inputmode]",
+      "key": "Tab"
+    },
+    {
+      "title": "อัตราค่าเสื่อมเติมอัตโนมัติ = 100 / อายุ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"อัตราค่าเสื่อม:\")) > div input[inputmode]",
+      "value": "{{r1}}"
+    },
+    {
+      "title": "กรอกวันที่เริ่มคิดค่าเสื่อม",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วันที่เริ่มคิดค่าเสื่อม:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วันที่เริ่มคิดค่าเสื่อม:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "วันที่สิ้นสุดคิดค่าเสื่อมเติมอัตโนมัติ = เริ่ม + อายุ ปี − 1 วัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วันที่สิ้นสุดคิดค่าเสื่อม:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{spth}}",
+      "op": "same"
+    },
+    {
+      "title": "กรอกหักค่าเสื่อมเบื้องต้น",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"หักค่าเสื่อมเบื้องต้น:\")) > div input[inputmode]",
+      "value": "{{cut}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"หักค่าเสื่อมเบื้องต้น:\")) > div input[inputmode]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกมูลค่าคงเหลือยกมา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"มูลค่าคงเหลือยกมา:\")) > div input[inputmode]",
+      "value": "{{vb}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"มูลค่าคงเหลือยกมา:\")) > div input[inputmode]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกค่าเสื่อมสะสมยกมา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"ค่าเสื่อมสะสมยกมา:\")) > div input[inputmode]",
+      "value": "{{svb}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"ค่าเสื่อมสะสมยกมา:\")) > div input[inputmode]",
+      "key": "Tab"
+    },
+    {
+      "title": "ติ๊กคิดค่าซาก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"คิดค่าซาก:\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "กรอกสถานะภาพ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"สถานะภาพ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ใช้งานปกติ"
+    },
+    {
+      "title": "จังหวัด: พิมพ์รหัส {{pv}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"จังหวัด:\")) textarea",
+      "value": "{{pv}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"จังหวัด:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "จังหวัด: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"จังหวัด:\")) textarea",
+      "value": "{{pvd}}",
+      "op": "same"
+    },
+    {
+      "title": "กรอกรุ่น",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"รุ่น:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} รุ่นทดสอบ"
+    },
+    {
+      "title": "กรอกกลุ่มราคา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"กลุ่มราคา:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} กลุ่มราคา"
+    },
+    {
+      "title": "กรอกงบประมาณ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"งบประมาณ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} งบลงทุน"
+    },
+    {
+      "title": "กรอกรายละเอียด",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"รายละเอียด:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} รายละเอียดสินทรัพย์"
+    },
+    {
+      "title": "หมายเหตุส่วนอื่น ๆ แสดงค่าเดียวกับส่วนประกัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"หมายเหตุ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} หมายเหตุรายละเอียด",
+      "op": "same"
+    },
+    {
+      "title": "กดบันทึก (เลขที่กรมธรรม์ยาวเกิน → ต้องไม่บันทึก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] button:has(> span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "หน้าจอแจ้ง \"ยาวเกิน 25\"",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] div.bg-rose-50[role=\"alert\"]",
+      "text": "ยาวเกิน 25"
+    },
+    {
+      "title": "ไม่มีแถวสินทรัพย์ถูกบันทึก",
+      "do": "db.query",
+      "sql": "select ((select count(*) from as_asset where code = :'fa') + (select count(*) from as_asset_detail where as_code = :'fa') + (select count(*) from as_asset_result where as_code = :'fa'))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "แก้เลขที่กรมธรรม์ให้ไม่เกิน 25 ตัว",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เลขที่กรมธรรม์:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}}-INS-1"
+    },
+    {
+      "title": "ใส่วันที่สิ้นสุดคิดค่าเสื่อมก่อนวันเริ่ม",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วันที่สิ้นสุดคิดค่าเสื่อม:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{badth}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วันที่สิ้นสุดคิดค่าเสื่อม:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "กดบันทึก (วันสิ้นสุดก่อนวันเริ่ม → ต้องไม่บันทึก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] button:has(> span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "หน้าจอแจ้ง \"วันที่สิ้นสุดคิดค่าเสื่อมต้องมากกว่าหรือเท่ากับวันที่เริ่มคิดค่าเสื่อม\"",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] div.bg-rose-50[role=\"alert\"]",
+      "text": "วันที่สิ้นสุดคิดค่าเสื่อมต้องมากกว่าหรือเท่ากับวันที่เริ่มคิดค่าเสื่อม"
+    },
+    {
+      "title": "ไม่มีแถวสินทรัพย์ถูกบันทึก",
+      "do": "db.query",
+      "sql": "select ((select count(*) from as_asset where code = :'fa') + (select count(*) from as_asset_detail where as_code = :'fa') + (select count(*) from as_asset_result where as_code = :'fa'))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ใส่วันที่สิ้นสุดคิดค่าเสื่อมที่ถูกต้องคืน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วันที่สิ้นสุดคิดค่าเสื่อม:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{spth}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วันที่สิ้นสุดคิดค่าเสื่อม:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "รหัส",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัส:\")) > div > input[type=\"text\"]",
+      "value": "{{fa}}",
+      "op": "same"
+    },
+    {
+      "title": "รหัสเก่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสเก่า:\")) > div > input[type=\"text\"]",
+      "value": "{{fao}}",
+      "op": "same"
+    },
+    {
+      "title": "ชื่อ 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ 1:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} สินทรัพย์ทดสอบ",
+      "op": "same"
+    },
+    {
+      "title": "ชื่อ 2",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ 2:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ชื่อที่สอง",
+      "op": "same"
+    },
+    {
+      "title": "ชื่ออังกฤษ 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ (ภาษาอังกฤษ) 1:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} Test Asset",
+      "op": "same"
+    },
+    {
+      "title": "ชื่ออังกฤษ 2",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ (ภาษาอังกฤษ) 2:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} Second Name",
+      "op": "same"
+    },
+    {
+      "title": "หน่วยนับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"หน่วยนับ:\")) textarea",
+      "value": "{{ud}}",
+      "op": "same"
+    },
+    {
+      "title": "ประเภทสินทรัพย์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ประเภทสินทรัพย์:\")) textarea",
+      "value": "{{tyd}}",
+      "op": "same"
+    },
+    {
+      "title": "หน่วยงาน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสหน่วยงาน:\")) textarea",
+      "value": "{{sdd}}",
+      "op": "same"
+    },
+    {
+      "title": "แผนก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสแผนก:\")) textarea",
+      "value": "{{dpd}}",
+      "op": "same"
+    },
+    {
+      "title": "ที่ตั้ง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ที่ตั้งสินทรัพย์:\")) textarea",
+      "value": "{{lcd}}",
+      "op": "same"
+    },
+    {
+      "title": "ผู้ใช้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผู้ใช้:\")) textarea",
+      "value": "{{usd}}",
+      "op": "same"
+    },
+    {
+      "title": "สาขา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"สาขา:\")) textarea",
+      "value": "{{brd}}",
+      "op": "same"
+    },
+    {
+      "title": "สถานะ = ชำรุด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"สถานะ:\")) label:has(> span:text-is(\"ชำรุด\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "บัญชีสินทรัพย์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสผังบัญชี:\")) textarea",
+      "value": "{{accd}}",
+      "op": "same"
+    },
+    {
+      "title": "บัญชีค่าเสื่อมราคา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผังบัญชีค่าเสื่อมราคา:\")) textarea",
+      "value": "{{daccd}}",
+      "op": "same"
+    },
+    {
+      "title": "บัญชีค่าเสื่อมราคาสะสม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผังบัญชีค่าเสื่อมราคาสะสม:\")) textarea",
+      "value": "{{saccd}}",
+      "op": "same"
+    },
+    {
+      "title": "หมายเหตุ (ทั่วไป)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"หมายเหตุ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} หมายเหตุสินทรัพย์",
+      "op": "same"
+    },
+    {
+      "title": "วันที่ซื้อเข้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วันที่ซื้อเข้า:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}",
+      "op": "same"
+    },
+    {
+      "title": "ราคาซื้อเข้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ราคาซื้อเข้า:\")) > div input[inputmode]",
+      "value": "{{buy}}"
+    },
+    {
+      "title": "ซื้อจาก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ซื้อจาก:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ผู้ขายสินทรัพย์",
+      "op": "same"
+    },
+    {
+      "title": "วิธีได้มา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วิธีได้มา:\")) > div > input[type=\"text\"]",
+      "value": "ซื้อเงินสด UAT{{run.short}}",
+      "op": "same"
+    },
+    {
+      "title": "ปี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ปี:\")) > div input[inputmode]",
+      "value": "{{bey}}"
+    },
+    {
+      "title": "เอกสารอ้างอิงซื้อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"เอกสารอ้างอิงซื้อ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}}-BUY",
+      "op": "same"
+    },
+    {
+      "title": "วันที่เอกสารซื้อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วันที่เอกสารซื้อ:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}",
+      "op": "same"
+    },
+    {
+      "title": "รายละเอียดการซื้อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"รายละเอียดการซื้อ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} รายละเอียดการซื้อ",
+      "op": "same"
+    },
+    {
+      "title": "เลขที่กรมธรรม์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เลขที่กรมธรรม์:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}}-INS-1",
+      "op": "same"
+    },
+    {
+      "title": "เลขประกัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เลขประกัน:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}}-SAFE",
+      "op": "same"
+    },
+    {
+      "title": "บริษัทประกัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"บริษัทประกัน:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ประกันภัย",
+      "op": "same"
+    },
+    {
+      "title": "เบี้ยประกัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เบี้ยประกัน:\")) > div input[inputmode]",
+      "value": "{{ins}}"
+    },
+    {
+      "title": "อายุกรมธรรม์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"อายุกรมธรรม์:\")) > div input[inputmode]",
+      "value": "1"
+    },
+    {
+      "title": "เริ่มการคุ้มครอง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เริ่มการคุ้มครอง:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}",
+      "op": "same"
+    },
+    {
+      "title": "สิ้นสุดการคุ้มครอง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"สิ้นสุดการคุ้มครอง:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{ieth}}",
+      "op": "same"
+    },
+    {
+      "title": "หมายเหตุ (ประกัน)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"หมายเหตุ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} หมายเหตุรายละเอียด",
+      "op": "same"
+    },
+    {
+      "title": "วิธีคิดค่าเสื่อม = เส้นตรง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วิธีคิดค่าเสื่อม:\")) label:has(> span:text-is(\"เส้นตรง\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "อายุการใช้งาน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"อายุการใช้งาน:\")) > div input[inputmode]",
+      "value": "{{age}}"
+    },
+    {
+      "title": "อัตราค่าเสื่อม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"อัตราค่าเสื่อม:\")) > div input[inputmode]",
+      "value": "{{r1}}"
+    },
+    {
+      "title": "หักค่าเสื่อมเบื้องต้น",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"หักค่าเสื่อมเบื้องต้น:\")) > div input[inputmode]",
+      "value": "{{cut}}"
+    },
+    {
+      "title": "มูลค่าที่คิดค่าเสื่อม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"มูลค่าที่คิดค่าเสื่อม:\")) > div input[inputmode]",
+      "value": "{{buy}}"
+    },
+    {
+      "title": "วันที่เริ่มคิดค่าเสื่อม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วันที่เริ่มคิดค่าเสื่อม:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}",
+      "op": "same"
+    },
+    {
+      "title": "วันที่สิ้นสุดคิดค่าเสื่อม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วันที่สิ้นสุดคิดค่าเสื่อม:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{spth}}",
+      "op": "same"
+    },
+    {
+      "title": "มูลค่าคงเหลือยกมา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"มูลค่าคงเหลือยกมา:\")) > div input[inputmode]",
+      "value": "{{vb}}"
+    },
+    {
+      "title": "ค่าเสื่อมสะสมยกมา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"ค่าเสื่อมสะสมยกมา:\")) > div input[inputmode]",
+      "value": "{{svb}}"
+    },
+    {
+      "title": "คิดค่าซาก ถูกติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"คิดค่าซาก:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "ราคาซาก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"ราคาซาก:\")) > div input[inputmode]",
+      "value": "{{dead}}"
+    },
+    {
+      "title": "ส่วนขาย: วันที่ขาย ว่าง (ยังไม่ขาย)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-4 div.flex.items-start:has(> label:text-is(\"วันที่ขาย:\")) > div > div",
+      "text": "",
+      "op": "empty"
+    },
+    {
+      "title": "ส่วนขาย: ราคาขาย ว่าง (ยังไม่ขาย)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-4 div.flex.items-start:has(> label:text-is(\"ราคาขาย:\")) > div > div",
+      "text": "",
+      "op": "empty"
+    },
+    {
+      "title": "ส่วนขาย: ขายให้ ว่าง (ยังไม่ขาย)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-4 div.flex.items-start:has(> label:text-is(\"ขายให้:\")) > div > div",
+      "text": "",
+      "op": "empty"
+    },
+    {
+      "title": "ส่วนขาย: เอกสารอ้างอิงขาย ว่าง (ยังไม่ขาย)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-4 div.flex.items-start:has(> label:text-is(\"เอกสารอ้างอิงขาย:\")) > div > div",
+      "text": "",
+      "op": "empty"
+    },
+    {
+      "title": "สถานะภาพ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"สถานะภาพ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ใช้งานปกติ",
+      "op": "same"
+    },
+    {
+      "title": "จังหวัด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"จังหวัด:\")) textarea",
+      "value": "{{pvd}}",
+      "op": "same"
+    },
+    {
+      "title": "รุ่น",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"รุ่น:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} รุ่นทดสอบ",
+      "op": "same"
+    },
+    {
+      "title": "กลุ่มราคา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"กลุ่มราคา:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} กลุ่มราคา",
+      "op": "same"
+    },
+    {
+      "title": "งบประมาณ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"งบประมาณ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} งบลงทุน",
+      "op": "same"
+    },
+    {
+      "title": "รายละเอียด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"รายละเอียด:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} รายละเอียดสินทรัพย์",
+      "op": "same"
+    },
+    {
+      "title": "หมายเหตุ (อื่น ๆ) = ช่องเดียวกับส่วนประกัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"หมายเหตุ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} หมายเหตุรายละเอียด",
+      "op": "same"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงก่อนบันทึก (ยกเว้น 400 ของการบันทึกที่ตั้งใจให้ถูกปฏิเสธ 3 ครั้ง)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 400 POST /api/process/master-detail/save",
+        "status of 400"
+      ]
+    },
+    {
+      "title": "ภาพหน้าจอก่อนบันทึก (กรอกครบ)",
+      "do": "ui.screenshot",
+      "name": "asset-filled"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] button:has(> span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "บันทึกสำเร็จ (บันทึกล่าสุด)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] header span:has-text(\"บันทึกล่าสุด\")",
+      "text": "บันทึกล่าสุด"
+    },
+    {
+      "title": "ภาพหน้าจอหลังบันทึกสินทรัพย์ใหม่",
+      "do": "ui.screenshot",
+      "name": "asset-saved"
+    },
+    {
+      "title": "ไม่มีข้อความผิดพลาด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] div.bg-rose-50[role=\"alert\"]",
+      "visible": false
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงหลังบันทึก",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "หลังบันทึก: as_asset ตรงทุกช่อง",
+      "do": "db.query",
+      "sql": "select concat_ws('|', coalesce((code)::text, '~'), coalesce((code_old)::text, '~'), coalesce((name_1)::text, '~'), coalesce((name_2)::text, '~'), coalesce((name_eng_1)::text, '~'), coalesce((name_eng_2)::text, '~'), coalesce((unit_code)::text, '~'), coalesce((as_type)::text, '~'), coalesce((side_code)::text, '~'), coalesce((department_code)::text, '~'), coalesce((as_location)::text, '~'), coalesce((remark)::text, '~'), coalesce((status)::text, '~'), coalesce((user_code)::text, '~'), coalesce((account_code)::text, '~'), coalesce((depreciation_account_code)::text, '~'), coalesce((depreciation_sum_account_code)::text, '~'), coalesce((branch_code)::text, '~')) h from as_asset where code = :'fa'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "h",
+          "op": "same",
+          "value": "{{fa}}|{{fao}}|UAT{{run.short}} สินทรัพย์ทดสอบ|UAT{{run.short}} ชื่อที่สอง|UAT{{run.short}} Test Asset|UAT{{run.short}} Second Name|{{u}}|{{ty}}|{{sd}}|{{dp}}|{{lc}}|UAT{{run.short}} หมายเหตุสินทรัพย์|1|{{us}}|{{acc}}|{{dacc}}|{{sacc}}|{{br}}"
+        }
+      ]
+    },
+    {
+      "title": "หลังบันทึก: as_asset_detail 1 แถว ตรงทุกช่อง (ช่องขายยังว่าง)",
+      "do": "db.query",
+      "sql": "select concat_ws('|', coalesce((as_buy_date)::text, '~'), coalesce((round(as_buy_price, 2))::text, '~'), coalesce((as_buy_from)::text, '~'), coalesce((derived_from)::text, '~'), coalesce((as_buy_year)::text, '~'), coalesce((doc_buy_ref)::text, '~'), coalesce((doc_buy_date)::text, '~'), coalesce((as_buy_description)::text, '~'), coalesce((insure_no)::text, '~'), coalesce((safety_code)::text, '~'), coalesce((insure_company)::text, '~'), coalesce((round(insure_money, 2))::text, '~'), coalesce((round(insure_age, 2))::text, '~'), coalesce((insure_start_date)::text, '~'), coalesce((insure_stop_date)::text, '~'), coalesce((remark)::text, '~'), coalesce((calc_type)::text, '~'), coalesce((round(as_start_cut, 2))::text, '~'), coalesce((round(as_calc_value, 2))::text, '~'), coalesce((as_dead_calc)::text, '~'), coalesce((round(as_dead_value, 2))::text, '~'), coalesce((round(as_age, 2))::text, '~'), coalesce((round(as_rate, 2))::text, '~'), coalesce((start_calc_date)::text, '~'), coalesce((stop_calc_date)::text, '~'), coalesce((round(as_value_balance, 2))::text, '~'), coalesce((round(as_sum_value_balance, 2))::text, '~'), coalesce((asset_status)::text, '~'), coalesce((asset_province)::text, '~'), coalesce((as_model)::text, '~'), coalesce((as_description)::text, '~'), coalesce((as_price_group)::text, '~'), coalesce((as_budget)::text, '~'), coalesce((as_sale_date)::text, '~'), coalesce((round(as_sale_price, 2))::text, '~'), coalesce((as_sale_to)::text, '~'), coalesce((doc_sale_ref)::text, '~')) d, (select count(*) from as_asset_detail where as_code = :'fa')::text n from as_asset_detail where as_code = :'fa'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "d",
+          "op": "same",
+          "value": "{{bd}}|{{buy}}|UAT{{run.short}} ผู้ขายสินทรัพย์|ซื้อเงินสด UAT{{run.short}}|{{bey}}|UAT{{run.short}}-BUY|{{bd}}|UAT{{run.short}} รายละเอียดการซื้อ|UAT{{run.short}}-INS-1|UAT{{run.short}}-SAFE|UAT{{run.short}} ประกันภัย|{{ins}}|1.00|{{bd}}|{{ie}}|UAT{{run.short}} หมายเหตุรายละเอียด|0|{{cut}}|{{buy}}|1|{{dead}}|{{ager}}|{{r1}}|{{bd}}|{{sp}}|{{vb}}|{{svb}}|UAT{{run.short}} ใช้งานปกติ|{{pv}}|UAT{{run.short}} รุ่นทดสอบ|UAT{{run.short}} รายละเอียดสินทรัพย์|UAT{{run.short}} กลุ่มราคา|UAT{{run.short}} งบลงทุน|~|0.00||"
+        }
+      ]
+    },
+    {
+      "title": "รายการซ้าย: ค้นหาด้วยรหัส",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{fa}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ผลค้นหาด้วยรหัส = 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "รายการซ้าย: ค้นหาด้วยชื่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}} สินทรัพย์"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ผลค้นหาด้วยชื่อ = 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "รายการซ้าย: ค้นหาด้วยรหัสเก่า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{fao}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ผลค้นหาด้วยรหัสเก่า = 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "รายการซ้าย: ค้นหาคำที่ไม่มีจริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "ZQXJNOPEQZ"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ผลค้นหาคำที่ไม่มีจริง = 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดเมนูใหม่ (แท็บสด)",
+      "do": "ui.openMenu",
+      "key": "menu_asset_lists"
+    },
+    {
+      "title": "รายการซ้าย: ค้นหาด้วยรหัสเพื่อเปิด",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{fa}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ผลค้นหาด้วยรหัสเพื่อเปิด = 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "กดแก้ไขรายการในรายการซ้าย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] button[title=\"แก้ไขรายการ {{fa}}\"]"
+    },
+    {
+      "title": "เปิดในโหมดแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] header span:has-text(\"โหมดแก้ไข\")",
+      "text": "โหมดแก้ไข"
+    },
+    {
+      "title": "รหัส (คีย์) แก้ไม่ได้ในโหมดแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัส:\")) > div > input[type=\"text\"][disabled]"
+    },
+    {
+      "title": "รหัส",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัส:\")) > div > input[type=\"text\"]",
+      "value": "{{fa}}",
+      "op": "same"
+    },
+    {
+      "title": "รหัสเก่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสเก่า:\")) > div > input[type=\"text\"]",
+      "value": "{{fao}}",
+      "op": "same"
+    },
+    {
+      "title": "ชื่อ 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ 1:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} สินทรัพย์ทดสอบ",
+      "op": "same"
+    },
+    {
+      "title": "ชื่อ 2",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ 2:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ชื่อที่สอง",
+      "op": "same"
+    },
+    {
+      "title": "ชื่ออังกฤษ 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ (ภาษาอังกฤษ) 1:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} Test Asset",
+      "op": "same"
+    },
+    {
+      "title": "ชื่ออังกฤษ 2",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ (ภาษาอังกฤษ) 2:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} Second Name",
+      "op": "same"
+    },
+    {
+      "title": "หน่วยนับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"หน่วยนับ:\")) textarea",
+      "value": "{{ud}}",
+      "op": "same"
+    },
+    {
+      "title": "ประเภทสินทรัพย์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ประเภทสินทรัพย์:\")) textarea",
+      "value": "{{tyd}}",
+      "op": "same"
+    },
+    {
+      "title": "หน่วยงาน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสหน่วยงาน:\")) textarea",
+      "value": "{{sdd}}",
+      "op": "same"
+    },
+    {
+      "title": "แผนก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสแผนก:\")) textarea",
+      "value": "{{dpd}}",
+      "op": "same"
+    },
+    {
+      "title": "ที่ตั้ง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ที่ตั้งสินทรัพย์:\")) textarea",
+      "value": "{{lcd}}",
+      "op": "same"
+    },
+    {
+      "title": "ผู้ใช้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผู้ใช้:\")) textarea",
+      "value": "{{usd}}",
+      "op": "same"
+    },
+    {
+      "title": "สาขา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"สาขา:\")) textarea",
+      "value": "{{brd}}",
+      "op": "same"
+    },
+    {
+      "title": "สถานะ = ชำรุด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"สถานะ:\")) label:has(> span:text-is(\"ชำรุด\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "บัญชีสินทรัพย์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสผังบัญชี:\")) textarea",
+      "value": "{{accd}}",
+      "op": "same"
+    },
+    {
+      "title": "บัญชีค่าเสื่อมราคา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผังบัญชีค่าเสื่อมราคา:\")) textarea",
+      "value": "{{daccd}}",
+      "op": "same"
+    },
+    {
+      "title": "บัญชีค่าเสื่อมราคาสะสม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผังบัญชีค่าเสื่อมราคาสะสม:\")) textarea",
+      "value": "{{saccd}}",
+      "op": "same"
+    },
+    {
+      "title": "หมายเหตุ (ทั่วไป)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"หมายเหตุ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} หมายเหตุสินทรัพย์",
+      "op": "same"
+    },
+    {
+      "title": "วันที่ซื้อเข้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วันที่ซื้อเข้า:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}",
+      "op": "same"
+    },
+    {
+      "title": "ราคาซื้อเข้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ราคาซื้อเข้า:\")) > div input[inputmode]",
+      "value": "{{buy}}"
+    },
+    {
+      "title": "ซื้อจาก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ซื้อจาก:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ผู้ขายสินทรัพย์",
+      "op": "same"
+    },
+    {
+      "title": "วิธีได้มา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วิธีได้มา:\")) > div > input[type=\"text\"]",
+      "value": "ซื้อเงินสด UAT{{run.short}}",
+      "op": "same"
+    },
+    {
+      "title": "ปี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ปี:\")) > div input[inputmode]",
+      "value": "{{bey}}"
+    },
+    {
+      "title": "เอกสารอ้างอิงซื้อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"เอกสารอ้างอิงซื้อ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}}-BUY",
+      "op": "same"
+    },
+    {
+      "title": "วันที่เอกสารซื้อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วันที่เอกสารซื้อ:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}",
+      "op": "same"
+    },
+    {
+      "title": "รายละเอียดการซื้อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"รายละเอียดการซื้อ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} รายละเอียดการซื้อ",
+      "op": "same"
+    },
+    {
+      "title": "เลขที่กรมธรรม์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เลขที่กรมธรรม์:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}}-INS-1",
+      "op": "same"
+    },
+    {
+      "title": "เลขประกัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เลขประกัน:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}}-SAFE",
+      "op": "same"
+    },
+    {
+      "title": "บริษัทประกัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"บริษัทประกัน:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ประกันภัย",
+      "op": "same"
+    },
+    {
+      "title": "เบี้ยประกัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เบี้ยประกัน:\")) > div input[inputmode]",
+      "value": "{{ins}}"
+    },
+    {
+      "title": "อายุกรมธรรม์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"อายุกรมธรรม์:\")) > div input[inputmode]",
+      "value": "1"
+    },
+    {
+      "title": "เริ่มการคุ้มครอง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เริ่มการคุ้มครอง:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}",
+      "op": "same"
+    },
+    {
+      "title": "สิ้นสุดการคุ้มครอง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"สิ้นสุดการคุ้มครอง:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{ieth}}",
+      "op": "same"
+    },
+    {
+      "title": "หมายเหตุ (ประกัน)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"หมายเหตุ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} หมายเหตุรายละเอียด",
+      "op": "same"
+    },
+    {
+      "title": "วิธีคิดค่าเสื่อม = เส้นตรง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วิธีคิดค่าเสื่อม:\")) label:has(> span:text-is(\"เส้นตรง\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "อายุการใช้งาน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"อายุการใช้งาน:\")) > div input[inputmode]",
+      "value": "{{age}}"
+    },
+    {
+      "title": "อัตราค่าเสื่อม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"อัตราค่าเสื่อม:\")) > div input[inputmode]",
+      "value": "{{r1}}"
+    },
+    {
+      "title": "หักค่าเสื่อมเบื้องต้น",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"หักค่าเสื่อมเบื้องต้น:\")) > div input[inputmode]",
+      "value": "{{cut}}"
+    },
+    {
+      "title": "มูลค่าที่คิดค่าเสื่อม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"มูลค่าที่คิดค่าเสื่อม:\")) > div input[inputmode]",
+      "value": "{{buy}}"
+    },
+    {
+      "title": "วันที่เริ่มคิดค่าเสื่อม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วันที่เริ่มคิดค่าเสื่อม:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}",
+      "op": "same"
+    },
+    {
+      "title": "วันที่สิ้นสุดคิดค่าเสื่อม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วันที่สิ้นสุดคิดค่าเสื่อม:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{spth}}",
+      "op": "same"
+    },
+    {
+      "title": "มูลค่าคงเหลือยกมา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"มูลค่าคงเหลือยกมา:\")) > div input[inputmode]",
+      "value": "{{vb}}"
+    },
+    {
+      "title": "ค่าเสื่อมสะสมยกมา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"ค่าเสื่อมสะสมยกมา:\")) > div input[inputmode]",
+      "value": "{{svb}}"
+    },
+    {
+      "title": "คิดค่าซาก ถูกติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"คิดค่าซาก:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "ราคาซาก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"ราคาซาก:\")) > div input[inputmode]",
+      "value": "{{dead}}"
+    },
+    {
+      "title": "ส่วนขาย: วันที่ขาย ว่าง (ยังไม่ขาย)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-4 div.flex.items-start:has(> label:text-is(\"วันที่ขาย:\")) > div > div",
+      "text": "",
+      "op": "empty"
+    },
+    {
+      "title": "ส่วนขาย: ราคาขาย ว่าง (ยังไม่ขาย)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-4 div.flex.items-start:has(> label:text-is(\"ราคาขาย:\")) > div > div",
+      "text": "",
+      "op": "empty"
+    },
+    {
+      "title": "ส่วนขาย: ขายให้ ว่าง (ยังไม่ขาย)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-4 div.flex.items-start:has(> label:text-is(\"ขายให้:\")) > div > div",
+      "text": "",
+      "op": "empty"
+    },
+    {
+      "title": "ส่วนขาย: เอกสารอ้างอิงขาย ว่าง (ยังไม่ขาย)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-4 div.flex.items-start:has(> label:text-is(\"เอกสารอ้างอิงขาย:\")) > div > div",
+      "text": "",
+      "op": "empty"
+    },
+    {
+      "title": "สถานะภาพ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"สถานะภาพ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ใช้งานปกติ",
+      "op": "same"
+    },
+    {
+      "title": "จังหวัด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"จังหวัด:\")) textarea",
+      "value": "{{pvd}}",
+      "op": "same"
+    },
+    {
+      "title": "รุ่น",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"รุ่น:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} รุ่นทดสอบ",
+      "op": "same"
+    },
+    {
+      "title": "กลุ่มราคา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"กลุ่มราคา:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} กลุ่มราคา",
+      "op": "same"
+    },
+    {
+      "title": "งบประมาณ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"งบประมาณ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} งบลงทุน",
+      "op": "same"
+    },
+    {
+      "title": "รายละเอียด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"รายละเอียด:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} รายละเอียดสินทรัพย์",
+      "op": "same"
+    },
+    {
+      "title": "หมายเหตุ (อื่น ๆ) = ช่องเดียวกับส่วนประกัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"หมายเหตุ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} หมายเหตุรายละเอียด",
+      "op": "same"
+    },
+    {
+      "title": "แก้ชื่อ 1",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ 1:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} สินทรัพย์ทดสอบแก้ไข"
+    },
+    {
+      "title": "แก้รหัสหน่วยงาน: พิมพ์รหัส {{sd2}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสหน่วยงาน:\")) textarea",
+      "value": "{{sd2}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสหน่วยงาน:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "แก้รหัสหน่วยงาน: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสหน่วยงาน:\")) textarea",
+      "value": "{{sd2d}}",
+      "op": "same"
+    },
+    {
+      "title": "เปลี่ยนสถานะเป็น สูญหาย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"สถานะ:\")) label:has(> span:text-is(\"สูญหาย\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "เปลี่ยนวิธีคิดค่าเสื่อมเป็น ลดน้อยถอยลง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วิธีคิดค่าเสื่อม:\")) label:has(> span:text-is(\"ลดน้อยถอยลง\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "ออกจากช่องอายุการใช้งานอีกครั้ง (คำนวณอัตราใหม่)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"อายุการใช้งาน:\")) > div input[inputmode]",
+      "key": "Tab"
+    },
+    {
+      "title": "อัตราค่าเสื่อมแบบลดน้อยถอยลง = (1 − (ซาก/มูลค่า)^(1/อายุ)) × 100",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"อัตราค่าเสื่อม:\")) > div input[inputmode]",
+      "value": "{{r2}}"
+    },
+    {
+      "title": "กดบันทึกการแก้ไข",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] button:has(> span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "บันทึกการแก้ไขสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] header span:has-text(\"บันทึกล่าสุด\")",
+      "text": "บันทึกล่าสุด"
+    },
+    {
+      "title": "ภาพหน้าจอหลังบันทึกการแก้ไข",
+      "do": "ui.screenshot",
+      "name": "asset-edited"
+    },
+    {
+      "title": "ไม่มีข้อความผิดพลาด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] div.bg-rose-50[role=\"alert\"]",
+      "visible": false
+    },
+    {
+      "title": "หลังแก้ไข: as_asset ตรงทุกช่อง",
+      "do": "db.query",
+      "sql": "select concat_ws('|', coalesce((code)::text, '~'), coalesce((code_old)::text, '~'), coalesce((name_1)::text, '~'), coalesce((name_2)::text, '~'), coalesce((name_eng_1)::text, '~'), coalesce((name_eng_2)::text, '~'), coalesce((unit_code)::text, '~'), coalesce((as_type)::text, '~'), coalesce((side_code)::text, '~'), coalesce((department_code)::text, '~'), coalesce((as_location)::text, '~'), coalesce((remark)::text, '~'), coalesce((status)::text, '~'), coalesce((user_code)::text, '~'), coalesce((account_code)::text, '~'), coalesce((depreciation_account_code)::text, '~'), coalesce((depreciation_sum_account_code)::text, '~'), coalesce((branch_code)::text, '~')) h from as_asset where code = :'fa'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "h",
+          "op": "same",
+          "value": "{{fa}}|{{fao}}|UAT{{run.short}} สินทรัพย์ทดสอบแก้ไข|UAT{{run.short}} ชื่อที่สอง|UAT{{run.short}} Test Asset|UAT{{run.short}} Second Name|{{u}}|{{ty}}|{{sd2}}|{{dp}}|{{lc}}|UAT{{run.short}} หมายเหตุสินทรัพย์|2|{{us}}|{{acc}}|{{dacc}}|{{sacc}}|{{br}}"
+        }
+      ]
+    },
+    {
+      "title": "หลังแก้ไข: as_asset_detail 1 แถว ตรงทุกช่อง (ช่องขายยังว่าง)",
+      "do": "db.query",
+      "sql": "select concat_ws('|', coalesce((as_buy_date)::text, '~'), coalesce((round(as_buy_price, 2))::text, '~'), coalesce((as_buy_from)::text, '~'), coalesce((derived_from)::text, '~'), coalesce((as_buy_year)::text, '~'), coalesce((doc_buy_ref)::text, '~'), coalesce((doc_buy_date)::text, '~'), coalesce((as_buy_description)::text, '~'), coalesce((insure_no)::text, '~'), coalesce((safety_code)::text, '~'), coalesce((insure_company)::text, '~'), coalesce((round(insure_money, 2))::text, '~'), coalesce((round(insure_age, 2))::text, '~'), coalesce((insure_start_date)::text, '~'), coalesce((insure_stop_date)::text, '~'), coalesce((remark)::text, '~'), coalesce((calc_type)::text, '~'), coalesce((round(as_start_cut, 2))::text, '~'), coalesce((round(as_calc_value, 2))::text, '~'), coalesce((as_dead_calc)::text, '~'), coalesce((round(as_dead_value, 2))::text, '~'), coalesce((round(as_age, 2))::text, '~'), coalesce((round(as_rate, 2))::text, '~'), coalesce((start_calc_date)::text, '~'), coalesce((stop_calc_date)::text, '~'), coalesce((round(as_value_balance, 2))::text, '~'), coalesce((round(as_sum_value_balance, 2))::text, '~'), coalesce((asset_status)::text, '~'), coalesce((asset_province)::text, '~'), coalesce((as_model)::text, '~'), coalesce((as_description)::text, '~'), coalesce((as_price_group)::text, '~'), coalesce((as_budget)::text, '~'), coalesce((as_sale_date)::text, '~'), coalesce((round(as_sale_price, 2))::text, '~'), coalesce((as_sale_to)::text, '~'), coalesce((doc_sale_ref)::text, '~')) d, (select count(*) from as_asset_detail where as_code = :'fa')::text n from as_asset_detail where as_code = :'fa'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "d",
+          "op": "same",
+          "value": "{{bd}}|{{buy}}|UAT{{run.short}} ผู้ขายสินทรัพย์|ซื้อเงินสด UAT{{run.short}}|{{bey}}|UAT{{run.short}}-BUY|{{bd}}|UAT{{run.short}} รายละเอียดการซื้อ|UAT{{run.short}}-INS-1|UAT{{run.short}}-SAFE|UAT{{run.short}} ประกันภัย|{{ins}}|1.00|{{bd}}|{{ie}}|UAT{{run.short}} หมายเหตุรายละเอียด|1|{{cut}}|{{buy}}|1|{{dead}}|{{ager}}|{{r2}}|{{bd}}|{{sp}}|{{vb}}|{{svb}}|UAT{{run.short}} ใช้งานปกติ|{{pv}}|UAT{{run.short}} รุ่นทดสอบ|UAT{{run.short}} รายละเอียดสินทรัพย์|UAT{{run.short}} กลุ่มราคา|UAT{{run.short}} งบลงทุน|~|0.00||"
+        }
+      ]
+    },
+    {
+      "title": "เปิดเมนูใหม่เพื่อตรวจค่าที่แก้",
+      "do": "ui.openMenu",
+      "key": "menu_asset_lists"
+    },
+    {
+      "title": "รายการซ้าย: ค้นหาด้วยรหัส",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{fa}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ผลค้นหาด้วยรหัส = 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "กดแก้ไขรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] button[title=\"แก้ไขรายการ {{fa}}\"]"
+    },
+    {
+      "title": "เปิดในโหมดแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] header span:has-text(\"โหมดแก้ไข\")",
+      "text": "โหมดแก้ไข"
+    },
+    {
+      "title": "รหัส",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัส:\")) > div > input[type=\"text\"]",
+      "value": "{{fa}}",
+      "op": "same"
+    },
+    {
+      "title": "รหัสเก่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสเก่า:\")) > div > input[type=\"text\"]",
+      "value": "{{fao}}",
+      "op": "same"
+    },
+    {
+      "title": "ชื่อ 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ 1:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} สินทรัพย์ทดสอบแก้ไข",
+      "op": "same"
+    },
+    {
+      "title": "ชื่อ 2",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ 2:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ชื่อที่สอง",
+      "op": "same"
+    },
+    {
+      "title": "ชื่ออังกฤษ 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ (ภาษาอังกฤษ) 1:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} Test Asset",
+      "op": "same"
+    },
+    {
+      "title": "ชื่ออังกฤษ 2",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ชื่อ (ภาษาอังกฤษ) 2:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} Second Name",
+      "op": "same"
+    },
+    {
+      "title": "หน่วยนับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"หน่วยนับ:\")) textarea",
+      "value": "{{ud}}",
+      "op": "same"
+    },
+    {
+      "title": "ประเภทสินทรัพย์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ประเภทสินทรัพย์:\")) textarea",
+      "value": "{{tyd}}",
+      "op": "same"
+    },
+    {
+      "title": "หน่วยงาน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสหน่วยงาน:\")) textarea",
+      "value": "{{sd2d}}",
+      "op": "same"
+    },
+    {
+      "title": "แผนก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสแผนก:\")) textarea",
+      "value": "{{dpd}}",
+      "op": "same"
+    },
+    {
+      "title": "ที่ตั้ง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ที่ตั้งสินทรัพย์:\")) textarea",
+      "value": "{{lcd}}",
+      "op": "same"
+    },
+    {
+      "title": "ผู้ใช้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผู้ใช้:\")) textarea",
+      "value": "{{usd}}",
+      "op": "same"
+    },
+    {
+      "title": "สาขา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"สาขา:\")) textarea",
+      "value": "{{brd}}",
+      "op": "same"
+    },
+    {
+      "title": "สถานะ = สูญหาย",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"สถานะ:\")) label:has(> span:text-is(\"สูญหาย\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "บัญชีสินทรัพย์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"รหัสผังบัญชี:\")) textarea",
+      "value": "{{accd}}",
+      "op": "same"
+    },
+    {
+      "title": "บัญชีค่าเสื่อมราคา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผังบัญชีค่าเสื่อมราคา:\")) textarea",
+      "value": "{{daccd}}",
+      "op": "same"
+    },
+    {
+      "title": "บัญชีค่าเสื่อมราคาสะสม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"ผังบัญชีค่าเสื่อมราคาสะสม:\")) textarea",
+      "value": "{{saccd}}",
+      "op": "same"
+    },
+    {
+      "title": "หมายเหตุ (ทั่วไป)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-0 div.flex.items-start:has(> label:text-is(\"หมายเหตุ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} หมายเหตุสินทรัพย์",
+      "op": "same"
+    },
+    {
+      "title": "วันที่ซื้อเข้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วันที่ซื้อเข้า:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}",
+      "op": "same"
+    },
+    {
+      "title": "ราคาซื้อเข้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ราคาซื้อเข้า:\")) > div input[inputmode]",
+      "value": "{{buy}}"
+    },
+    {
+      "title": "ซื้อจาก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ซื้อจาก:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ผู้ขายสินทรัพย์",
+      "op": "same"
+    },
+    {
+      "title": "วิธีได้มา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วิธีได้มา:\")) > div > input[type=\"text\"]",
+      "value": "ซื้อเงินสด UAT{{run.short}}",
+      "op": "same"
+    },
+    {
+      "title": "ปี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"ปี:\")) > div input[inputmode]",
+      "value": "{{bey}}"
+    },
+    {
+      "title": "เอกสารอ้างอิงซื้อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"เอกสารอ้างอิงซื้อ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}}-BUY",
+      "op": "same"
+    },
+    {
+      "title": "วันที่เอกสารซื้อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"วันที่เอกสารซื้อ:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}",
+      "op": "same"
+    },
+    {
+      "title": "รายละเอียดการซื้อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-1 div.flex.items-start:has(> label:text-is(\"รายละเอียดการซื้อ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} รายละเอียดการซื้อ",
+      "op": "same"
+    },
+    {
+      "title": "เลขที่กรมธรรม์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เลขที่กรมธรรม์:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}}-INS-1",
+      "op": "same"
+    },
+    {
+      "title": "เลขประกัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เลขประกัน:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}}-SAFE",
+      "op": "same"
+    },
+    {
+      "title": "บริษัทประกัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"บริษัทประกัน:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ประกันภัย",
+      "op": "same"
+    },
+    {
+      "title": "เบี้ยประกัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เบี้ยประกัน:\")) > div input[inputmode]",
+      "value": "{{ins}}"
+    },
+    {
+      "title": "อายุกรมธรรม์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"อายุกรมธรรม์:\")) > div input[inputmode]",
+      "value": "1"
+    },
+    {
+      "title": "เริ่มการคุ้มครอง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"เริ่มการคุ้มครอง:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}",
+      "op": "same"
+    },
+    {
+      "title": "สิ้นสุดการคุ้มครอง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"สิ้นสุดการคุ้มครอง:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{ieth}}",
+      "op": "same"
+    },
+    {
+      "title": "หมายเหตุ (ประกัน)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-2 div.flex.items-start:has(> label:text-is(\"หมายเหตุ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} หมายเหตุรายละเอียด",
+      "op": "same"
+    },
+    {
+      "title": "วิธีคิดค่าเสื่อม = ลดน้อยถอยลง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วิธีคิดค่าเสื่อม:\")) label:has(> span:text-is(\"ลดน้อยถอยลง\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "อายุการใช้งาน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"อายุการใช้งาน:\")) > div input[inputmode]",
+      "value": "{{age}}"
+    },
+    {
+      "title": "อัตราค่าเสื่อม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"อัตราค่าเสื่อม:\")) > div input[inputmode]",
+      "value": "{{r2}}"
+    },
+    {
+      "title": "หักค่าเสื่อมเบื้องต้น",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"หักค่าเสื่อมเบื้องต้น:\")) > div input[inputmode]",
+      "value": "{{cut}}"
+    },
+    {
+      "title": "มูลค่าที่คิดค่าเสื่อม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"มูลค่าที่คิดค่าเสื่อม:\")) > div input[inputmode]",
+      "value": "{{buy}}"
+    },
+    {
+      "title": "วันที่เริ่มคิดค่าเสื่อม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วันที่เริ่มคิดค่าเสื่อม:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{bdth}}",
+      "op": "same"
+    },
+    {
+      "title": "วันที่สิ้นสุดคิดค่าเสื่อม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"วันที่สิ้นสุดคิดค่าเสื่อม:\")) input[placeholder=\"DD/MM/YYYY\"]",
+      "value": "{{spth}}",
+      "op": "same"
+    },
+    {
+      "title": "มูลค่าคงเหลือยกมา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"มูลค่าคงเหลือยกมา:\")) > div input[inputmode]",
+      "value": "{{vb}}"
+    },
+    {
+      "title": "ค่าเสื่อมสะสมยกมา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"ค่าเสื่อมสะสมยกมา:\")) > div input[inputmode]",
+      "value": "{{svb}}"
+    },
+    {
+      "title": "คิดค่าซาก ถูกติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"คิดค่าซาก:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "ราคาซาก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-3 div.flex.items-start:has(> label:text-is(\"ราคาซาก:\")) > div input[inputmode]",
+      "value": "{{dead}}"
+    },
+    {
+      "title": "ส่วนขาย: วันที่ขาย ว่าง (ยังไม่ขาย)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-4 div.flex.items-start:has(> label:text-is(\"วันที่ขาย:\")) > div > div",
+      "text": "",
+      "op": "empty"
+    },
+    {
+      "title": "ส่วนขาย: ราคาขาย ว่าง (ยังไม่ขาย)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-4 div.flex.items-start:has(> label:text-is(\"ราคาขาย:\")) > div > div",
+      "text": "",
+      "op": "empty"
+    },
+    {
+      "title": "ส่วนขาย: ขายให้ ว่าง (ยังไม่ขาย)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-4 div.flex.items-start:has(> label:text-is(\"ขายให้:\")) > div > div",
+      "text": "",
+      "op": "empty"
+    },
+    {
+      "title": "ส่วนขาย: เอกสารอ้างอิงขาย ว่าง (ยังไม่ขาย)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-4 div.flex.items-start:has(> label:text-is(\"เอกสารอ้างอิงขาย:\")) > div > div",
+      "text": "",
+      "op": "empty"
+    },
+    {
+      "title": "สถานะภาพ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"สถานะภาพ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} ใช้งานปกติ",
+      "op": "same"
+    },
+    {
+      "title": "จังหวัด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"จังหวัด:\")) textarea",
+      "value": "{{pvd}}",
+      "op": "same"
+    },
+    {
+      "title": "รุ่น",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"รุ่น:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} รุ่นทดสอบ",
+      "op": "same"
+    },
+    {
+      "title": "กลุ่มราคา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"กลุ่มราคา:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} กลุ่มราคา",
+      "op": "same"
+    },
+    {
+      "title": "งบประมาณ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"งบประมาณ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} งบลงทุน",
+      "op": "same"
+    },
+    {
+      "title": "รายละเอียด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"รายละเอียด:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} รายละเอียดสินทรัพย์",
+      "op": "same"
+    },
+    {
+      "title": "หมายเหตุ (อื่น ๆ) = ช่องเดียวกับส่วนประกัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] #md-sec-menu_asset_lists-6 div.flex.items-start:has(> label:text-is(\"หมายเหตุ:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} หมายเหตุรายละเอียด",
+      "op": "same"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงหลังแก้ไขและเปิดซ้ำ",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "ยกเลิกโหมดแก้ไข (ไม่มีการแก้)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] button[title=\"ยกเลิกการแก้ไข\"]"
+    },
+    {
+      "title": "กดลบ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] button:has(> span:text-is(\"ลบ\"))"
+    },
+    {
+      "title": "หน้าต่างยืนยันการลบแสดงรหัสสินทรัพย์",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\")",
+      "text": "{{fa}}"
+    },
+    {
+      "title": "กดยืนยัน",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\") button:has-text(\"ยืนยัน\")"
+    },
+    {
+      "title": "ลบแล้วไม่เหลือแถวสินทรัพย์/รายละเอียด",
+      "do": "db.query",
+      "sql": "select ((select count(*) from as_asset where code = :'fa') + (select count(*) from as_asset_detail where as_code = :'fa') + (select count(*) from as_asset_result where as_code = :'fa'))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "รายการซ้าย: ค้นหารหัสที่ลบแล้ว",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{fa}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ไม่มีแถวสินทรัพย์ที่ลบแล้วในรายการซ้าย",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_asset_lists\"] button[title=\"แก้ไขรายการ {{fa}}\"]",
+      "visible": false
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบสินทรัพย์ทดสอบ (กรณีขั้นตอนลบผ่านหน้าจอไม่ผ่าน)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/master-detail/delete",
+      "body": {
+        "menuKey": "menu_asset_lists",
+        "key": "{{fa}}"
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษสินทรัพย์ทดสอบ",
+      "do": "db.query",
+      "sql": "select ((select count(*) from as_asset where code = :'fa') + (select count(*) from as_asset_detail where as_code = :'fa') + (select count(*) from as_asset_result where as_code = :'fa'))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

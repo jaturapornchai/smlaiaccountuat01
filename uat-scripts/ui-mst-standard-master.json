@@ -1,0 +1,1447 @@
+{
+  "id": "ui-mst-standard-master",
+  "module": "master",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "title": "ทะเบียนมาตรฐาน: กลุ่มบัญชีสินค้า เพิ่ม ค้นหา กรอง เรียง แก้ไข ลบ ตรวจ DB ครบ",
+  "description": "StandardMasterScreen บนจอ menu_setup_ic_account_group: เพิ่มรายการกรอกครบทุกช่อง (ชื่อไทย/อังกฤษ + 3 บัญชีจาก SmlLookupModal) ตรวจ DB ทุกคอลัมน์ ตรวจ validation รหัส/ชื่อว่าง รหัสซ้ำ เตือนปิดแท็บ ค้นหา (รหัส ชื่อไทย ชื่ออังกฤษ ไม่พบ) เรียง ตัวกรองขั้นสูง ตัวเลือกคอลัมน์ เปิดดู แก้ไข สลับรายการ/ยกเลิก ลบทีละรายการและลบจากรายการซ้าย แล้วพิสูจน์ 0 แถว",
+  "timeoutMs": 600000,
+  "steps": [
+    {
+      "title": "เลือกบัญชีจริงจากผังบัญชีใน smldemo (รายได้ สินค้า ต้นทุน และบัญชีสำรองไว้แก้ไข)",
+      "do": "db.query",
+      "sql": "select (select code from gl_chart_of_account where length(code) <= 10 and code like '41%' order by code limit 1) as inc_code,\n(select name_1 from gl_chart_of_account where length(code) <= 10 and code like '41%' order by code limit 1) as inc_name,\n(select code from gl_chart_of_account where length(code) <= 10 and code like '113%' order by code limit 1) as itm_code,\n(select name_1 from gl_chart_of_account where length(code) <= 10 and code like '113%' order by code limit 1) as itm_name,\n(select code from gl_chart_of_account where length(code) <= 10 and code like '51%' order by code limit 1) as cst_code,\n(select name_1 from gl_chart_of_account where length(code) <= 10 and code like '51%' order by code limit 1) as cst_name,\n(select code from gl_chart_of_account where length(code) <= 10 and code like '42%' order by code limit 1) as alt_code,\n(select name_1 from gl_chart_of_account where length(code) <= 10 and code like '42%' order by code limit 1) as alt_name",
+      "rows": 1,
+      "save": {
+        "inc_code": "inc_code",
+        "inc_name": "inc_name",
+        "itm_code": "itm_code",
+        "itm_name": "itm_name",
+        "cst_code": "cst_code",
+        "cst_name": "cst_name",
+        "alt_code": "alt_code",
+        "alt_name": "alt_name"
+      },
+      "expect": [
+        {
+          "col": "inc_code",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "itm_code",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "cst_code",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "alt_code",
+          "op": "ne",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ก่อนเริ่มยังไม่มีกลุ่มบัญชีสินค้าที่ขึ้นต้น UAT ของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_account_group where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true,
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดจอกำหนดกลุ่มบัญชีสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_account_group"
+    },
+    {
+      "title": "เปิดจอแล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นช่องค้นหาและตัวนับรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นปุ่มเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"เพิ่มรายการใหม่\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพจอเริ่มต้น",
+      "do": "ui.screenshot",
+      "name": "list-open"
+    },
+    {
+      "title": "กดเพิ่มรายการใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"เพิ่มรายการใหม่\"]"
+    },
+    {
+      "title": "หัวจอแสดงสถานะ เพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] header span:has-text(\"เพิ่มรายการใหม่\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "ปุ่มบันทึกยังกดไม่ได้เพราะยังไม่มีการแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"บันทึกข้อมูล\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องรหัสพร้อมให้กรอก (ไม่ถูกล็อก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัส:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][not(@disabled)]",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกเฉพาะชื่อ (เว้นรหัสว่าง)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ทดสอบ ไม่มีรหัส"
+    },
+    {
+      "title": "กดบันทึกทั้งที่ไม่มีรหัส",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบเตือน ข้อมูลไม่ครบถ้วน",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ข้อมูลไม่ครบถ้วน",
+      "continueOnFail": true
+    },
+    {
+      "title": "ระบบบอกให้ระบุรหัส",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "กรุณาระบุรหัส",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพเตือนไม่มีรหัส",
+      "do": "ui.screenshot",
+      "name": "warn-empty-code"
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "คำเตือนปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกรหัส",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัส:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}1"
+    },
+    {
+      "title": "ลบชื่อให้ว่าง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": ""
+    },
+    {
+      "title": "กดบันทึกทั้งที่ไม่มีชื่อ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบบอกให้ระบุชื่อ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "กรุณาระบุชื่อ",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน (ชื่อ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ยังไม่มีแถวถูกบันทึกจากการกดบันทึกที่ไม่ครบ",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_account_group where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปิดแท็บขณะกำลังเพิ่มรายการ",
+      "do": "ui.click",
+      "selector": "[data-testid=\"workspace-tab-close-menu_setup_ic_account_group\"]"
+    },
+    {
+      "title": "ระบบเตือนว่ามีข้อมูลที่ยังไม่บันทึก",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกอยู่ต่อ",
+      "do": "ui.click",
+      "selector": "[data-testid=\"tab-warning-keep-btn\"]"
+    },
+    {
+      "title": "หน้าต่างเตือนปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "รหัสที่กรอกไว้ยังอยู่ครบ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัส:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}1",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกชื่อภาษาไทย",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "กลุ่มบัญชีทดสอบ ALPHA {{run.short}}"
+    },
+    {
+      "title": "กรอกชื่อภาษาอังกฤษ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อภาษาอังกฤษ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT account group ALPHA {{run.short}}"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา รหัสบัญชีรายได้:",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"ค้นหาผังบัญชีรายได้\"]"
+    },
+    {
+      "title": "พิมพ์รหัสบัญชีใน รหัสบัญชีรายได้:",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{inc_code}}"
+    },
+    {
+      "title": "เลือกบัญชี {{inc_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{inc_code}}\"))"
+    },
+    {
+      "title": "ช่อง รหัสบัญชีรายได้: แสดงรหัสและชื่อบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัสบัญชีรายได้:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{inc_code}}~{{inc_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา รหัสบัญชีสินค้า:",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"ค้นหาผังบัญชีสินค้า\"]"
+    },
+    {
+      "title": "พิมพ์รหัสบัญชีใน รหัสบัญชีสินค้า:",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{itm_code}}"
+    },
+    {
+      "title": "เลือกบัญชี {{itm_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{itm_code}}\"))"
+    },
+    {
+      "title": "ช่อง รหัสบัญชีสินค้า: แสดงรหัสและชื่อบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัสบัญชีสินค้า:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{itm_code}}~{{itm_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา รหัสบัญชีต้นทุน:",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"ค้นหาผังบัญชีต้นทุน\"]"
+    },
+    {
+      "title": "พิมพ์รหัสบัญชีใน รหัสบัญชีต้นทุน:",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{cst_code}}"
+    },
+    {
+      "title": "เลือกบัญชี {{cst_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{cst_code}}\"))"
+    },
+    {
+      "title": "ช่อง รหัสบัญชีต้นทุน: แสดงรหัสและชื่อบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัสบัญชีต้นทุน:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{cst_code}}~{{cst_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพก่อนบันทึกรายการ A",
+      "do": "ui.screenshot",
+      "name": "form-before-save-a"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "หัวจอแสดง บันทึกล่าสุด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] header span:has-text(\"บันทึกล่าสุด\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "บันทึกรายการ A แล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: รายการ A ครบทุกคอลัมน์ตามที่กรอก",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, income_acc_code, item_acc_code, cost_acc_code, coalesce(status,0) as status from ic_account_group where code = 'UAT' || :'run_short' || '1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "กลุ่มบัญชีทดสอบ ALPHA {{run.short}}"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT account group ALPHA {{run.short}}"
+        },
+        {
+          "col": "income_acc_code",
+          "op": "eq",
+          "value": "{{inc_code}}"
+        },
+        {
+          "col": "item_acc_code",
+          "op": "eq",
+          "value": "{{itm_code}}"
+        },
+        {
+          "col": "cost_acc_code",
+          "op": "eq",
+          "value": "{{cst_code}}"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกกลับเป็นโหมดดู ช่องรหัสถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัส:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดเพิ่มรายการใหม่ (ทดสอบรหัสซ้ำ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"เพิ่มรายการใหม่\"]"
+    },
+    {
+      "title": "กรอกรหัสซ้ำกับรายการ A",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัส:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}1"
+    },
+    {
+      "title": "กรอกชื่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "รหัสซ้ำ ไม่ควรถูกบันทึก"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบแจ้ง รหัสซ้ำ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "รหัสซ้ำ",
+      "continueOnFail": true
+    },
+    {
+      "title": "ข้อความบอกว่ารหัสมีอยู่แล้ว",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "รหัส \"UAT{{run.short}}1\" มีอยู่ในระบบแล้ว",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพแจ้งรหัสซ้ำ",
+      "do": "ui.screenshot",
+      "name": "warn-duplicate"
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: รหัสซ้ำไม่ทำให้เกิดแถวที่สองและชื่อรายการ A ไม่ถูกทับ",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, income_acc_code, item_acc_code, cost_acc_code, coalesce(status,0) as status from ic_account_group where code = 'UAT' || :'run_short' || '1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "กลุ่มบัญชีทดสอบ ALPHA {{run.short}}"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปลี่ยนเป็นรหัสใหม่ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัส:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}2"
+    },
+    {
+      "title": "กรอกชื่อ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "กลุ่มสองทดสอบ BETA {{run.short}}"
+    },
+    {
+      "title": "กรอกชื่ออังกฤษ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อภาษาอังกฤษ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT account group BETA {{run.short}}"
+    },
+    {
+      "title": "กดบันทึก B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "หัวจอแสดง บันทึกล่าสุด (B)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] header span:has-text(\"บันทึกล่าสุด\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: รายการ B บันทึกแล้ว ช่องบัญชีที่ไม่เลือกเป็นค่าว่าง",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, income_acc_code, item_acc_code, cost_acc_code, coalesce(status,0) as status from ic_account_group where code = 'UAT' || :'run_short' || '2'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "กลุ่มสองทดสอบ BETA {{run.short}}"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT account group BETA {{run.short}}"
+        },
+        {
+          "col": "income_acc_code",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "item_acc_code",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "cost_acc_code",
+          "op": "eq",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: มี 2 รายการของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_account_group where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "2"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยตัวนำหน้ารหัส UAT ของรอบนี้",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "ค้นหาด้วยตัวนำหน้ารหัส UAT ของรอบนี้ (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ตัวนับรายการเป็น 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว A ในรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว B ในรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยรหัสเต็มของ A (คำค้นถูกตัดเป็นหลายคำ จึงไม่ยืนยันว่า B หายไป)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}1"
+    },
+    {
+      "title": "ค้นหาด้วยรหัสเต็มของ A (คำค้นถูกตัดเป็นหลายคำ จึงไม่ยืนยันว่า B หายไป) (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "เห็นแถว A",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยส่วนของชื่อภาษาอังกฤษ ALPHA",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "ALPHA {{run.short}}"
+    },
+    {
+      "title": "ค้นหาด้วยส่วนของชื่อภาษาอังกฤษ ALPHA (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ตัวนับรายการเป็น 1/1 (ชื่ออังกฤษ)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว A (ค้นจากชื่ออังกฤษ)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยส่วนของชื่อภาษาไทยของ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "กลุ่มสองทดสอบ BETA"
+    },
+    {
+      "title": "ค้นหาด้วยส่วนของชื่อภาษาไทยของ B (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "เห็นแถว B (ค้นจากชื่อไทย)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่เห็นแถว A (ค้นจากชื่อไทยของ B)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาคำที่ไม่มีอยู่จริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "ZZNOHITXYZ"
+    },
+    {
+      "title": "ค้นหาคำที่ไม่มีอยู่จริง (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "แสดงข้อความ ไม่พบข้อมูลที่ค้นหา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> text=ไม่พบข้อมูลที่ค้นหา",
+      "continueOnFail": true
+    },
+    {
+      "title": "ตัวนับรายการเป็น 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปุ่มล้างคำค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"ล้างคำค้นหา\"]"
+    },
+    {
+      "title": "ค้นหาใหม่ด้วย UAT ของรอบนี้",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "ค้นหาใหม่ด้วย UAT ของรอบนี้ (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "กลับมาเห็น 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกหัวคอลัมน์รหัส (เรียงน้อยไปมาก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "แถวแรกเป็นรหัส A",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr td[data-col-key=\"code\"]",
+      "text": "UAT{{run.short}}1",
+      "nth": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกหัวคอลัมน์รหัสอีกครั้ง (มากไปน้อย)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "แถวแรกเป็นรหัส B",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr td[data-col-key=\"code\"]",
+      "text": "UAT{{run.short}}2",
+      "nth": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกครั้งที่สามเพื่อยกเลิกการเรียง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่างตัวกรองขั้นสูง",
+      "do": "ui.expectVisible",
+      "selector": "text=ตัวกรองข้อมูลขั้นสูง (Advanced Filter)",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกช่วงรหัสจาก = B",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP01\"]",
+      "value": "UAT{{run.short}}2"
+    },
+    {
+      "title": "กรอกช่วงรหัสถึง = B",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP99\"]",
+      "value": "UAT{{run.short}}2"
+    },
+    {
+      "title": "กดกรองข้อมูล",
+      "do": "ui.click",
+      "selector": "button:has-text(\"กรองข้อมูล\")"
+    },
+    {
+      "title": "กรองช่วงรหัสแล้วเหลือ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เหลือเฉพาะแถว B",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว A ถูกกรองออก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูงอีกครั้ง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "ช่วงรหัสจาก = A",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP01\"]",
+      "value": "UAT{{run.short}}1"
+    },
+    {
+      "title": "ช่วงรหัสถึง = B",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP99\"]",
+      "value": "UAT{{run.short}}2"
+    },
+    {
+      "title": "กดกรองข้อมูล (ช่วง A ถึง B)",
+      "do": "ui.click",
+      "selector": "button:has-text(\"กรองข้อมูล\")"
+    },
+    {
+      "title": "ช่วง A ถึง B เหลือ 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูง (กรองด้วยชื่อ 2)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "ล้างช่วงรหัสจาก",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP01\"]",
+      "value": ""
+    },
+    {
+      "title": "ล้างช่วงรหัสถึง",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP99\"]",
+      "value": ""
+    },
+    {
+      "title": "กรอกคำค้นชื่อ 2 = ALPHA",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"คำค้นชื่อ 2\"]",
+      "value": "ALPHA"
+    },
+    {
+      "title": "กดกรองข้อมูล (ชื่อ 2)",
+      "do": "ui.click",
+      "selector": "button:has-text(\"กรองข้อมูล\")"
+    },
+    {
+      "title": "กรองด้วยชื่อ 2 เหลือ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เหลือเฉพาะแถว A",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูงเพื่อล้าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "กดล้างตัวกรอง",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ล้างตัวกรอง\")"
+    },
+    {
+      "title": "ล้างตัวกรองแล้วกลับเป็น 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างปรับแต่งคอลัมน์",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-customize-btn\"]"
+    },
+    {
+      "title": "เห็นหน้าต่างปรับแต่งคอลัมน์",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"sml-datalist-customize-modal\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นคอลัมน์ชื่อภาษาอังกฤษในตัวเลือก",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"datalist-col-row-name_2\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ตั้งรหัสผู้ใช้ที่จะบันทึกมุมมองเป็น UAT ของรอบนี้",
+      "do": "ui.fill",
+      "selector": "[data-testid=\"datalist-customize-user-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "ซ่อนคอลัมน์ชื่อภาษาอังกฤษ",
+      "do": "ui.click",
+      "selector": "[data-testid=\"datalist-col-toggle-name_2\"]"
+    },
+    {
+      "title": "เปลี่ยนหัวคอลัมน์ชื่อเป็น ชื่อกลุ่ม UAT",
+      "do": "ui.fill",
+      "selector": "[data-testid=\"datalist-col-label-name_1\"]",
+      "value": "ชื่อกลุ่ม UAT{{run.short}}"
+    },
+    {
+      "title": "ภาพหน้าต่างปรับแต่งคอลัมน์",
+      "do": "ui.screenshot",
+      "name": "customize-modal"
+    },
+    {
+      "title": "บันทึกมุมมอง",
+      "do": "ui.click",
+      "selector": "[data-testid=\"datalist-customize-save-btn\"]"
+    },
+    {
+      "title": "หน้าต่างปรับแต่งปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"sml-datalist-customize-modal\"]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "หัวคอลัมน์ชื่อใช้ข้อความใหม่",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] th[data-col-key=\"name_1\"]",
+      "text": "ชื่อกลุ่ม UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "คอลัมน์ชื่อภาษาอังกฤษถูกซ่อน",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] th[data-col-key=\"name_2\"]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: มุมมองถูกบันทึกให้ผู้ใช้ UAT ของรอบนี้",
+      "do": "db.query",
+      "sql": "select user_code, list_key, config_json::text as cfg from erp_user_datalist_config where user_code = 'UAT' || :'run_short' and list_key = 'menu_setup_ic_account_group'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "user_code",
+          "op": "eq",
+          "value": "UAT{{run.short}}"
+        },
+        {
+          "col": "cfg",
+          "op": "contains",
+          "value": "ชื่อกลุ่ม UAT{{run.short}}"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างปรับแต่งคอลัมน์อีกครั้ง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-customize-btn\"]"
+    },
+    {
+      "title": "หัวคอลัมน์ชื่อที่ตั้งไว้ยังอยู่ในหน้าต่าง",
+      "do": "ui.expectValue",
+      "selector": "[data-testid=\"datalist-col-label-name_1\"]",
+      "value": "ชื่อกลุ่ม UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดคืนค่าเริ่มต้น",
+      "do": "ui.click",
+      "selector": "[data-testid=\"datalist-customize-reset-btn\"]"
+    },
+    {
+      "title": "หน้าต่างปรับแต่งปิดหลังคืนค่า",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"sml-datalist-customize-modal\"]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "คอลัมน์ชื่อภาษาอังกฤษกลับมาแสดง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] th[data-col-key=\"name_2\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "หัวคอลัมน์ชื่อกลับเป็นค่าเริ่มต้น",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] th[data-col-key=\"name_1\"]",
+      "text": "^ชื่อ 1\\s*$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: คืนค่าเริ่มต้นแล้วคอลัมน์ในมุมมองว่าง",
+      "do": "db.query",
+      "sql": "select jsonb_array_length(config_json->'columns') as n from erp_user_datalist_config where user_code = 'UAT' || :'run_short' and list_key = 'menu_setup_ic_account_group'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ใช้ตัวเลือกคอลัมน์แล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยตัวนำหน้ารหัสของรอบนี้ (เห็นทั้ง A และ B)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "ค้นหาด้วยตัวนำหน้ารหัสของรอบนี้ (เห็นทั้ง A และ B) (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "คลิกแถว A เพื่อเปิดดู",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}1\"])"
+    },
+    {
+      "title": "รหัสแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัส:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}1",
+      "continueOnFail": true
+    },
+    {
+      "title": "ชื่อแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "กลุ่มบัญชีทดสอบ ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ชื่ออังกฤษแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อภาษาอังกฤษ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT account group ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "บัญชีรายได้แสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัสบัญชีรายได้:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{inc_code}}~{{inc_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "บัญชีสินค้าแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัสบัญชีสินค้า:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{itm_code}}~{{itm_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "บัญชีต้นทุนแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัสบัญชีต้นทุน:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{cst_code}}~{{cst_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดูข้อมูล ช่องชื่อถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพเปิดดูรายการ A",
+      "do": "ui.screenshot",
+      "name": "view-a"
+    },
+    {
+      "title": "กดแก้ไขข้อมูล",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "หัวจอแสดง โหมดแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] header span:has-text(\"โหมดแก้ไข\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "รหัสแก้ไขไม่ได้ในโหมดแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัส:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "แก้ชื่อไทย",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "กลุ่มบัญชีทดสอบ ALPHA {{run.short}} แก้ไข"
+    },
+    {
+      "title": "ล้างบัญชีต้นทุน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัสบัญชีต้นทุน:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": ""
+    },
+    {
+      "title": "ออกจากช่องบัญชีต้นทุน",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัสบัญชีต้นทุน:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาบัญชีรายได้เพื่อเปลี่ยนบัญชี",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"ค้นหาผังบัญชีรายได้\"]"
+    },
+    {
+      "title": "ค้นหาบัญชีรายได้ตัวใหม่",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{alt_code}}"
+    },
+    {
+      "title": "เลือกบัญชีรายได้ตัวใหม่",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{alt_code}}\"))"
+    },
+    {
+      "title": "ช่องบัญชีรายได้เปลี่ยนเป็นบัญชีใหม่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"รหัสบัญชีรายได้:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{alt_code}}~{{alt_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดบันทึกการแก้ไข",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "หัวจอแสดง บันทึกล่าสุด หลังแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] header span:has-text(\"บันทึกล่าสุด\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: ชื่อ บัญชีรายได้ และบัญชีต้นทุนเปลี่ยนตามที่แก้ ส่วนที่ไม่แตะคงเดิม",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, income_acc_code, item_acc_code, cost_acc_code, coalesce(status,0) as status from ic_account_group where code = 'UAT' || :'run_short' || '1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "กลุ่มบัญชีทดสอบ ALPHA {{run.short}} แก้ไข"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT account group ALPHA {{run.short}}"
+        },
+        {
+          "col": "income_acc_code",
+          "op": "eq",
+          "value": "{{alt_code}}"
+        },
+        {
+          "col": "item_acc_code",
+          "op": "eq",
+          "value": "{{itm_code}}"
+        },
+        {
+          "col": "cost_acc_code",
+          "op": "eq",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "กดแก้ไขข้อมูลอีกครั้ง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "แก้ชื่ออังกฤษแต่ยังไม่บันทึก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อภาษาอังกฤษ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ต้องไม่ถูกบันทึก"
+    },
+    {
+      "title": "คลิกแถว B ขณะมีข้อมูลค้าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}2\"])"
+    },
+    {
+      "title": "ระบบถามก่อนเปลี่ยนรายการ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "เปลี่ยนรายการ",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกทำงานต่อ",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ทำงานต่อ\")"
+    },
+    {
+      "title": "ข้อความที่แก้ค้างไว้ยังอยู่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อภาษาอังกฤษ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ต้องไม่ถูกบันทึก",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปิดหน้าจอ (ยกเลิกการแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"ปิดหน้าจอ / ยกเลิกการแก้ไข (Esc)\"]"
+    },
+    {
+      "title": "ระบบถามก่อนยกเลิกการแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ยกเลิกการแก้ไข",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกละทิ้งการแก้ไข",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ละทิ้งการแก้ไข\")"
+    },
+    {
+      "title": "หลังละทิ้ง ชื่ออังกฤษกลับเป็นค่าที่บันทึกไว้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] >> xpath=.//label[normalize-space(.)=\"ชื่อภาษาอังกฤษ:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT account group ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: ชื่ออังกฤษของ A ไม่ถูกเปลี่ยน",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, income_acc_code, item_acc_code, cost_acc_code, coalesce(status,0) as status from ic_account_group where code = 'UAT' || :'run_short' || '1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT account group ALPHA {{run.short}}"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกแถว B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}2\"])"
+    },
+    {
+      "title": "กดลบรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันการลบ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ยืนยันการลบ",
+      "continueOnFail": true
+    },
+    {
+      "title": "ข้อความยืนยันบอกรหัส B",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "UAT{{run.short}}2",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดยกเลิกการลบก่อน",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ยกเลิก\")"
+    },
+    {
+      "title": "DB: ยกเลิกการลบแล้ว B ยังอยู่",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, income_acc_code, item_acc_code, cost_acc_code, coalesce(status,0) as status from ic_account_group where code = 'UAT' || :'run_short' || '2'",
+      "rows": 1,
+      "continueOnFail": true
+    },
+    {
+      "title": "กดลบรายการอีกครั้ง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "กดยืนยันลบข้อมูล",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ลบข้อมูล\")"
+    },
+    {
+      "title": "DB: B ถูกลบ ไม่เหลือแถว",
+      "do": "db.query",
+      "sql": "select code, name_1, name_2, income_acc_code, item_acc_code, cost_acc_code, coalesce(status,0) as status from ic_account_group where code = 'UAT' || :'run_short' || '2'",
+      "rows": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว B หายจากรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}2\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ติ๊กเลือกแถว A ในรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}1\"]) td[data-col-key=\"__check__\"]"
+    },
+    {
+      "title": "กดปุ่มลบรายการที่เลือกในรายการซ้าย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-nav-delete-btn\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันลบ 1 รายการ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "1 รายการ",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดยืนยันลบข้อมูล (A)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ลบข้อมูล\")"
+    },
+    {
+      "title": "DB: A ถูกลบ ไม่เหลือแถวของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_account_group where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว A หายจากรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบแล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดจอกำหนดกลุ่มบัญชีสินค้าเพื่อเก็บกวาด",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_account_group"
+    },
+    {
+      "title": "ค้นหาข้อมูลของรอบนี้",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "ค้นหาข้อมูลของรอบนี้ (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ติ๊กเลือกแถว A (ถ้ามีเหลือ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}1\"]) td[data-col-key=\"__check__\"]",
+      "optional": true
+    },
+    {
+      "title": "ติ๊กเลือกแถว B (ถ้ามีเหลือ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}2\"]) td[data-col-key=\"__check__\"]",
+      "optional": true
+    },
+    {
+      "title": "กดลบรายการที่เลือก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_account_group\"] [data-testid=\"sml-nav-delete-btn\"]"
+    },
+    {
+      "title": "ยืนยันลบข้อมูล (ถ้ามีรายการเหลือ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ลบข้อมูล\")",
+      "optional": true
+    },
+    {
+      "title": "ปิดคำเตือน ไม่มีรายการเลือก (ถ้ามี)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")",
+      "optional": true
+    },
+    {
+      "title": "ลบมุมมองคอลัมน์ของผู้ใช้ UAT ของรอบนี้",
+      "do": "db.exec",
+      "sql": "delete from erp_user_datalist_config where user_code = 'UAT' || :'run_short' and list_key = 'menu_setup_ic_account_group'"
+    },
+    {
+      "title": "ลบกลุ่มบัญชีสินค้าของสคริปต์นี้ที่ค้างจากรอบนี้หรือรอบที่ถูกขัดจังหวะ (รหัสรูปแบบ UAT+6 ตัว+1/2 เท่านั้น)",
+      "do": "db.exec",
+      "sql": "delete from ic_account_group where code ~ '^UAT[0-9A-Z]{6}[12]$'"
+    },
+    {
+      "title": "DB: ไม่เหลือกลุ่มบัญชีสินค้าของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_account_group where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "DB: ไม่เหลือมุมมองคอลัมน์ของผู้ใช้ UAT รอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from erp_user_datalist_config where user_code = 'UAT' || :'run_short'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

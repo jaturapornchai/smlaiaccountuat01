@@ -1,0 +1,151 @@
+{
+ "id": "glx-vat-buy-report-gl-recon",
+ "title": "ภาษีซื้อ: ยอดรวมรายงานภาษีซื้อทั้งงวดเท่ากับผลรวมแถวภาษีซื้อในฐานข้อมูล และเท่ากับยอดบัญชีภาษีซื้อใน GL",
+ "module": "tax",
+ "lens": "data",
+ "severityOnFail": "S1",
+ "description": "อ่านอย่างเดียว ไม่สร้างเอกสาร · เลือกเดือนภาษีล่าสุดที่มีภาษีซื้อจริง (vat_effective_year แบบ พ.ศ. หรือ ค.ศ. + vat_effective_period, กันซ้ำ B10-002) และช่วงเลขเอกสารจริงของเดือนนั้นที่ไม่ใช่ UAT (กันเอกสารของ agent อื่นที่สร้างระหว่างรัน) · คำนวณใน SQL: จำนวนแถว, ผลรวมภาษี, ผลรวมฐาน ของ gl_journal_vat_buy (vat_type 0, × vat_calc, เอกสารยกเลิกเป็น 0) → รัน menu_report_vat_buy ช่วงเดียวกัน ยอดรวมและจำนวนแถวต้องตรงเป๊ะ → คำนวณซ้ำทันทีเพื่อยืนยันข้อมูลไม่เปลี่ยนระหว่างตรวจ → กระทบยอดกับ GL: ผลรวม (เดบิต − เครดิต) ของบัญชีภาษีซื้อของเอกสารชุดเดียวกัน = ผลรวมภาษีซื้อ (บัญชีภาษีซื้อหาจากบรรทัด GL ที่ยอดเท่ากับภาษีซื้อของเอกสารเดียวกันมากที่สุด ไม่ fix รหัส)",
+ "timeoutMs": 240000,
+ "steps": [
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "เลือกเดือนภาษีล่าสุดและช่วงเลขเอกสารภาษีซื้อจริง",
+   "do": "db.query",
+   "sql": "with m as (select ((case when coalesce(v.vat_effective_year, 0) > 2400 then coalesce(v.vat_effective_year, 0) - 543 else coalesce(v.vat_effective_year, 0) end) * 100 + coalesce(v.vat_effective_period, 0)) ym from gl_journal_vat_buy v where v.doc_no < 'UAT' and coalesce(v.vat_type, 0) = 0 and coalesce(v.vat_effective_period, 0) > 0 order by 1 desc limit 1)\nselect m.ym::text ym, to_date(m.ym::text || '01', 'YYYYMMDD')::text d1, (to_date(m.ym::text || '01', 'YYYYMMDD') + interval '1 month' - interval '1 day')::date::text d2,\n (select min(v.doc_no) from gl_journal_vat_buy v where ((case when coalesce(v.vat_effective_year, 0) > 2400 then coalesce(v.vat_effective_year, 0) - 543 else coalesce(v.vat_effective_year, 0) end) * 100 + coalesce(v.vat_effective_period, 0)) = m.ym and v.doc_no < 'UAT') fc,\n (select max(v.doc_no) from gl_journal_vat_buy v where ((case when coalesce(v.vat_effective_year, 0) > 2400 then coalesce(v.vat_effective_year, 0) - 543 else coalesce(v.vat_effective_year, 0) end) * 100 + coalesce(v.vat_effective_period, 0)) = m.ym and v.doc_no < 'UAT') tc\nfrom m",
+   "rows": 1,
+   "save": {
+    "ym": "ym",
+    "d1": "d1",
+    "d2": "d2",
+    "fc": "fc",
+    "tc": "tc"
+   }
+  },
+  {
+   "title": "คำนวณยอดที่รายงานต้องได้จากแถวภาษีซื้อในฐานข้อมูล",
+   "do": "db.query",
+   "sql": "with r as (select v.doc_no, v.trans_flag, v.vat_amount, v.vat_base_amount,\n  case when coalesce(t.last_status, 0) = 1 then 0 else coalesce(v.vat_calc, 0) end k\n from gl_journal_vat_buy v left join lateral (select x.last_status from ic_trans x where x.doc_no = v.doc_no limit 1) t on true\n where coalesce(v.vat_type, 0) = 0 and ((case when coalesce(v.vat_effective_year, 0) > 2400 then coalesce(v.vat_effective_year, 0) - 543 else coalesce(v.vat_effective_year, 0) end) * 100 + coalesce(v.vat_effective_period, 0)) = :'ym'::int and upper(v.doc_no) between upper(:'fc') and upper(:'tc'))\nselect count(*)::text n, (count(*) - 1)::text nlast, coalesce(sum(round(vat_amount * k, 2)), 0)::text vat, coalesce(sum(round(vat_base_amount * k, 2)), 0)::text base,\n count(distinct doc_no)::text docs from r",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "gt",
+     "value": "0"
+    }
+   ],
+   "save": {
+    "n": "n",
+    "nlast": "nlast",
+    "vat": "vat",
+    "base": "base"
+   }
+  },
+  {
+   "title": "รายงานภาษีซื้อ: ยอดภาษี ยอดฐาน และจำนวนแถวตรงกับฐานข้อมูล",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/report/run",
+   "body": {
+    "menuKey": "menu_report_vat_buy",
+    "mode": "summary",
+    "dateFrom": "{{d1}}",
+    "dateTo": "{{d2}}",
+    "fromCode": "{{fc}}",
+    "toCode": "{{tc}}",
+    "orderBy": "",
+    "keyword": "",
+    "viewDetail": false
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    },
+    {
+     "path": "data.totals.ภาษีมูลค่าเพิ่ม",
+     "op": "eq",
+     "value": "{{vat}}"
+    },
+    {
+     "path": "data.totals.มูลค่าสินค้า/บริการ",
+     "op": "eq",
+     "value": "{{base}}"
+    },
+    {
+     "path": "data.rows.{{nlast}}.ลำดับ",
+     "op": "eq",
+     "value": "{{n}}"
+    },
+    {
+     "path": "data.rows.{{n}}.ลำดับ",
+     "op": "empty"
+    }
+   ]
+  },
+  {
+   "title": "คำนวณซ้ำทันที: ข้อมูลภาษีซื้อช่วงนี้ไม่เปลี่ยนระหว่างตรวจ",
+   "do": "db.query",
+   "sql": "with r as (select v.doc_no, v.trans_flag, v.vat_amount, v.vat_base_amount,\n  case when coalesce(t.last_status, 0) = 1 then 0 else coalesce(v.vat_calc, 0) end k\n from gl_journal_vat_buy v left join lateral (select x.last_status from ic_trans x where x.doc_no = v.doc_no limit 1) t on true\n where coalesce(v.vat_type, 0) = 0 and ((case when coalesce(v.vat_effective_year, 0) > 2400 then coalesce(v.vat_effective_year, 0) - 543 else coalesce(v.vat_effective_year, 0) end) * 100 + coalesce(v.vat_effective_period, 0)) = :'ym'::int and upper(v.doc_no) between upper(:'fc') and upper(:'tc'))\nselect count(*)::text n, (count(*) - 1)::text nlast, coalesce(sum(round(vat_amount * k, 2)), 0)::text vat, coalesce(sum(round(vat_base_amount * k, 2)), 0)::text base,\n count(distinct doc_no)::text docs from r",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "{{n}}"
+    },
+    {
+     "col": "vat",
+     "op": "eq",
+     "value": "{{vat}}"
+    },
+    {
+     "col": "base",
+     "op": "eq",
+     "value": "{{base}}"
+    }
+   ]
+  },
+  {
+   "title": "หาบัญชีภาษีซื้อจากบรรทัด GL ของเอกสารภาษีซื้อชุดนี้",
+   "do": "db.query",
+   "sql": "with r as (select v.doc_no, v.trans_flag, v.vat_amount, v.vat_base_amount,\n  case when coalesce(t.last_status, 0) = 1 then 0 else coalesce(v.vat_calc, 0) end k\n from gl_journal_vat_buy v left join lateral (select x.last_status from ic_trans x where x.doc_no = v.doc_no limit 1) t on true\n where coalesce(v.vat_type, 0) = 0 and ((case when coalesce(v.vat_effective_year, 0) > 2400 then coalesce(v.vat_effective_year, 0) - 543 else coalesce(v.vat_effective_year, 0) end) * 100 + coalesce(v.vat_effective_period, 0)) = :'ym'::int and upper(v.doc_no) between upper(:'fc') and upper(:'tc'))\nselect d.account_code acc, count(*)::text hits from r join gl_journal_detail d on d.doc_no = r.doc_no and d.trans_flag = r.trans_flag and d.debit = r.vat_amount\ngroup by 1 order by count(*) desc, 1 limit 1",
+   "rows": 1,
+   "save": {
+    "acc": "acc"
+   }
+  },
+  {
+   "title": "กระทบยอด GL: เดบิต − เครดิต บัญชีภาษีซื้อของเอกสารชุดนี้ = ยอดภาษีซื้อในรายงาน",
+   "do": "db.query",
+   "sql": "with r as (select v.doc_no, v.trans_flag, v.vat_amount, v.vat_base_amount,\n  case when coalesce(t.last_status, 0) = 1 then 0 else coalesce(v.vat_calc, 0) end k\n from gl_journal_vat_buy v left join lateral (select x.last_status from ic_trans x where x.doc_no = v.doc_no limit 1) t on true\n where coalesce(v.vat_type, 0) = 0 and ((case when coalesce(v.vat_effective_year, 0) > 2400 then coalesce(v.vat_effective_year, 0) - 543 else coalesce(v.vat_effective_year, 0) end) * 100 + coalesce(v.vat_effective_period, 0)) = :'ym'::int and upper(v.doc_no) between upper(:'fc') and upper(:'tc')), docs as (select distinct doc_no, trans_flag from r where k <> 0)\nselect coalesce(sum(d.debit - d.credit), 0)::text gl from docs join gl_journal_detail d on d.doc_no = docs.doc_no and d.trans_flag = docs.trans_flag and d.account_code = :'acc'",
+   "rows": 1,
+   "continueOnFail": true,
+   "expect": [
+    {
+     "col": "gl",
+     "op": "eq",
+     "value": "{{vat}}"
+    }
+   ]
+  },
+  {
+   "title": "วินิจฉัย: เอกสารที่ภาษีซื้อในรายงาน ≠ ยอดบัญชีภาษีซื้อใน GL (20 อันดับแรก พร้อมบรรทัด GL ของเอกสาร)",
+   "do": "db.query",
+   "continueOnFail": true,
+   "sql": "with r as (select v.doc_no, v.trans_flag, v.vat_amount, v.vat_base_amount,\n  case when coalesce(t.last_status, 0) = 1 then 0 else coalesce(v.vat_calc, 0) end k\n from gl_journal_vat_buy v left join lateral (select x.last_status from ic_trans x where x.doc_no = v.doc_no limit 1) t on true\n where coalesce(v.vat_type, 0) = 0 and ((case when coalesce(v.vat_effective_year, 0) > 2400 then coalesce(v.vat_effective_year, 0) - 543 else coalesce(v.vat_effective_year, 0) end) * 100 + coalesce(v.vat_effective_period, 0)) = :'ym'::int and upper(v.doc_no) between upper(:'fc') and upper(:'tc')), v as (select doc_no, trans_flag, sum(round(vat_amount * k, 2)) vat from r where k <> 0 group by 1, 2),\ng as (select v.*, coalesce((select sum(d.debit - d.credit) from gl_journal_detail d where d.doc_no = v.doc_no and d.trans_flag = v.trans_flag and d.account_code = :'acc'), 0) gl,\n (select string_agg(d.account_code || ':' || d.debit::text || '/' || d.credit::text || '@' || d.trans_flag::text, ' ' order by d.line_number) from gl_journal_detail d where d.doc_no = v.doc_no) lines\n from v)\nselect doc_no, trans_flag::text tf, vat::text, gl::text, (vat - gl)::text diff, (select count(*) from g where vat <> gl)::text ndocs, (select sum(vat - gl) from g)::text total_diff, left(coalesce(lines, '(no GL)'), 400) lines\nfrom g where vat <> gl order by abs(vat - gl) desc, doc_no limit 20",
+   "rows": 0
+  },
+  {
+   "title": "วินิจฉัย: หัวเอกสารที่ต่าง + รูปแบบเอกสารมีผังลงบัญชี (erp_doc_format_gl) หรือไม่ — ไม่มี = ลงบัญชีแบบมาตรฐาน (service.go:1921)",
+   "do": "db.query",
+   "continueOnFail": true,
+   "sql": "with r as (select v.doc_no, v.trans_flag, v.vat_amount, v.vat_base_amount,\n  case when coalesce(t.last_status, 0) = 1 then 0 else coalesce(v.vat_calc, 0) end k\n from gl_journal_vat_buy v left join lateral (select x.last_status from ic_trans x where x.doc_no = v.doc_no limit 1) t on true\n where coalesce(v.vat_type, 0) = 0 and ((case when coalesce(v.vat_effective_year, 0) > 2400 then coalesce(v.vat_effective_year, 0) - 543 else coalesce(v.vat_effective_year, 0) end) * 100 + coalesce(v.vat_effective_period, 0)) = :'ym'::int and upper(v.doc_no) between upper(:'fc') and upper(:'tc')), v as (select doc_no, trans_flag, sum(round(vat_amount * k, 2)) vat from r where k <> 0 group by 1, 2),\ng as (select v.*, coalesce((select sum(d.debit - d.credit) from gl_journal_detail d where d.doc_no = v.doc_no and d.trans_flag = v.trans_flag and d.account_code = :'acc'), 0) gl from v)\nselect g.doc_no, g.trans_flag::text tf, t.doc_format_code fmt, t.total_before_vat::text before_vat, t.total_vat_value::text vat_hdr, t.total_amount::text total,\n (select count(*) from erp_doc_format_gl f where upper(f.doc_code) = upper(t.doc_format_code) and f.condition_number > 0)::text tpl_rows\nfrom g join ic_trans t on t.doc_no = g.doc_no and t.trans_flag = g.trans_flag where g.vat <> g.gl order by g.doc_no limit 20",
+   "rows": 0
+  }
+ ],
+ "cleanup": []
+}

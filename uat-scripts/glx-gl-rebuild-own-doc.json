@@ -1,0 +1,220 @@
+{
+ "id": "glx-gl-rebuild-own-doc",
+ "title": "ประมวลผลบัญชีใหม่ (menu_gl_process) เฉพาะเอกสารของเรา: GL หลังประมวลผลซ้ำต้องเหมือนเดิมทุกบรรทัดและสมดุล",
+ "module": "gl",
+ "lens": "api",
+ "severityOnFail": "S1",
+ "description": "ไม่รันประมวลผลทั้งฐาน/ช่วงวันที่ (ปุ่มในหน้าจอ menu_gl_process ส่งช่วงวันที่ = ทั้งงวด จึงไม่ใช้) · ใช้ API เดียวกัน POST /api/process/gl/rebuild แบบระบุเลขเอกสาร (สิทธิ์ write แบบเดียวกับหน้าจอบันทึกที่ส่งเอกสารตัวเองไปลงบัญชีใหม่) · สร้างบิลซื้อเชื่อ UAT-<รอบ>-GP 1 หน่วย ราคา/อัตรา VAT/ผู้ขาย/สินค้า/คลังจากบิลซื้อจริงล่าสุดที่ VAT แยกนอก → เก็บลายนิ้วมือ GL (md5 ทุกบรรทัด) → ประมวลผลบัญชีใหม่เฉพาะเอกสารนี้ ต้องได้ docsProcessed = 1 → GL ต้องเหมือนเดิมทุกบรรทัด เดบิต = เครดิต และหัวรายวันมี 1 ใบ · ตรวจเงื่อนไข: ไม่ระบุเลขเอกสารและช่วงวันที่ต้องถูกปฏิเสธ (400/403 ก่อนทำงาน, service.go:1019) · cleanup ลบบิลผ่าน /api/process/trans/delete แล้วตรวจว่าไม่เหลือแถว",
+ "timeoutMs": 300000,
+ "steps": [
+  {
+   "title": "กำหนดเลขบิลซื้อทดสอบ",
+   "do": "set",
+   "name": "pu",
+   "value": "UAT-{{run.short}}-GP"
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "เลือกผู้ขาย/สินค้า/คลัง/ราคา/อัตรา VAT จากบิลซื้อจริงล่าสุด",
+   "do": "db.query",
+   "sql": "select t.cust_code supp, d.item_code item, d.unit_code unit, d.wh_code wh, d.shelf_code shelf, d.stand_value::text stand, d.divide_value::text divide,\n round(d.price, 2)::text price, t.vat_rate::text vatrate, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') today\nfrom ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag\nwhere t.trans_flag = 12 and t.inquiry_type = 0 and coalesce(t.vat_type, 0) = 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 and d.price > 0\n  and exists (select 1 from ic_inventory i where i.code = d.item_code) and exists (select 1 from ap_supplier s where s.code = t.cust_code)\norder by t.doc_date desc, t.roworder desc limit 1",
+   "rows": 1,
+   "save": {
+    "supp": "supp",
+    "item": "item",
+    "unit": "unit",
+    "wh": "wh",
+    "shelf": "shelf",
+    "stand": "stand",
+    "divide": "divide",
+    "price": "price",
+    "vatrate": "vatrate",
+    "today": "today"
+   }
+  },
+  {
+   "title": "บันทึกบิลซื้อเชื่อทดสอบ 1 หน่วย",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/save",
+   "body": {
+    "isNew": true,
+    "confirmed": true,
+    "docNo": "{{pu}}",
+    "docDate": "{{today}}",
+    "transType": 1,
+    "transFlag": 12,
+    "inquiryType": 0,
+    "custCode": "{{supp}}",
+    "docFormatCode": "PU",
+    "taxDocNo": "{{pu}}",
+    "taxDocDate": "{{today}}",
+    "vatType": 0,
+    "vatRate": "{{vatrate}}",
+    "remark": "{{run.tag}}",
+    "lines": [
+     {
+      "itemCode": "{{item}}",
+      "unitCode": "{{unit}}",
+      "whCode": "{{wh}}",
+      "shelfCode": "{{shelf}}",
+      "standValue": "{{stand}}",
+      "divideValue": "{{divide}}",
+      "qty": "1",
+      "price": "{{price}}",
+      "sumAmount": "{{price}}",
+      "taxType": 0
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "data.docNo",
+     "op": "eq",
+     "value": "{{pu}}"
+    }
+   ]
+  },
+  {
+   "title": "เก็บลายนิ้วมือ GL ของบิลก่อนประมวลผลใหม่ (ต้องสมดุล)",
+   "do": "db.query",
+   "sql": "select md5(coalesce(string_agg(d.account_code || ':' || d.debit::text || ':' || d.credit::text, '|' order by d.account_code, d.debit, d.credit), '')) fp,\n count(*)::text n, coalesce(sum(d.debit), 0)::text dr, coalesce(sum(d.credit), 0)::text cr, (select count(*) from gl_journal h where h.doc_no = :'pu' and h.trans_flag = 12)::text hdr\nfrom gl_journal_detail d where d.doc_no = :'pu' and d.trans_flag = 12",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "gt",
+     "value": "0"
+    },
+    {
+     "col": "hdr",
+     "op": "eq",
+     "value": "1"
+    }
+   ],
+   "save": {
+    "fp": "fp",
+    "n": "n",
+    "dr": "dr",
+    "cr": "cr"
+   }
+  },
+  {
+   "title": "GL ก่อนประมวลผลใหม่: เดบิต = เครดิต",
+   "do": "db.query",
+   "sql": "select :'dr'::numeric = :'cr'::numeric as ok",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "ok",
+     "op": "eq",
+     "value": "t"
+    }
+   ]
+  },
+  {
+   "title": "ประมวลผลบัญชีใหม่เฉพาะเอกสารนี้",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/gl/rebuild",
+   "body": {
+    "docNo": "{{pu}}",
+    "transFlag": 12
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    },
+    {
+     "path": "data.docsProcessed",
+     "op": "eq",
+     "value": "1"
+    }
+   ]
+  },
+  {
+   "title": "GL หลังประมวลผลใหม่เหมือนเดิมทุกบรรทัดและยังสมดุล",
+   "do": "db.query",
+   "sql": "select md5(coalesce(string_agg(d.account_code || ':' || d.debit::text || ':' || d.credit::text, '|' order by d.account_code, d.debit, d.credit), '')) fp,\n count(*)::text n, coalesce(sum(d.debit), 0)::text dr, coalesce(sum(d.credit), 0)::text cr, (select count(*) from gl_journal h where h.doc_no = :'pu' and h.trans_flag = 12)::text hdr\nfrom gl_journal_detail d where d.doc_no = :'pu' and d.trans_flag = 12",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "fp",
+     "op": "same",
+     "value": "{{fp}}"
+    },
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "{{n}}"
+    },
+    {
+     "col": "dr",
+     "op": "eq",
+     "value": "{{dr}}"
+    },
+    {
+     "col": "cr",
+     "op": "eq",
+     "value": "{{dr}}"
+    },
+    {
+     "col": "hdr",
+     "op": "eq",
+     "value": "1"
+    }
+   ]
+  },
+  {
+   "title": "ไม่ระบุเลขเอกสารและช่วงวันที่ต้องถูกปฏิเสธก่อนทำงาน",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/gl/rebuild",
+   "body": {
+    "docNo": "",
+    "dateFrom": "",
+    "dateTo": ""
+   },
+   "expectStatus": [
+    400,
+    403
+   ]
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบบิลซื้อทดสอบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/delete",
+   "body": {
+    "docNo": "{{pu}}",
+    "transFlag": 12
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo",
+   "do": "db.query",
+   "sql": "select (select count(*) from ic_trans where doc_no = :'pu') + (select count(*) from ic_trans_detail where doc_no = :'pu') + (select count(*) from ap_ar_trans where doc_no = :'pu') + (select count(*) from ap_ar_trans_detail where doc_no = :'pu') + (select count(*) from gl_journal where doc_no = :'pu') + (select count(*) from gl_journal_detail where doc_no = :'pu') + (select count(*) from gl_journal_vat_buy where doc_no = :'pu') as left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}

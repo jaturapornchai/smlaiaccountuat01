@@ -1,0 +1,1826 @@
+{
+ "module": "reports",
+ "lens": "screen",
+ "severityOnFail": "S1",
+ "timeoutMs": 900000,
+ "id": "ui-rpt-gl",
+ "title": "รายงานบัญชีแยกประเภท + งบทดลอง บนหน้าจอ: สมุดรายวันทดสอบ 3 บรรทัด ยอดเดบิต/เครดิต/คงเหลือตรงทุกเงื่อนไข และพิมพ์ PDF",
+ "description": "เลือกผังบัญชีจริง 2 บัญชีย่อย (สินทรัพย์/หนี้สิน/ทุน) ที่ยังไม่มีรายการ GL เลย ยอดเงินจากรายการเดบิตจริง สมุดรายวันจากรายการบันทึกมือจริง แล้วบันทึกสมุดรายวันวันนี้: บัญชี A เดบิต X, บัญชี A เครดิต Y (= X/4), บัญชี B เครดิต Z (= X − Y) · บัญชีแยกประเภท: ทุกคอลัมน์ทุกแถว ยอดคงเหลือสะสม รวมท้ายวัน รวมทั้งบัญชี ท้ายตาราง จัดกลุ่ม เงื่อนไขสมุดรายวัน/ยอดรวมท้ายวัน/คำค้น/เดือนหน้า (ยอดยกมา)/บัญชี B และพิมพ์ PDF · งบทดลอง: ยอดสุทธิ/ไม่สุทธิ ช่องประเภทรายการ เดือนหน้า (ยกมา) เมื่อวาน บัญชี B รหัสที่ไม่มี และพิมพ์ PDF · ลบสมุดรายวันผ่าน API แล้วตรวจว่าไม่เหลือแถว",
+ "steps": [
+  {
+   "title": "กำหนดเลขสมุดรายวันทดสอบ",
+   "do": "set",
+   "name": "jv",
+   "value": "UAT-{{run.short}}-JV"
+  },
+  {
+   "title": "กำหนดหมายเหตุบรรทัดที่ 1",
+   "do": "set",
+   "name": "l1",
+   "value": "UAT-{{run.short}}-L1"
+  },
+  {
+   "title": "กำหนดหมายเหตุบรรทัดที่ 2",
+   "do": "set",
+   "name": "l2",
+   "value": "UAT-{{run.short}}-L2"
+  },
+  {
+   "title": "กำหนดหมายเหตุบรรทัดที่ 3",
+   "do": "set",
+   "name": "l3",
+   "value": "UAT-{{run.short}}-L3"
+  },
+  {
+   "title": "เก็บรหัสรอบสำหรับสุ่ม",
+   "do": "set",
+   "name": "rs",
+   "value": "{{run.short}}"
+  },
+  {
+   "title": "วันที่วันนี้/เมื่อวาน/เดือนก่อน (ปฏิทินไทย พ.ศ. สำหรับช่องวันที่)",
+   "do": "db.query",
+   "sql": "with b as (select (now() at time zone 'Asia/Bangkok')::date d), x as (select d, d - 1 as y, (date_trunc('month', d) - interval '1 month')::date as pf, (date_trunc('month', d)::date - 1) as pt, (date_trunc('month', d) + interval '1 month')::date as nf, (date_trunc('month', d) + interval '2 month')::date - 1 as nt from b) select to_char(d, 'YYYY-MM-DD') as today, to_char(d, 'DD/MM/') || (extract(year from d)::int + 543) as today_th, to_char(y, 'DD/MM/') || (extract(year from y)::int + 543) as yday_th, to_char(pf, 'DD/MM/') || (extract(year from pf)::int + 543) as pm_from_th, to_char(pt, 'DD/MM/') || (extract(year from pt)::int + 543) as pm_to_th, to_char(nf, 'DD/MM/') || (extract(year from nf)::int + 543) as nm_from_th, to_char(nt, 'DD/MM/') || (extract(year from nt)::int + 543) as nm_to_th, to_char(y, 'YYYY-MM-DD') as yday from x",
+   "rows": 1,
+   "save": {
+    "today": "today",
+    "today_th": "today_th",
+    "yday_th": "yday_th",
+    "pm_from_th": "pm_from_th",
+    "pm_to_th": "pm_to_th",
+    "nm_from_th": "nm_from_th",
+    "nm_to_th": "nm_to_th",
+    "yday": "yday"
+   }
+  },
+  {
+   "title": "วันที่ในรูปแบบที่รายงานแสดง (ตาม erp_option.year_type)",
+   "do": "db.query",
+   "sql": "with b as (select (now() at time zone 'Asia/Bangkok')::date as d, case when (select coalesce(year_type::text, '0') from erp_option limit 1) = '1' then 543 else 0 end as k), x as (select d, k, (date_trunc('month', d) + interval '1 month')::date as nf from b) select to_char(d, 'DD/MM/') || (extract(year from d)::int + k) as today_r, to_char(nf, 'DD/MM/') || (extract(year from nf)::int + k) as nm_from_r from x",
+   "rows": 1,
+   "save": {
+    "today_r": "today_r",
+    "nm_from_r": "nm_from_r"
+   }
+  },
+  {
+   "title": "เลือกผังบัญชีย่อยจริง 2 บัญชี (สินทรัพย์/หนี้สิน/ทุน) ที่ยังไม่มีรายการ GL เลย (สุ่มตามรอบ) แล้วเรียง A < B",
+   "do": "db.query",
+   "sql": "with c as (select c.code, c.name_1 from gl_chart_of_account c where coalesce(c.status, 0) = 0 and coalesce(c.account_type, 0) in (0, 1, 2) and c.code ~ '^[0-9A-Z._-]+$' and c.code not like 'UAT%' and coalesce(c.name_1, '') <> '' and c.name_1 = btrim(c.name_1) and c.name_1 !~ '\\s\\s' and (select count(*) from gl_chart_of_account x where x.code = c.code) = 1 and not exists (select 1 from gl_chart_of_account k where k.main_code = c.code) and not exists (select 1 from gl_journal_detail d where d.account_code = c.code) and not exists (select 1 from gl_chart_of_account o where o.code <> c.code and (strpos(upper(o.code), upper(c.code)) > 0 or strpos(upper(coalesce(o.name_1, '')), upper(c.code)) > 0)) order by md5(c.code || :'rs') limit 2), s as (select array_agg(code order by code) a, array_agg(name_1 order by code) n, count(*) k from c) select a[1] as acct_a, a[2] as acct_b, (select '^\\s*' || string_agg('\\u' || lpad(to_hex(ascii(z.ch)), 4, '0'), '\\u200b*' order by z.i) || '\\s*$' from regexp_split_to_table(n[1], '') with ordinality z(ch, i)) as rx_a, k::text as k from s",
+   "rows": 1,
+   "save": {
+    "acctA": "acct_a",
+    "acctB": "acct_b",
+    "rxA": "rx_a"
+   },
+   "expect": [
+    {
+     "col": "k",
+     "op": "eq",
+     "value": "2"
+    }
+   ]
+  },
+  {
+   "title": "ยอดเงินจากรายการเดบิตจริงล่าสุด: X, Y = X/4, Z = X − Y",
+   "do": "db.query",
+   "sql": "with s as (select d.debit as x from gl_journal_detail d where d.debit >= 4 and d.debit = round(d.debit, 2) and d.doc_no not like 'UAT%' order by (coalesce(d.trans_flag, 0) = 0) desc, d.doc_date desc, d.roworder desc limit 1), v as (select x, round(x / 4, 2) as y from s) select x::text as x, y::text as y, (x - y)::text as z, to_char(x, 'FM999,999,999,990.00') as x_f, to_char(y, 'FM999,999,999,990.00') as y_f, to_char(x - y, 'FM999,999,999,990.00') as z_f from v",
+   "rows": 1,
+   "save": {
+    "x": "x",
+    "y": "y",
+    "z": "z",
+    "x_f": "x_f",
+    "y_f": "y_f",
+    "z_f": "z_f"
+   },
+   "expect": [
+    {
+     "col": "y",
+     "op": "gt",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "สมุดรายวันและรูปแบบเลขเอกสารจากรายการบันทึกมือจริงล่าสุด (ไม่มีใช้ JV)",
+   "do": "db.query",
+   "sql": "select coalesce((select j.book_code from gl_journal j where coalesce(j.trans_flag, 0) = 0 and j.doc_no not like 'UAT%' and coalesce(j.book_code, '') ~ '^[0-9A-Z]+$' and exists (select 1 from gl_journal_book b where b.code = j.book_code) order by j.doc_date desc, j.roworder desc limit 1), 'JV') as book, coalesce((select j.doc_format_code from gl_journal j where coalesce(j.trans_flag, 0) = 0 and j.doc_no not like 'UAT%' and coalesce(j.doc_format_code, '') <> '' order by j.doc_date desc, j.roworder desc limit 1), 'JV') as jfmt",
+   "rows": 1,
+   "save": {
+    "book": "book",
+    "jfmt": "jfmt"
+   }
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "บันทึกสมุดรายวันวันนี้ 3 บรรทัด (A เดบิต X, A เครดิต Y, B เครดิต Z)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/save",
+   "body": {
+    "kind": "gl_journal",
+    "isNew": true,
+    "docNo": "{{jv}}",
+    "docDate": "{{today}}",
+    "transFlag": 0,
+    "bookCode": "{{book}}",
+    "docFormatCode": "{{jfmt}}",
+    "remark": "{{jv}}",
+    "glLines": [
+     {
+      "accountCode": "{{acctA}}",
+      "debit": "{{x}}",
+      "credit": "0",
+      "remark": "{{l1}}"
+     },
+     {
+      "accountCode": "{{acctA}}",
+      "debit": "0",
+      "credit": "{{y}}",
+      "remark": "{{l2}}"
+     },
+     {
+      "accountCode": "{{acctB}}",
+      "debit": "0",
+      "credit": "{{z}}",
+      "remark": "{{l3}}"
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    }
+   ]
+  },
+  {
+   "title": "ฐานข้อมูล: หัวรายวัน เดบิต = เครดิต = X สมุดรายวันที่เลือก และบรรทัดแยกบัญชีถูก",
+   "do": "db.query",
+   "sql": "select (select debit::text from gl_journal where doc_no = :'jv') as dr, (select credit::text from gl_journal where doc_no = :'jv') as cr, (select book_code from gl_journal where doc_no = :'jv') as bk, (select count(*)::text from gl_journal_detail where doc_no = :'jv') as n, (select sum(debit - credit)::text from gl_journal_detail where doc_no = :'jv' and account_code = :'acctA') as a_net, (select sum(credit)::text from gl_journal_detail where doc_no = :'jv' and account_code = :'acctB') as b_cr",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "dr",
+     "op": "eq",
+     "value": "{{x}}"
+    },
+    {
+     "col": "cr",
+     "op": "eq",
+     "value": "{{x}}"
+    },
+    {
+     "col": "bk",
+     "op": "same",
+     "value": "{{book}}"
+    },
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "3"
+    },
+    {
+     "col": "a_net",
+     "op": "eq",
+     "value": "{{z}}"
+    },
+    {
+     "col": "b_cr",
+     "op": "eq",
+     "value": "{{z}}"
+    }
+   ]
+  },
+  {
+   "title": "เปิดเมนู รายงานบัญชีแยกประเภท",
+   "do": "ui.openMenu",
+   "key": "menu_gl_report_sheet"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = บัญชี A",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{acctA}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = บัญชี A",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{acctA}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขสมุดรายวันทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{jv}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "เงื่อนไข สมุดรายวัน (รหัส) = สมุดรายวันจริง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] div:has(> label:has-text(\"สมุดรายวัน (รหัส)\")) > input",
+   "value": "{{book}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค่าเริ่มต้น ยอดรวมท้ายวัน ถูกติ๊ก",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] label:has-text(\"ยอดรวมท้ายวัน\") input[type=\"checkbox\"]:checked",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวชื่อบัญชี: รหัสบัญชี A",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=0 >> td >> nth=1",
+   "op": "same",
+   "text": "{{acctA}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวชื่อบัญชี: ชื่อบัญชีตรงผังบัญชี",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=0 >> td >> nth=4",
+   "op": "matches",
+   "text": "{{rxA}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวยอดยกมา: ข้อความ ยอดยกมา",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=1 >> td >> nth=4",
+   "op": "matches",
+   "text": "^ย\\u200b*อ\\u200b*ด\\u200b*ย\\u200b*ก\\u200b*ม\\u200b*า$",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บรรทัดที่ 1: รหัสบัญชี",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=1",
+   "op": "same",
+   "text": "{{acctA}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บรรทัดที่ 1: วันที่ = วันนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=2",
+   "op": "same",
+   "text": "{{today_r}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บรรทัดที่ 1: เลขที่เอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=3",
+   "op": "same",
+   "text": "{{jv}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บรรทัดที่ 1: รายละเอียด = คำอธิบายหัว/หมายเหตุบรรทัด",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=4",
+   "op": "same",
+   "text": "{{jv}}/{{l1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บรรทัดที่ 1: สมุดรายวัน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=5",
+   "op": "same",
+   "text": "{{book}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บรรทัดที่ 1: เดบิต = X",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=6",
+   "op": "eq",
+   "text": "{{x}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บรรทัดที่ 1: เครดิต ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=7",
+   "op": "empty",
+   "text": "",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บรรทัดที่ 1: ยอดคงเหลือ = X",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=8",
+   "op": "eq",
+   "text": "{{x}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บรรทัดที่ 2: เลขที่เอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=3 >> td >> nth=3",
+   "op": "same",
+   "text": "{{jv}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บรรทัดที่ 2: รายละเอียด",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=3 >> td >> nth=4",
+   "op": "same",
+   "text": "{{jv}}/{{l2}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บรรทัดที่ 2: เดบิต ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=3 >> td >> nth=6",
+   "op": "empty",
+   "text": "",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บรรทัดที่ 2: เครดิต = Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=3 >> td >> nth=7",
+   "op": "eq",
+   "text": "{{y}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บรรทัดที่ 2: ยอดคงเหลือ = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=3 >> td >> nth=8",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวรวมท้ายวัน: ข้อความ รวม 2 รายการ <วันที่>",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=4 >> td >> nth=4",
+   "op": "matches",
+   "text": "^ร\\u200b*ว\\u200b*ม\\u200b* \\u200b*2\\u200b* \\u200b*ร\\u200b*า\\u200b*ย\\u200b*ก\\u200b*า\\u200b*ร\\u200b* ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวรวมท้ายวัน: เดบิต = X",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=4 >> td >> nth=6",
+   "op": "eq",
+   "text": "{{x}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวรวมท้ายวัน: เครดิต = Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=4 >> td >> nth=7",
+   "op": "eq",
+   "text": "{{y}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวรวมท้ายวัน: ยอดคงเหลือ ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=4 >> td >> nth=8",
+   "op": "empty",
+   "text": "",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวรวมบัญชี: ข้อความ รวม 2 รายการ <รหัสบัญชี>",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=5 >> td >> nth=4",
+   "op": "matches",
+   "text": "^ร\\u200b*ว\\u200b*ม\\u200b* \\u200b*2\\u200b* \\u200b*ร\\u200b*า\\u200b*ย\\u200b*ก\\u200b*า\\u200b*ร\\u200b* .*{{acctA}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวรวมบัญชี: เดบิต = X",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=5 >> td >> nth=6",
+   "op": "eq",
+   "text": "{{x}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวรวมบัญชี: เครดิต = Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=5 >> td >> nth=7",
+   "op": "eq",
+   "text": "{{y}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวรวมบัญชี: ยอดคงเหลือ = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=5 >> td >> nth=8",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีแถวเกิน (บัญชีเดียว 6 แถว)",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=6",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: เดบิต = X (ไม่นับแถวรวมซ้ำ)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{x}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: เครดิต = Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tfoot tr >> td >> nth=2",
+   "op": "eq",
+   "text": "{{y}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "มีข้อมูล ปุ่ม ส่งออก CSV กดได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] button:has-text(\"ส่งออก CSV\"):not([disabled])",
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ gl-ledger",
+   "do": "ui.screenshot",
+   "name": "gl-ledger",
+   "continueOnFail": true
+  },
+  {
+   "title": "จัดกลุ่มชั้นที่ 1 ตาม รหัสบัญชี",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "บัญชี",
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวหัวกลุ่มบัญชี A มียอดเดบิตรวม = X (ไม่นับแถวรวมท้ายวัน/รวมบัญชีซ้ำ)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr:has-text(\"{{acctA}} (\")",
+   "op": "contains",
+   "text": "{{x_f}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ gl-ledger-group",
+   "do": "ui.screenshot",
+   "name": "gl-ledger-group",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับเป็นตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "เอาติ๊ก ยอดรวมท้ายวัน ออก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] label:has-text(\"ยอดรวมท้ายวัน\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ยอดรวมท้ายวัน ไม่ถูกติ๊กแล้ว",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] label:has-text(\"ยอดรวมท้ายวัน\") input[type=\"checkbox\"]:not(:checked)",
+   "continueOnFail": true
+  },
+  {
+   "title": "ประมวลผลโดยไม่มียอดรวมท้ายวัน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีรวมท้ายวัน: แถวที่ 5 เป็นแถวรวมบัญชี",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=4 >> td >> nth=4",
+   "op": "matches",
+   "text": "^ร\\u200b*ว\\u200b*ม\\u200b* \\u200b*2\\u200b* \\u200b*ร\\u200b*า\\u200b*ย\\u200b*ก\\u200b*า\\u200b*ร\\u200b* .*{{acctA}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีรวมท้ายวัน: ยอดคงเหลือรวมบัญชี = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=4 >> td >> nth=8",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีรวมท้ายวัน: เหลือ 5 แถว",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=5",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ติ๊ก ยอดรวมท้ายวัน กลับ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] label:has-text(\"ยอดรวมท้ายวัน\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "สมุดรายวัน = รหัสที่ไม่มี",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] div:has(> label:has-text(\"สมุดรายวัน (รหัส)\")) > input",
+   "value": "{{book}}Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "สมุดรายวันไม่ตรง",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีข้อมูล ปุ่ม ส่งออก CSV ต้องกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] button:has-text(\"ส่งออก CSV\")[disabled]",
+   "continueOnFail": true
+  },
+  {
+   "title": "สมุดรายวัน กลับเป็นสมุดรายวันจริง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] div:has(> label:has-text(\"สมุดรายวัน (รหัส)\")) > input",
+   "value": "{{book}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = UAT-NOPE-ค่าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "UAT-NOPE-{{run.short}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค้นหาคำที่ไม่มี",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = หมายเหตุบรรทัด 2",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{l2}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค้นหาหมายเหตุบรรทัดที่ 2",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหมายเหตุ: เหลือบรรทัดที่ 2 อย่างเดียว",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=4",
+   "op": "same",
+   "text": "{{jv}}/{{l2}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหมายเหตุ: แถวรวมบัญชี รวม 1 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=4 >> td >> nth=4",
+   "op": "matches",
+   "text": "^ร\\u200b*ว\\u200b*ม\\u200b* \\u200b*1\\u200b* \\u200b*ร\\u200b*า\\u200b*ย\\u200b*ก\\u200b*า\\u200b*ร\\u200b* .*{{acctA}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหมายเหตุ: ท้ายตาราง เดบิต ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tfoot tr >> td >> nth=1",
+   "op": "empty",
+   "text": "",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหมายเหตุ: ท้ายตาราง เครดิต = Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tfoot tr >> td >> nth=2",
+   "op": "eq",
+   "text": "{{y}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขสมุดรายวันทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{jv}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันแรกของเดือนหน้า",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{nm_from_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันสุดท้ายของเดือนหน้า",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{nm_to_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "เดือนหน้า",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เดือนหน้า: ยอดยกมา = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=1 >> td >> nth=8",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เดือนหน้า: แถวรวมบัญชี รวม 0 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=4",
+   "op": "matches",
+   "text": "^ร\\u200b*ว\\u200b*ม\\u200b* \\u200b*0\\u200b* \\u200b*ร\\u200b*า\\u200b*ย\\u200b*ก\\u200b*า\\u200b*ร\\u200b* .*{{acctA}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เดือนหน้า: ยอดคงเหลือรวมบัญชี = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=8",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เดือนหน้า: ท้ายตาราง เดบิต ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tfoot tr >> td >> nth=1",
+   "op": "empty",
+   "text": "",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "เมื่อวาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = บัญชี B",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{acctB}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = บัญชี B",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{acctB}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี B",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี B: รหัสบัญชี",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=1",
+   "op": "same",
+   "text": "{{acctB}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี B: รายละเอียด",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=4",
+   "op": "same",
+   "text": "{{jv}}/{{l3}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี B: เดบิต ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=6",
+   "op": "empty",
+   "text": "",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี B: เครดิต = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=7",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี B: ยอดคงเหลือติดลบ = −(X − Y)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=2 >> td >> nth=8",
+   "op": "eq",
+   "text": "-{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี B: ยอดคงเหลือรวมบัญชี = −(X − Y)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=4 >> td >> nth=8",
+   "op": "eq",
+   "text": "-{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี B: ท้ายตาราง เครดิต = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tfoot tr >> td >> nth=2",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = บัญชี A",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{acctA}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = บัญชี B",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{acctB}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี A ถึง B",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "A ถึง B: บัญชี A มาก่อน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{acctA}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "A ถึง B: บรรทัดบัญชี B เครดิต = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tbody tr:has-text(\"{{l3}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "A ถึง B: ท้ายตาราง เดบิต = X",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{x}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "A ถึง B: ท้ายตาราง เครดิต = Y + Z = X (สมดุล)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] table tfoot tr >> td >> nth=2",
+   "op": "eq",
+   "text": "{{x}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดแท็บ รูปแบบรายงาน (Studio)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] button:has-text(\"รูปแบบรายงาน (\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งชื่อหัวรายงานกำหนดเอง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"เช่น รายงานตรวจนับสินค้าคงคลังประจำเดือน...\"]",
+   "value": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งคำโปรยหัวกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"เช่น สำหรับฝ่ายบริหารและผู้สอบบัญชี...\"]",
+   "value": "UAT-{{run.short}}-SUB",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งหมายเหตุท้ายกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] input[placeholder=\"เช่น เอกสารภายในองค์กร ห้ามเผยแพร่...\"]",
+   "value": "UAT-{{run.short}}-FOOT",
+   "continueOnFail": true
+  },
+  {
+   "title": "หัวรายงานบนจอเปลี่ยนเป็นชื่อที่ตั้ง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] h1",
+   "op": "contains",
+   "text": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม พิมพ์รายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_sheet\"] button:has-text(\"พิมพ์รายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าต่างตั้งค่าหน้ากระดาษเปิด",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"][aria-label=\"หน้าต่างตั้งค่าหน้ากระดาษและพิมพ์รายงาน PDF ส่วนกลาง\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวนอน",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวนอน ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวนอน: มีเลขเอกสาร ยอดเงิน หัว/ท้ายรายงานที่ตั้ง",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{jv}}",
+    "{{acctA}}",
+    "{{acctB}}",
+    "{{x_f}}",
+    "{{y_f}}",
+    "{{z_f}}",
+    "UAT-{{run.short}}-TITLE",
+    "UAT-{{run.short}}-SUB",
+    "UAT-{{run.short}}-FOOT"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวตั้ง",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวตั้ง ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวตั้ง: ยังมีเลขเอกสารและยอดเงินครบ",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{jv}}",
+    "{{acctA}}",
+    "{{acctB}}",
+    "{{x_f}}",
+    "{{y_f}}",
+    "{{z_f}}",
+    "UAT-{{run.short}}-TITLE"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "ปิดหน้าต่างพิมพ์",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"ปิดหน้าต่าง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดเมนู รายงานงบทดลอง",
+   "do": "ui.openMenu",
+   "key": "menu_gl_report_trial_balance"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = บัญชี A",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{acctA}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = บัญชี A",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{acctA}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค่าเริ่มต้น ต้องการแสดงยอดสุทธิ ถูกติ๊ก",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] label:has-text(\"ต้องการแสดงยอดสุทธิ\") input[type=\"checkbox\"]:checked",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค่าเริ่มต้น ต้องการแสดงยอดปรับปรุง ถูกติ๊ก",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] label:has-text(\"ต้องการแสดงยอดปรับปรุง\") input[type=\"checkbox\"]:checked",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค่าเริ่มต้น รวมรายการปิดบัญชี ถูกติ๊ก",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] label:has-text(\"รวมรายการปิดบัญชี\") input[type=\"checkbox\"]:checked",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค่าเริ่มต้น รวมรายการยกไป ถูกติ๊ก",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] label:has-text(\"รวมรายการยกไป\") input[type=\"checkbox\"]:checked",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "งบทดลอง: เลขที่บัญชี A",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=1",
+   "op": "same",
+   "text": "{{acctA}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "งบทดลอง: ชื่อบัญชีตรงผังบัญชี",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=2",
+   "op": "matches",
+   "text": "{{rxA}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ยอดสุทธิ: ช่องที่ 3 ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=3",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ยอดสุทธิ: ช่องที่ 4 ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=4",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ยอดสุทธิ: ช่องที่ 5 = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=5",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ยอดสุทธิ: ช่องที่ 6 ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=6",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ยอดสุทธิ: ช่องที่ 7 = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ยอดสุทธิ: ช่องที่ 8 ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=8",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: ยอดยกมา เดบิต ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tfoot tr >> td >> nth=1",
+   "op": "empty",
+   "text": "",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: ประจำงวด เดบิต = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tfoot tr >> td >> nth=3",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: ยอดสะสม เดบิต = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tfoot tr >> td >> nth=5",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "มีข้อมูล ปุ่ม ส่งออก CSV กดได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] button:has-text(\"ส่งออก CSV\"):not([disabled])",
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ gl-tb",
+   "do": "ui.screenshot",
+   "name": "gl-tb",
+   "continueOnFail": true
+  },
+  {
+   "title": "เอาติ๊ก ต้องการแสดงยอดสุทธิ ออก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] label:has-text(\"ต้องการแสดงยอดสุทธิ\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ประมวลผลแบบไม่สุทธิ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่สุทธิ: ช่องที่ 3 ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=3",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่สุทธิ: ช่องที่ 4 ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=4",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่สุทธิ: ช่องที่ 5 = เดบิต X",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=5",
+   "op": "eq",
+   "text": "{{x}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่สุทธิ: ช่องที่ 6 = เครดิต Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=6",
+   "op": "eq",
+   "text": "{{y}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่สุทธิ: ช่องที่ 7 = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่สุทธิ: ช่องที่ 8 ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=8",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่สุทธิ: ท้ายตาราง ประจำงวด เดบิต = X",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tfoot tr >> td >> nth=3",
+   "op": "eq",
+   "text": "{{x}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่สุทธิ: ท้ายตาราง ประจำงวด เครดิต = Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tfoot tr >> td >> nth=4",
+   "op": "eq",
+   "text": "{{y}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เอาติ๊ก ยอดปรับปรุง ออก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] label:has-text(\"ต้องการแสดงยอดปรับปรุง\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "เอาติ๊ก รวมรายการปิดบัญชี ออก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] label:has-text(\"รวมรายการปิดบัญชี\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "เอาติ๊ก รวมรายการยกไป ออก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] label:has-text(\"รวมรายการยกไป\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ประมวลผลโดยไม่รวมรายการปรับปรุง/ปิดบัญชี/ยกไป",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รายการปกติ (journal_type 0) ยังอยู่: ประจำงวด เดบิต = X",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=5",
+   "op": "eq",
+   "text": "{{x}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายการปกติยังอยู่: ประจำงวด เครดิต = Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=6",
+   "op": "eq",
+   "text": "{{y}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ติ๊ก ยอดปรับปรุง กลับ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] label:has-text(\"ต้องการแสดงยอดปรับปรุง\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ติ๊ก รวมรายการปิดบัญชี กลับ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] label:has-text(\"รวมรายการปิดบัญชี\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ติ๊ก รวมรายการยกไป กลับ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] label:has-text(\"รวมรายการยกไป\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ติ๊ก ต้องการแสดงยอดสุทธิ กลับ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] label:has-text(\"ต้องการแสดงยอดสุทธิ\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันแรกของเดือนหน้า",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{nm_from_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันสุดท้ายของเดือนหน้า",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{nm_to_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "เดือนหน้า",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เดือนหน้า: ช่องที่ 3 = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=3",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เดือนหน้า: ช่องที่ 4 ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=4",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เดือนหน้า: ช่องที่ 5 ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=5",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เดือนหน้า: ช่องที่ 6 ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=6",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เดือนหน้า: ช่องที่ 7 = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เดือนหน้า: ช่องที่ 8 ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=8",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เดือนหน้า: ท้ายตาราง ยอดยกมา เดบิต = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "เมื่อวาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เมื่อวาน: ไม่มีบัญชี A",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = บัญชี B",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{acctB}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = บัญชี B",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{acctB}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี B",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี B: ประจำงวด เครดิต = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctB}}\") >> td >> nth=6",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี B: ประจำงวด เดบิต ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctB}}\") >> td >> nth=5",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี B: ยอดสะสม เครดิต = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctB}}\") >> td >> nth=8",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี B: ท้ายตาราง ยอดสะสม เครดิต = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tfoot tr >> td >> nth=6",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = บัญชี AZ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{acctA}}Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = บัญชี AZ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{acctA}}Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "รหัสบัญชีที่ไม่มี",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รหัสไม่ตรง: ไม่มีบัญชี A",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = บัญชี A",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{acctA}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = บัญชี B",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{acctB}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "บัญชี A ถึง B",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "A ถึง B: บัญชี A ประจำงวด เดบิต = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctA}}\") >> td >> nth=5",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "A ถึง B: บัญชี B ประจำงวด เครดิต = X − Y",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] table tbody tr:has-text(\"{{acctB}}\") >> td >> nth=6",
+   "op": "eq",
+   "text": "{{z}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดแท็บ รูปแบบรายงาน (Studio)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] button:has-text(\"รูปแบบรายงาน (\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งชื่อหัวรายงานกำหนดเอง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"เช่น รายงานตรวจนับสินค้าคงคลังประจำเดือน...\"]",
+   "value": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งคำโปรยหัวกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"เช่น สำหรับฝ่ายบริหารและผู้สอบบัญชี...\"]",
+   "value": "UAT-{{run.short}}-SUB",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งหมายเหตุท้ายกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] input[placeholder=\"เช่น เอกสารภายในองค์กร ห้ามเผยแพร่...\"]",
+   "value": "UAT-{{run.short}}-FOOT",
+   "continueOnFail": true
+  },
+  {
+   "title": "หัวรายงานบนจอเปลี่ยนเป็นชื่อที่ตั้ง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] h1",
+   "op": "contains",
+   "text": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม พิมพ์รายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_trial_balance\"] button:has-text(\"พิมพ์รายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าต่างตั้งค่าหน้ากระดาษเปิด",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"][aria-label=\"หน้าต่างตั้งค่าหน้ากระดาษและพิมพ์รายงาน PDF ส่วนกลาง\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวนอน",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวนอน ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวนอน: มีเลขเอกสาร ยอดเงิน หัว/ท้ายรายงานที่ตั้ง",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{acctA}}",
+    "{{acctB}}",
+    "{{z_f}}",
+    "UAT-{{run.short}}-TITLE",
+    "UAT-{{run.short}}-SUB",
+    "UAT-{{run.short}}-FOOT"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวตั้ง",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวตั้ง ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวตั้ง: ยังมีเลขเอกสารและยอดเงินครบ",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{acctA}}",
+    "{{acctB}}",
+    "{{z_f}}",
+    "UAT-{{run.short}}-TITLE"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "ปิดหน้าต่างพิมพ์",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"ปิดหน้าต่าง\")",
+   "continueOnFail": true
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบสมุดรายวันทดสอบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/delete",
+   "body": {
+    "kind": "gl_journal",
+    "docNo": "{{jv}}",
+    "transFlag": 0
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือแถวของเอกสารทดสอบในทุกตารางที่แตะ",
+   "do": "db.query",
+   "sql": "select (select count(*) from ic_trans where doc_no in (:'jv')) + (select count(*) from ic_trans_detail where doc_no in (:'jv')) + (select count(*) from ap_ar_trans where doc_no in (:'jv')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'jv')) + (select count(*) from cb_trans where doc_no in (:'jv')) + (select count(*) from cb_trans_detail where doc_no in (:'jv')) + (select count(*) from gl_journal where doc_no in (:'jv')) + (select count(*) from gl_journal_detail where doc_no in (:'jv')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'jv')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'jv')) as left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}

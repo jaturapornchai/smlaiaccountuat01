@@ -1,0 +1,1122 @@
+{
+  "id": "cb-ui-bank-deposit-withdraw",
+  "title": "หน้าจอบันทึกฝากเงิน/ถอนเงิน: กรอกครบผ่านหน้าจอ ตรวจฐานข้อมูล GL รายงาน PDF และลบ",
+  "module": "gl",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "ทดสอบผ่านหน้าจอจริง: บันทึกฝากเงิน (401) 2 บรรทัด เลือกสมุดผ่านหน้าต่างค้นหา (ชื่อบางส่วน / รหัสจากปุ่มค้นหาใต้ตาราง) ชื่อสมุดต้องเติมเอง กรอกคำอธิบาย ยอด หมายเหตุ · บันทึกโดยยังไม่ชำระต้องถูกปฏิเสธ · แท็บรับ/จ่ายชำระ กดคำนวณยอดเงินสดแล้วครบ · ตรวจหัว/บรรทัด/cb_trans และ GL ต้องลงบัญชีเงินฝากตามผังของสมุดแต่ละบรรทัด · ค้นในรายการ (ไม่พบ/พบ) เปิดซ้ำค่าตรง เปิดหน้าต่างพิมพ์ฟอร์ม · บันทึกถอนเงิน (402) ตรวจ GL · รายงาน Bank Statement ดาวน์โหลด PDF ต้องมีเลขที่และยอด · ลบผ่านหน้าจอแล้วเหลือ 0 แถว · สมุด/ยอดเงินดึงจากข้อมูลจริงตอนรัน",
+  "timeoutMs": 900000,
+  "steps": [
+    {
+      "title": "กำหนดเลขบันทึกฝากเงินทดสอบ",
+      "do": "set",
+      "name": "dm",
+      "value": "UAT-{{run.short}}-UDM"
+    },
+    {
+      "title": "กำหนดเลขบันทึกถอนเงินทดสอบ",
+      "do": "set",
+      "name": "wm",
+      "value": "UAT-{{run.short}}-UWM"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "วันที่วันนี้ (ค.ศ./พ.ศ.)",
+      "do": "db.query",
+      "sql": "select to_char(current_date, 'YYYY-MM-DD') as today, to_char(current_date, 'DD/MM/') || (extract(year from current_date)::int + 543)::text as today_be",
+      "rows": 1,
+      "save": {
+        "today": "today",
+        "today_be": "today_be"
+      }
+    },
+    {
+      "title": "ดึงสมุดธนาคาร 2 เล่มจริง (คู่ที่ผังบัญชีเงินฝากต่างกันก่อน) ชื่อบางส่วนของเล่มแรก และยอดจากบิลขายเงินสดจริง 2 ใบล่าสุด (ยอดถอน = ครึ่งหนึ่งของยอดแรก)",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "with b as (select p.code, p.name_1, p.account_code_1 as acc from erp_pass_book p join gl_chart_of_account c on c.code = p.account_code_1 where coalesce(p.code, '') ~ '^[A-Za-z0-9_.-]+$' and coalesce(p.name_1, '') <> ''),\npr as (select b1.code as book1, b1.name_1 as bname1, b1.acc as acc1, b2.code as book2, b2.name_1 as bname2, b2.acc as acc2 from b b1 join b b2 on b2.code <> b1.code order by (b1.acc <> b2.acc) desc, b1.code, b2.code limit 1),\ns as (select total_amount, row_number() over () as rn from (select total_amount from ic_trans where trans_flag = 44 and inquiry_type = 1 and doc_no not like 'UAT%' and coalesce(is_cancel, 0) = 0 and coalesce(last_status, 0) = 0 and total_amount > 0 order by doc_date desc, roworder desc limit 2) x),\na as (select (select total_amount from s where rn = 1) as amt1, coalesce((select total_amount from s where rn = 2), (select total_amount from s where rn = 1)) as amt2)\nselect pr.book1, pr.bname1, pr.acc1, pr.book2, pr.bname2, pr.acc2, substr(regexp_replace(substr(pr.bname1, 3), $re$^[ัิ-ฺ็-๎]+$re$, $e$$e$), 1, 5) as bfrag,\n a.amt1::text as amt1, a.amt2::text as amt2, (a.amt1 + a.amt2)::text as tot, round(a.amt1 / 2, 2)::text as wd,\n to_char(a.amt1, 'FM999,999,999,990.00') as amt1_fmt, to_char(a.amt2, 'FM999,999,999,990.00') as amt2_fmt, to_char(a.amt1 + a.amt2, 'FM999,999,999,990.00') as tot_fmt, to_char(round(a.amt1 / 2, 2), 'FM999,999,999,990.00') as wd_fmt,\n (case when pr.acc1 = pr.acc2 then a.amt1 + a.amt2 else a.amt1 end)::text as dr1, (case when pr.acc1 = pr.acc2 then a.amt1 + a.amt2 else a.amt2 end)::text as dr2,\n (select count(*) from erp_doc_format_gl g where upper(g.doc_code) = 'DM' and g.condition_number > 0)::text as dm_tpl\nfrom pr cross join a",
+      "save": {
+        "book1": "book1",
+        "bname1": "bname1",
+        "acc1": "acc1",
+        "book2": "book2",
+        "bname2": "bname2",
+        "acc2": "acc2",
+        "bfrag": "bfrag",
+        "amt1": "amt1",
+        "amt2": "amt2",
+        "tot": "tot",
+        "wd": "wd",
+        "amt1_fmt": "amt1_fmt",
+        "amt2_fmt": "amt2_fmt",
+        "tot_fmt": "tot_fmt",
+        "wd_fmt": "wd_fmt",
+        "dr1": "dr1",
+        "dr2": "dr2",
+        "dm_tpl": "dm_tpl"
+      }
+    },
+    {
+      "title": "เปิดเมนู",
+      "do": "ui.openMenu",
+      "key": "menu_cb_cash_payin"
+    },
+    {
+      "title": "กดเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] button:text-is(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "หน้าจออยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "ระบบรันเลขที่เอกสารให้อัตโนมัติ (ไม่ว่าง)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "",
+      "op": "ne"
+    },
+    {
+      "title": "วันที่เอกสารตั้งต้น = วันนี้ (พ.ศ.)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] div:has(> label:has-text(\"วันที่เอกสาร\")) input",
+      "value": "{{today_be}}"
+    },
+    {
+      "title": "กรอกเลขที่เอกสารทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{dm}}"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาสมุดบัญชี แถว 1 (ด้วยชื่อบางส่วน)",
+      "do": "ui.click",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"สมุดบัญชีธนาคาร\"]]/tbody/tr[1]//button[@title=\"ค้นหาสินค้า\"]",
+      "nth": 0
+    },
+    {
+      "title": "หน้าต่างค้นหาสมุดบัญชี แถว 1 (ด้วยชื่อบางส่วน)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาสมุดบัญชี แถว 1 (ด้วยชื่อบางส่วน): {{bfrag}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{bfrag}}"
+    },
+    {
+      "title": "ผลค้นหามีแถว {{book1}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{book1}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกแถว {{book1}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{book1}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "หน้าต่างค้นหาสมุดบัญชี แถว 1 (ด้วยชื่อบางส่วน)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "แถว 1: รหัสสมุด = เล่มแรก",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"สมุดบัญชีธนาคาร\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"สมุดบัญชีธนาคาร\"]/preceding-sibling::th)+1]//input",
+      "value": "{{book1}}"
+    },
+    {
+      "title": "แถว 1: ชื่อสมุดเติมอัตโนมัติ = erp_pass_book.name_1",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"ชื่อ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ชื่อ\"]/preceding-sibling::th)+1]//textarea",
+      "value": "{{bname1}}"
+    },
+    {
+      "title": "แถว 1: คำอธิบายรายการ",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"คำอธิบายรายการ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"คำอธิบายรายการ\"]/preceding-sibling::th)+1]//input",
+      "value": "ฝากเล่ม1 {{run.short}}"
+    },
+    {
+      "title": "แถว 1: จำนวนเงิน",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"จำนวนเงิน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวนเงิน\"]/preceding-sibling::th)+1]//input",
+      "value": "{{amt1}}"
+    },
+    {
+      "title": "ออกจากช่องจำนวนเงิน",
+      "do": "ui.press",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"จำนวนเงิน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวนเงิน\"]/preceding-sibling::th)+1]//input",
+      "key": "Tab"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาสมุดบัญชี แถว 2 (ด้วยรหัส จากปุ่มค้นหาใต้ตาราง = เพิ่มแถวใหม่)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] div.bg-surface-subtle button:has-text(\"ค้นหาสินค้า\")",
+      "nth": 0
+    },
+    {
+      "title": "หน้าต่างค้นหาสมุดบัญชี แถว 2 (ด้วยรหัส จากปุ่มค้นหาใต้ตาราง = เพิ่มแถวใหม่)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาสมุดบัญชี แถว 2 (ด้วยรหัส จากปุ่มค้นหาใต้ตาราง = เพิ่มแถวใหม่): {{book2}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{book2}}"
+    },
+    {
+      "title": "ผลค้นหามีแถว {{book2}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{book2}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกแถว {{book2}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{book2}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "หน้าต่างค้นหาสมุดบัญชี แถว 2 (ด้วยรหัส จากปุ่มค้นหาใต้ตาราง = เพิ่มแถวใหม่)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "แถว 2: รหัสสมุด = เล่มที่สอง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"สมุดบัญชีธนาคาร\"]]/tbody/tr[2]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"สมุดบัญชีธนาคาร\"]/preceding-sibling::th)+1]//input",
+      "value": "{{book2}}"
+    },
+    {
+      "title": "แถว 2: ชื่อสมุดเติมอัตโนมัติ",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"ชื่อ\"]]/tbody/tr[2]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ชื่อ\"]/preceding-sibling::th)+1]//textarea",
+      "value": "{{bname2}}"
+    },
+    {
+      "title": "แถว 2: คำอธิบายรายการ",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"คำอธิบายรายการ\"]]/tbody/tr[2]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"คำอธิบายรายการ\"]/preceding-sibling::th)+1]//input",
+      "value": "ฝากเล่ม2 {{run.short}}"
+    },
+    {
+      "title": "แถว 2: จำนวนเงิน",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"จำนวนเงิน\"]]/tbody/tr[2]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวนเงิน\"]/preceding-sibling::th)+1]//input",
+      "value": "{{amt2}}"
+    },
+    {
+      "title": "ออกจากช่องจำนวนเงิน",
+      "do": "ui.press",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"จำนวนเงิน\"]]/tbody/tr[2]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวนเงิน\"]/preceding-sibling::th)+1]//input",
+      "key": "Tab"
+    },
+    {
+      "title": "รวมมูลค่าทั้งสิ้น = ยอดแถว 1 + แถว 2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] label:has-text(\"รวมมูลค่าทั้งสิ้น:\") + div",
+      "text": "{{tot_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "หมายเหตุเอกสาร",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}}"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดก่อนทดสอบบันทึกที่ต้องถูกปฏิเสธ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "ทดสอบลบ: บันทึกโดยยังไม่ระบุการชำระ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] button:text-is(\"บันทึก\")"
+    },
+    {
+      "title": "ระบบปฏิเสธ: ยอดการจ่ายเงินไม่สมบูรณ์",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] span.whitespace-pre-line",
+      "text": "ยอดการจ่ายเงินไม่สมบูรณ์",
+      "timeout": 30000
+    },
+    {
+      "title": "ไม่มีเอกสารในฐานหลังถูกปฏิเสธ",
+      "do": "db.query",
+      "sql": "select count(*)::text as n from ic_trans where doc_no = :'dm'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดจากการปฏิเสธที่ตั้งใจ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดแท็บ การรับ/จ่ายชำระเงิน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] button:text-is(\"การรับ/จ่ายชำระเงิน\")"
+    },
+    {
+      "title": "ยอดตามเอกสาร = ยอดรวม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] div:has(> span:text-is(\"1. ยอดตามเอกสาร\")) > span.font-mono",
+      "text": "{{tot_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "ปุ่มคำนวณเงินสดแสดงส่วนที่เหลือ = ยอดรวม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] button:has-text(\"คำนวณยอดเงินสด\")",
+      "text": "{{tot_fmt}}"
+    },
+    {
+      "title": "กดคำนวณยอดเงินสด",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] button:has-text(\"คำนวณยอดเงินสด\")"
+    },
+    {
+      "title": "แสดงป้ายยอดชำระครบถ้วน",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] :text(\"ยอดรับ/จ่ายชำระครบถ้วนตรงตามยอดสุทธิ\")"
+    },
+    {
+      "title": "กลับแท็บรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] button:text-is(\"รายการ\")"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] button:text-is(\"บันทึก\")"
+    },
+    {
+      "title": "บันทึกสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] span.whitespace-pre-line",
+      "text": "บันทึกเอกสาร {{dm}} เรียบร้อยแล้ว",
+      "timeout": 30000
+    },
+    {
+      "title": "หน้าต่างถามพิมพ์ฟอร์ม: กด ยังไม่พิมพ์",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+      "optional": true,
+      "timeout": 5000
+    },
+    {
+      "title": "หน้าจอกลับเป็นโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "DB หัวเอกสาร 401: วันที่วันนี้ ยอดรวม หมายเหตุ รูปแบบ DM",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "select trans_flag::text as flag, to_char(doc_date, 'YYYY-MM-DD') as d, total_amount::text as total, remark, doc_format_code as fmt from ic_trans where doc_no = :'dm'",
+      "expect": [
+        {
+          "col": "flag",
+          "op": "eq",
+          "value": "401"
+        },
+        {
+          "col": "d",
+          "op": "eq",
+          "value": "{{today}}"
+        },
+        {
+          "col": "total",
+          "op": "eq",
+          "value": "{{tot}}"
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "{{run.tag}}"
+        },
+        {
+          "col": "fmt",
+          "op": "eq",
+          "value": "DM"
+        }
+      ]
+    },
+    {
+      "title": "DB บรรทัด 401: 2 แถว รหัส/ชื่อ/ยอด/คำอธิบายตรงตามที่กรอก",
+      "do": "db.query",
+      "rows": 2,
+      "sql": "select item_code, item_name, sum_amount::text as amt, remark from ic_trans_detail where doc_no = :'dm' and trans_flag = 401 order by line_number",
+      "expect": [
+        {
+          "row": 0,
+          "col": "item_code",
+          "op": "eq",
+          "value": "{{book1}}"
+        },
+        {
+          "row": 0,
+          "col": "item_name",
+          "op": "eq",
+          "value": "{{bname1}}"
+        },
+        {
+          "row": 0,
+          "col": "amt",
+          "op": "eq",
+          "value": "{{amt1}}"
+        },
+        {
+          "row": 0,
+          "col": "remark",
+          "op": "eq",
+          "value": "ฝากเล่ม1 {{run.short}}"
+        },
+        {
+          "row": 1,
+          "col": "item_code",
+          "op": "eq",
+          "value": "{{book2}}"
+        },
+        {
+          "row": 1,
+          "col": "item_name",
+          "op": "eq",
+          "value": "{{bname2}}"
+        },
+        {
+          "row": 1,
+          "col": "amt",
+          "op": "eq",
+          "value": "{{amt2}}"
+        },
+        {
+          "row": 1,
+          "col": "remark",
+          "op": "eq",
+          "value": "ฝากเล่ม2 {{run.short}}"
+        }
+      ]
+    },
+    {
+      "title": "DB การชำระ (cb_trans): เงินสด = ยอดรวม",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "select cash_amount::text as cash, coalesce(total_amount_pay, 0)::text as paid from cb_trans where doc_no = :'dm' and trans_flag = 401",
+      "expect": [
+        {
+          "col": "cash",
+          "op": "eq",
+          "value": "{{tot}}"
+        },
+        {
+          "col": "paid",
+          "op": "eq",
+          "value": "{{tot}}"
+        }
+      ]
+    },
+    {
+      "title": "GL ฝากเงิน: 1 หัว สมดุล",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "select (select count(*) from gl_journal where doc_no = :'dm')::text as head, count(*)::text as n, (coalesce(sum(debit), 0) - coalesce(sum(credit), 0))::text as diff from gl_journal_detail where doc_no = :'dm'",
+      "expect": [
+        {
+          "col": "head",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "GL ฝากเงิน: เดบิตบัญชีเงินฝากตามผังของสมุดแต่ละบรรทัด เครดิตเงินสด = ยอดรวม",
+      "do": "db.query",
+      "rows": 1,
+      "continueOnFail": true,
+      "sql": "select coalesce(sum(debit) filter (where account_code = :'acc1'), 0)::text as dr1, coalesce(sum(debit) filter (where account_code = :'acc2'), 0)::text as dr2, coalesce(sum(credit) filter (where account_code not in (:'acc1', :'acc2')), 0)::text as cr_cash, :'dm_tpl' as dm_gl_template_rows, :'acc1' as acc1, :'acc2' as acc2 from gl_journal_detail where doc_no = :'dm'",
+      "expect": [
+        {
+          "col": "dr1",
+          "op": "eq",
+          "value": "{{dr1}}"
+        },
+        {
+          "col": "dr2",
+          "op": "eq",
+          "value": "{{dr2}}"
+        },
+        {
+          "col": "cr_cash",
+          "op": "eq",
+          "value": "{{tot}}"
+        }
+      ]
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงหลังบันทึก",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "เปิดเมนูใหม่",
+      "do": "ui.openMenu",
+      "key": "menu_cb_cash_payin"
+    },
+    {
+      "title": "ค้นเลขที่ที่ไม่มีอยู่จริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{dm}}-NONE"
+    },
+    {
+      "title": "กด Enter",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "รายการว่าง 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "ค้นเลขที่เอกสารทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{dm}}"
+    },
+    {
+      "title": "กด Enter",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบ 1 รายการ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถวเลขที่เอกสารในรายการ (เปิดแบบดูข้อมูล; ปุ่มดินสอจะเปิดโหมดแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] span[title=\"{{dm}}\"]"
+    },
+    {
+      "title": "เปิดในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{dm}}"
+    },
+    {
+      "title": "เปิดซ้ำ: แถว 1 รหัสสมุด (input disabled ในโหมดดู TransItemGrid.tsx:420-429)",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"สมุดบัญชีธนาคาร\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"สมุดบัญชีธนาคาร\"]/preceding-sibling::th)+1]//input",
+      "value": "{{book1}}"
+    },
+    {
+      "title": "เปิดซ้ำ: แถว 1 จำนวนเงิน",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"จำนวนเงิน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวนเงิน\"]/preceding-sibling::th)+1]",
+      "text": "{{amt1_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: แถว 2 รหัสสมุด",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"สมุดบัญชีธนาคาร\"]]/tbody/tr[2]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"สมุดบัญชีธนาคาร\"]/preceding-sibling::th)+1]//input",
+      "value": "{{book2}}"
+    },
+    {
+      "title": "เปิดซ้ำ: แถว 2 จำนวนเงิน",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_payin\"]//table[thead//th[normalize-space()=\"จำนวนเงิน\"]]/tbody/tr[2]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวนเงิน\"]/preceding-sibling::th)+1]",
+      "text": "{{amt2_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: หมายเหตุ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}}"
+    },
+    {
+      "title": "เปิดซ้ำ: รวมมูลค่าทั้งสิ้น",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] label:has-text(\"รวมมูลค่าทั้งสิ้น:\") + div",
+      "text": "{{tot_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดหน้าต่างพิมพ์ฟอร์ม (ไม่กดสั่งพิมพ์ เพราะสั่งพิมพ์ = window.print + บันทึกประวัติ ไม่มีไฟล์ PDF ให้ดาวน์โหลด)",
+      "do": "ui.click",
+      "selector": "[data-testid=\"trans-open-doc-form-print-btn\"]"
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มเปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "ฟอร์มอยู่ในโหมดข้อมูลที่บันทึกแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"doc-form-mode-badge-saved\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "ตัวอย่างฟอร์มแสดงเลขที่เอกสาร",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "text": "{{dm}}",
+      "timeout": 30000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพหน้าต่างพิมพ์ฟอร์ม",
+      "do": "ui.screenshot",
+      "name": "form-dm"
+    },
+    {
+      "title": "ปิดหน้าต่างพิมพ์ฟอร์ม",
+      "do": "ui.click",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] button:has(span:text-is(\"ปิด\"))"
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "visible": false
+    },
+    {
+      "title": "เปิดเมนู",
+      "do": "ui.openMenu",
+      "key": "menu_cb_cash_withdraw"
+    },
+    {
+      "title": "กดเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] button:text-is(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "หน้าจออยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "ระบบรันเลขที่เอกสารให้อัตโนมัติ (ไม่ว่าง)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "",
+      "op": "ne"
+    },
+    {
+      "title": "วันที่เอกสารตั้งต้น = วันนี้ (พ.ศ.)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] div:has(> label:has-text(\"วันที่เอกสาร\")) input",
+      "value": "{{today_be}}"
+    },
+    {
+      "title": "กรอกเลขที่เอกสารทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{wm}}"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาสมุดบัญชี (ด้วยรหัส)",
+      "do": "ui.click",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_withdraw\"]//table[thead//th[normalize-space()=\"สมุดบัญชีธนาคาร\"]]/tbody/tr[1]//button[@title=\"ค้นหาสินค้า\"]",
+      "nth": 0
+    },
+    {
+      "title": "หน้าต่างค้นหาสมุดบัญชี (ด้วยรหัส)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาสมุดบัญชี (ด้วยรหัส): {{book1}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{book1}}"
+    },
+    {
+      "title": "ผลค้นหามีแถว {{book1}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{book1}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกแถว {{book1}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{book1}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "หน้าต่างค้นหาสมุดบัญชี (ด้วยรหัส)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "ถอน: ชื่อสมุดเติมอัตโนมัติ",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_withdraw\"]//table[thead//th[normalize-space()=\"ชื่อ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ชื่อ\"]/preceding-sibling::th)+1]//textarea",
+      "value": "{{bname1}}"
+    },
+    {
+      "title": "ถอน: คำอธิบายรายการ",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_withdraw\"]//table[thead//th[normalize-space()=\"คำอธิบายรายการ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"คำอธิบายรายการ\"]/preceding-sibling::th)+1]//input",
+      "value": "ถอนเล่ม1 {{run.short}}"
+    },
+    {
+      "title": "ถอน: จำนวนเงิน",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_withdraw\"]//table[thead//th[normalize-space()=\"จำนวนเงิน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวนเงิน\"]/preceding-sibling::th)+1]//input",
+      "value": "{{wd}}"
+    },
+    {
+      "title": "ออกจากช่องจำนวนเงิน",
+      "do": "ui.press",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cb_cash_withdraw\"]//table[thead//th[normalize-space()=\"จำนวนเงิน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวนเงิน\"]/preceding-sibling::th)+1]//input",
+      "key": "Tab"
+    },
+    {
+      "title": "ถอน: รวมมูลค่าทั้งสิ้น",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] label:has-text(\"รวมมูลค่าทั้งสิ้น:\") + div",
+      "text": "{{wd_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "ถอน: หมายเหตุ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}}"
+    },
+    {
+      "title": "เปิดแท็บ การรับ/จ่ายชำระเงิน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] button:text-is(\"การรับ/จ่ายชำระเงิน\")"
+    },
+    {
+      "title": "ยอดตามเอกสาร = ยอดรวม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] div:has(> span:text-is(\"1. ยอดตามเอกสาร\")) > span.font-mono",
+      "text": "{{wd_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "ปุ่มคำนวณเงินสดแสดงส่วนที่เหลือ = ยอดรวม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] button:has-text(\"คำนวณยอดเงินสด\")",
+      "text": "{{wd_fmt}}"
+    },
+    {
+      "title": "กดคำนวณยอดเงินสด",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] button:has-text(\"คำนวณยอดเงินสด\")"
+    },
+    {
+      "title": "แสดงป้ายยอดชำระครบถ้วน",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] :text(\"ยอดรับ/จ่ายชำระครบถ้วนตรงตามยอดสุทธิ\")"
+    },
+    {
+      "title": "กลับแท็บรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] button:text-is(\"รายการ\")"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] button:text-is(\"บันทึก\")"
+    },
+    {
+      "title": "บันทึกสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] span.whitespace-pre-line",
+      "text": "บันทึกเอกสาร {{wm}} เรียบร้อยแล้ว",
+      "timeout": 30000
+    },
+    {
+      "title": "หน้าต่างถามพิมพ์ฟอร์ม: กด ยังไม่พิมพ์",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+      "optional": true,
+      "timeout": 5000
+    },
+    {
+      "title": "หน้าจอกลับเป็นโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "DB ถอน 402: หัว/บรรทัด/เงินสด",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "select t.total_amount::text as total, d.item_code, d.item_name, d.sum_amount::text as amt, d.remark, (select cash_amount from cb_trans c where c.doc_no = t.doc_no and c.trans_flag = 402)::text as cash from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag where t.doc_no = :'wm' and t.trans_flag = 402",
+      "expect": [
+        {
+          "col": "total",
+          "op": "eq",
+          "value": "{{wd}}"
+        },
+        {
+          "col": "item_code",
+          "op": "eq",
+          "value": "{{book1}}"
+        },
+        {
+          "col": "item_name",
+          "op": "eq",
+          "value": "{{bname1}}"
+        },
+        {
+          "col": "amt",
+          "op": "eq",
+          "value": "{{wd}}"
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "ถอนเล่ม1 {{run.short}}"
+        },
+        {
+          "col": "cash",
+          "op": "eq",
+          "value": "{{wd}}"
+        }
+      ]
+    },
+    {
+      "title": "GL ถอนเงิน: 1 หัว สมดุล เครดิตบัญชีเงินฝากเล่มแรก = ยอดถอน เดบิตเงินสด = ยอดถอน",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "select (select count(*) from gl_journal where doc_no = :'wm')::text as head, count(*)::text as n, (coalesce(sum(debit), 0) - coalesce(sum(credit), 0))::text as diff, coalesce(sum(credit) filter (where account_code = :'acc1'), 0)::text as cr_bank, coalesce(sum(debit) filter (where account_code <> :'acc1'), 0)::text as dr_cash from gl_journal_detail where doc_no = :'wm'",
+      "expect": [
+        {
+          "col": "head",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "cr_bank",
+          "op": "eq",
+          "value": "{{wd}}"
+        },
+        {
+          "col": "dr_cash",
+          "op": "eq",
+          "value": "{{wd}}"
+        }
+      ]
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงหลังบันทึกถอน",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "เปิดรายงาน",
+      "do": "ui.openMenu",
+      "key": "_menu_bank_statement"
+    },
+    {
+      "title": "ค้นเงื่อนไข {{dm}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"_menu_bank_statement\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+      "value": "{{dm}}"
+    },
+    {
+      "title": "กดประมวลผลรายงาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"_menu_bank_statement\"] button:has-text(\"ประมวลผลรายงาน\")"
+    },
+    {
+      "title": "รายงานแสดงเลขที่เอกสารทดสอบ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"_menu_bank_statement\"]",
+      "text": "{{dm}}",
+      "timeout": 60000
+    },
+    {
+      "title": "กดพิมพ์รายงาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"_menu_bank_statement\"] button:has-text(\"พิมพ์รายงาน\")"
+    },
+    {
+      "title": "ดาวน์โหลด PDF รายงาน มีเลขที่และยอดเงินของเอกสารทดสอบ",
+      "do": "ui.pdf",
+      "selector": "button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+      "contains": [
+        "{{dm}}",
+        "{{amt1_fmt}}",
+        "{{amt2_fmt}}"
+      ],
+      "timeout": 120000
+    },
+    {
+      "title": "เปิดเมนูใหม่",
+      "do": "ui.openMenu",
+      "key": "menu_cb_cash_withdraw"
+    },
+    {
+      "title": "ค้นเลขที่ที่ไม่มีอยู่จริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{wm}}-NONE"
+    },
+    {
+      "title": "กด Enter",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "รายการว่าง 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "ค้นเลขที่เอกสารทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{wm}}"
+    },
+    {
+      "title": "กด Enter",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบ 1 รายการ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถวเลขที่เอกสารในรายการ (เปิดแบบดูข้อมูล; ปุ่มดินสอจะเปิดโหมดแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] span[title=\"{{wm}}\"]"
+    },
+    {
+      "title": "เปิดในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{wm}}"
+    },
+    {
+      "title": "กดลบ (ยืนยันอัตโนมัติ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] button:text-is(\"ลบ\")"
+    },
+    {
+      "title": "ลบสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_withdraw\"] span.whitespace-pre-line",
+      "text": "ลบเอกสาร {{wm}} เรียบร้อยแล้ว",
+      "timeout": 30000
+    },
+    {
+      "title": "เปิดเมนูใหม่",
+      "do": "ui.openMenu",
+      "key": "menu_cb_cash_payin"
+    },
+    {
+      "title": "ค้นเลขที่ที่ไม่มีอยู่จริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{dm}}-NONE"
+    },
+    {
+      "title": "กด Enter",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "รายการว่าง 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "ค้นเลขที่เอกสารทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{dm}}"
+    },
+    {
+      "title": "กด Enter",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบ 1 รายการ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถวเลขที่เอกสารในรายการ (เปิดแบบดูข้อมูล; ปุ่มดินสอจะเปิดโหมดแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] span[title=\"{{dm}}\"]"
+    },
+    {
+      "title": "เปิดในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{dm}}"
+    },
+    {
+      "title": "กดลบ (ยืนยันอัตโนมัติ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] button:text-is(\"ลบ\")"
+    },
+    {
+      "title": "ลบสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] span.whitespace-pre-line",
+      "text": "ลบเอกสาร {{dm}} เรียบร้อยแล้ว",
+      "timeout": 30000
+    },
+    {
+      "title": "ลบผ่านหน้าจอแล้วไม่เหลือแถว (เอกสาร บรรทัด การชำระ GL)",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "select ((select count(*) from ic_trans where doc_no in (:'dm', :'wm')) + (select count(*) from ic_trans_detail where doc_no in (:'dm', :'wm')) + (select count(*) from cb_trans where doc_no in (:'dm', :'wm')) + (select count(*) from cb_trans_detail where doc_no in (:'dm', :'wm')) + (select count(*) from gl_journal where doc_no in (:'dm', :'wm')) + (select count(*) from gl_journal_detail where doc_no in (:'dm', :'wm')))::text as n",
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ค้นในรายการอีกครั้ง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{dm}}"
+    },
+    {
+      "title": "กด Enter",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ไม่พบแล้ว 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cb_cash_payin\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงตลอดการลบ",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบบันทึกถอนทดสอบ (ถ้ายังเหลือ)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{wm}}",
+        "transFlag": 402
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบบันทึกฝากทดสอบ (ถ้ายังเหลือ)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{dm}}",
+        "transFlag": 401
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบ",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ic_trans where doc_no in (:'dm', :'wm')) + (select count(*) from ic_trans_detail where doc_no in (:'dm', :'wm')) + (select count(*) from cb_trans where doc_no in (:'dm', :'wm')) + (select count(*) from cb_trans_detail where doc_no in (:'dm', :'wm')) + (select count(*) from gl_journal where doc_no in (:'dm', :'wm')) + (select count(*) from gl_journal_detail where doc_no in (:'dm', :'wm')))::text as n",
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

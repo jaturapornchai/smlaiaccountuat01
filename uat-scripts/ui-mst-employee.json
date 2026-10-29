@@ -1,0 +1,4647 @@
+{
+  "id": "ui-mst-employee",
+  "module": "master",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "title": "ทะเบียนพนักงาน: เพิ่มกรอกครบทุกช่อง ค้นหา กรอง เรียง แก้ไข คัดลอก รหัสผ่าน กันลบเมื่อถูกใช้ ลบ ตรวจ DB ครบ",
+  "description": "EmployeeScreen บนจอ menu_setup_staff (erp_user): เพิ่มพนักงานกรอกครบทุกช่องในทุกหมวด (ข้อมูลพนักงาน สิทธิ์ 17 ช่องติ๊ก รหัสผ่านสุ่มตอนรัน คลัง/ที่เก็บ/สาขา/ฝ่าย/แผนกจาก SmlLookupModal วงเงินอนุมัติและเงินเดือน 13 ช่องแบบ decimal string) ตรวจ DB ทุกคอลัมน์ validation รหัส/ชื่อว่าง รหัสซ้ำ เตือนปิดแท็บ ค้นหา เรียง ตัวกรองขั้นสูง เปิดดู (รหัสผ่านไม่ถูกแสดงกลับ) แก้ไขด้วยปุ่มแก้ไขและปุ่มดินสอ แก้รหัสผ่านและแก้โดยไม่แตะรหัสผ่าน พิมพ์รหัสแผนกตรงๆ ล้างฝ่าย สลับรายการ/ยกเลิก คัดลอกพนักงาน กันลบเมื่อถูกอ้างอิงใน ic_trans (พนักงานขาย/ผู้บันทึก) ลบทีละรายการและลบหลายรายการพร้อมกันแล้วพิสูจน์ 0 แถว",
+  "timeoutMs": 900000,
+  "steps": [
+    {
+      "title": "เลือกพนักงานจริงที่มีแผนกอยู่ใน smldemo ไว้ทดสอบค้นหาและเปิดดู",
+      "do": "db.query",
+      "sql": "select u.code as real_code, upper(u.code) as real_code_up, u.name_1 as real_name, u.department as real_dept, d.name_1 as real_dept_name from erp_user u join erp_department_list d on upper(d.code) = upper(u.department) where u.code !~ '^UAT' and coalesce(u.name_1,'') <> '' and u.code !~ '[\"\\\\]' and u.name_1 !~ '[\"\\\\]' and d.name_1 !~ '[\"\\\\]' order by u.code limit 1",
+      "rows": 1,
+      "save": {
+        "real_code": "real_code",
+        "real_code_up": "real_code_up",
+        "real_name": "real_name",
+        "real_dept": "real_dept",
+        "real_dept_name": "real_dept_name"
+      },
+      "expect": [
+        {
+          "col": "real_code",
+          "op": "ne",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "รหัสพนักงานแรกสุดของรายการ (จอต้องโหลดรายการแรกให้อัตโนมัติ)",
+      "do": "db.query",
+      "sql": "select upper(code) as first_code from erp_user order by code limit 1",
+      "rows": 1,
+      "save": {
+        "first_code": "first_code"
+      },
+      "expect": [
+        {
+          "col": "first_code",
+          "op": "ne",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกคลังพร้อมที่เก็บจริง 2 คู่ (คนละคลัง)",
+      "do": "db.query",
+      "sql": "with p as (select distinct on (w.code) w.code as wh_code, w.name_1 as wh_name, s.code as sh_code, s.name_1 as sh_name from ic_shelf s join ic_warehouse w on upper(w.code) = upper(s.whcode) where w.code !~ '^UAT' and s.code !~ '^UAT' and coalesce(w.name_1,'') <> '' and coalesce(s.name_1,'') <> '' and w.code !~ '[\"\\\\]' and s.code !~ '[\"\\\\]' and w.name_1 !~ '[\"\\\\]' and s.name_1 !~ '[\"\\\\]' order by w.code, s.code) select (select wh_code from p order by wh_code limit 1) as wh1_code, (select wh_name from p order by wh_code limit 1) as wh1_name, (select sh_code from p order by wh_code limit 1) as sh1_code, (select sh_name from p order by wh_code limit 1) as sh1_name, (select wh_code from p order by wh_code offset 1 limit 1) as wh2_code, (select wh_name from p order by wh_code offset 1 limit 1) as wh2_name, (select sh_code from p order by wh_code offset 1 limit 1) as sh2_code, (select sh_name from p order by wh_code offset 1 limit 1) as sh2_name",
+      "rows": 1,
+      "save": {
+        "wh1_code": "wh1_code",
+        "wh1_name": "wh1_name",
+        "sh1_code": "sh1_code",
+        "sh1_name": "sh1_name",
+        "wh2_code": "wh2_code",
+        "wh2_name": "wh2_name",
+        "sh2_code": "sh2_code",
+        "sh2_name": "sh2_name"
+      },
+      "expect": [
+        {
+          "col": "wh1_code",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "wh2_code",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "sh1_code",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "sh2_code",
+          "op": "ne",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกสาขาจริง 2 สาขา",
+      "do": "db.query",
+      "sql": "with p as (select code, name_1 from erp_branch_list where code !~ '^UAT' and coalesce(name_1,'') <> '' and code !~ '[\"\\\\]' and name_1 !~ '[\"\\\\]') select (select code from p order by code limit 1) as br1_code, (select name_1 from p order by code limit 1) as br1_name, (select code from p order by code offset 1 limit 1) as br2_code, (select name_1 from p order by code offset 1 limit 1) as br2_name",
+      "rows": 1,
+      "save": {
+        "br1_code": "br1_code",
+        "br1_name": "br1_name",
+        "br2_code": "br2_code",
+        "br2_name": "br2_name"
+      },
+      "expect": [
+        {
+          "col": "br1_code",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "br2_code",
+          "op": "ne",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกแผนกจริง 2 แผนก",
+      "do": "db.query",
+      "sql": "with p as (select code, name_1 from erp_department_list where code !~ '^UAT' and coalesce(name_1,'') <> '' and code !~ '[\"\\\\]' and name_1 !~ '[\"\\\\]') select (select code from p order by code limit 1) as dp1_code, (select name_1 from p order by code limit 1) as dp1_name, (select code from p order by code offset 1 limit 1) as dp2_code, (select name_1 from p order by code offset 1 limit 1) as dp2_name",
+      "rows": 1,
+      "save": {
+        "dp1_code": "dp1_code",
+        "dp1_name": "dp1_name",
+        "dp2_code": "dp2_code",
+        "dp2_name": "dp2_name"
+      },
+      "expect": [
+        {
+          "col": "dp1_code",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "dp2_code",
+          "op": "ne",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "สร้างรหัสผ่านสำหรับพนักงานทดสอบตอนรัน (สุ่มใหม่ทุกครั้ง ไม่เขียนไว้ในสคริปต์)",
+      "do": "db.query",
+      "sql": "select 'Pw' || substr(md5(random()::text), 1, 10) || 'a1' as pw1, 'Pw' || substr(md5(random()::text || clock_timestamp()::text), 1, 10) || 'b2' as pw2",
+      "rows": 1,
+      "save": {
+        "pw1": "pw1",
+        "pw2": "pw2"
+      },
+      "expect": [
+        {
+          "col": "pw1",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "pw2",
+          "op": "ne",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ก่อนเริ่มยังไม่มีพนักงานที่ขึ้นต้น UAT ของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from erp_user where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ก่อนเริ่มยังไม่มีฝ่าย UAT ของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from erp_side_list where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "smldemo ไม่มีฝ่ายให้เลือก (erp_side_list ว่าง) จึงสร้างฝ่าย UAT ของรอบนี้ 2 รายการ: รหัสสั้น 10 ตัวใช้ในขั้นตอนหลัก และรหัสยาว 17 ตัวใช้ทดสอบข้อความเตือนรหัสยาวเกินคอลัมน์",
+      "do": "db.exec",
+      "sql": "insert into erp_side_list (code, name_1) values ('UAT' || :'run_short' || 'S', 'ฝ่ายทดสอบ UAT' || :'run_short'), ('UAT' || :'run_short' || 'SIDELONG', 'ฝ่ายทดสอบรหัสยาว UAT' || :'run_short')",
+      "affected": 2
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true,
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดจอกำหนดพนักงาน",
+      "do": "ui.openMenu",
+      "key": "menu_setup_staff"
+    },
+    {
+      "title": "เปิดจอแล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นช่องค้นหาและตัวนับรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-search-input\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นปุ่มเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"เพิ่มรายการใหม่\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นหัวข้อ กำหนดพนักงาน",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] h1:has-text(\"กำหนดพนักงาน\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นหมวด ข้อมูลพนักงาน",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] header.card-head span:text-is(\"ข้อมูลพนักงาน\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นหมวด สิทธิ์การใช้งาน",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] header.card-head span:text-is(\"สิทธิ์การใช้งาน\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นหมวด คลัง ที่เก็บ และสาขา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] header.card-head span:text-is(\"คลัง ที่เก็บ และสาขา\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นหมวด สิทธิ์เอกสารและต้นทุน",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] header.card-head span:text-is(\"สิทธิ์เอกสารและต้นทุน\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นหมวด วงเงินอนุมัติ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] header.card-head span:text-is(\"วงเงินอนุมัติ\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นหมวด รูปภาพและลายมือชื่อ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] header.card-head span:text-is(\"รูปภาพและลายมือชื่อ\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "จอโหลดพนักงานรายการแรกให้อัตโนมัติ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code",
+      "value": "{{first_code}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องรหัสถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code[disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องชื่อ 1 ถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1[disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ไม่มีปุ่มบันทึก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"บันทึกข้อมูล\"]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ส่วนรูปภาพและลายมือชื่อแสดงช่องว่าง (จอนี้ยังไม่มีการอัปโหลดรูป)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> text=ยังไม่ได้เลือกรูป",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพจอเริ่มต้น",
+      "do": "ui.screenshot",
+      "name": "emp-open"
+    },
+    {
+      "title": "ค้นหาพนักงานจริงด้วยรหัส",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{real_code}}"
+    },
+    {
+      "title": "ค้นหาพนักงานจริงด้วยรหัส (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "เห็นแถวพนักงานจริงในรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ {{real_code}}\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดูพนักงานจริง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ {{real_code}}\"])"
+    },
+    {
+      "title": "ช่องรหัสแสดงรหัสพนักงานจริง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code",
+      "value": "{{real_code_up}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องชื่อ 1 แสดงชื่อพนักงานจริง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1",
+      "value": "{{real_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องแผนกแสดงรหัสและชื่อแผนกจริง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"แผนก\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{real_dept}}~{{real_dept_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องรหัสผ่านว่างเสมอ (ไม่ดึงรหัสผ่านมาแสดง)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #password",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "ล้างคำค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"ล้างคำค้นหา\"]"
+    },
+    {
+      "title": "กดเพิ่มรายการใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"เพิ่มรายการใหม่\"]"
+    },
+    {
+      "title": "หัวจอแสดง เพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] header span:has-text(\"เพิ่มรายการใหม่\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "ปุ่มบันทึกกดไม่ได้เพราะยังไม่มีการแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"บันทึกข้อมูล\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องสถานะติ๊กไว้ตั้งต้น",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #status:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องรหัสพร้อมให้กรอก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code:not([disabled])",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกเฉพาะชื่อ 1 (เว้นรหัสว่าง)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1",
+      "value": "ทดสอบ ไม่มีรหัส"
+    },
+    {
+      "title": "หัวจอแสดง แก้ไขแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] header span:has-text(\"แก้ไขแล้ว\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดบันทึกทั้งที่ไม่มีรหัส",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบเตือนข้อมูลไม่สมบูรณ์ รหัสพนักงาน",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ข้อมูลไม่สมบูรณ์ : รหัสพนักงาน",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพเตือนไม่มีรหัส",
+      "do": "ui.screenshot",
+      "name": "emp-warn-code"
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "คำเตือนปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกรหัสตัวพิมพ์เล็ก (ระบบต้องแปลงเป็นตัวพิมพ์ใหญ่)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code",
+      "value": "uat{{run.short}}e1"
+    },
+    {
+      "title": "ช่องรหัสแสดงตัวพิมพ์ใหญ่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code",
+      "value": "UAT{{run.short}}E1",
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบชื่อ 1 ให้เหลือแต่ช่องว่าง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1",
+      "value": "   "
+    },
+    {
+      "title": "กดบันทึกทั้งที่ชื่อ 1 เป็นช่องว่าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบเตือนข้อมูลไม่สมบูรณ์ ชื่อ 1",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ข้อมูลไม่สมบูรณ์ : ชื่อ 1 (ไทย)",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน (ชื่อ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: ยังไม่มีแถวถูกบันทึกจากการกดบันทึกที่ไม่ครบ",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from erp_user where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปิดแท็บขณะกำลังเพิ่มรายการ",
+      "do": "ui.click",
+      "selector": "[data-testid=\"workspace-tab-close-menu_setup_staff\"]"
+    },
+    {
+      "title": "ระบบเตือนว่ามีข้อมูลที่ยังไม่บันทึก",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกอยู่ต่อ",
+      "do": "ui.click",
+      "selector": "[data-testid=\"tab-warning-keep-btn\"]"
+    },
+    {
+      "title": "หน้าต่างเตือนปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "รหัสที่กรอกไว้ยังอยู่ครบ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code",
+      "value": "UAT{{run.short}}E1",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกชื่อ 1 (มีช่องว่างหน้าหลัง)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1",
+      "value": "  พนักงานทดสอบ ALPHA {{run.short}}  "
+    },
+    {
+      "title": "กรอก ชื่อ 2",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_2",
+      "value": "UAT EMPLOYEE ALPHA {{run.short}}"
+    },
+    {
+      "title": "กรอก เลขที่บัตรประชาชน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #id_card",
+      "value": "0000000000001"
+    },
+    {
+      "title": "กรอก ที่อยู่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #address",
+      "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110"
+    },
+    {
+      "title": "กรอก โทรศัพท์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #telephone",
+      "value": "02-000-0001"
+    },
+    {
+      "title": "กรอก มือถือ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #mobile",
+      "value": "080-000-0001"
+    },
+    {
+      "title": "ติ๊ก สามารถแก้ไขราคาได้",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #price_level_1"
+    },
+    {
+      "title": "ติ๊ก สามารถถอนมีสิทธิ์ราคาตามกลุ่มลูกค้าได้",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #price_level_2"
+    },
+    {
+      "title": "ติ๊ก สามารถใช้ระบบ POS",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #pos_cashier"
+    },
+    {
+      "title": "ติ๊ก สามารถแก้ไขส่วนลดสินค้าได้",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #discount_level_1"
+    },
+    {
+      "title": "ติ๊ก สามารถยกเลิกใบเสร็จ POS",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #cancel_pos_bill_level"
+    },
+    {
+      "title": "ติ๊ก สามารถเปิดลิ้นชัก POS",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #open_cash_drawer"
+    },
+    {
+      "title": "ติ๊ก สามารถแสดงยอดขาย POS",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #show_total_balance"
+    },
+    {
+      "title": "ติ๊ก อนุญาตให้เปลี่ยนสาขาได้",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #change_branch_code"
+    },
+    {
+      "title": "ติ๊ก อนุญาตให้ล็อคเอกสาร",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #lock_bill"
+    },
+    {
+      "title": "ติ๊ก สามารถถอนอนุมัติวงเงินเครดิตลูกค้า",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #approve_ar_credit"
+    },
+    {
+      "title": "ติ๊ก สามารถดูต้นทุนสินค้า",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #show_item_cost"
+    },
+    {
+      "title": "ติ๊ก ห้ามแก้ไขวันที่และเลขที่เอกสาร",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #disable_edit_doc_no_doc_date_user"
+    },
+    {
+      "title": "ติ๊ก สามารถลบรายการสินค้า (POS)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #delete_item_pos"
+    },
+    {
+      "title": "ติ๊ก สามารถล้างประวัติการพิมพ์เอกสาร",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #reset_print_log"
+    },
+    {
+      "title": "ติ๊ก สามารถ copy เอกสารได้",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #is_copy_doc"
+    },
+    {
+      "title": "ติ๊ก เป็น Login User",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #is_login_user"
+    },
+    {
+      "title": "กรอกรหัสผ่าน (สุ่มตอนรัน)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #password",
+      "value": "{{pw1}}"
+    },
+    {
+      "title": "กรอก ตำแหน่ง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #title",
+      "value": "ผู้จัดการฝ่ายทดสอบ {{run.short}}"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา คลังมาตรฐาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"คลังมาตรฐาน\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง ค้นหาคลังสินค้า",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"ค้นหาคลังสินค้า\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา คลังมาตรฐาน",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{wh1_code}}"
+    },
+    {
+      "title": "เลือกรายการ {{wh1_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{wh1_code}}\"))"
+    },
+    {
+      "title": "ช่อง คลังมาตรฐาน แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"คลังมาตรฐาน\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{wh1_code}}~{{wh1_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา ที่เก็บมาตรฐาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"ที่เก็บมาตรฐาน\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง ค้นหาที่เก็บสินค้า",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"ค้นหาที่เก็บสินค้า\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา ที่เก็บมาตรฐาน",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{sh1_code}}"
+    },
+    {
+      "title": "เลือกรายการ {{sh1_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{sh1_code}}\"))"
+    },
+    {
+      "title": "ช่อง ที่เก็บมาตรฐาน แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"ที่เก็บมาตรฐาน\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{sh1_code}}~{{sh1_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา สาขา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"สาขา\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง ค้นหาสาขา",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"ค้นหาสาขา\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา สาขา",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{br1_code}}"
+    },
+    {
+      "title": "เลือกรายการ {{br1_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{br1_code}}\"))"
+    },
+    {
+      "title": "ช่อง สาขา แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"สาขา\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{br1_code}}~{{br1_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา ฝ่าย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"ฝ่าย\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง ค้นหาฝ่าย",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"ค้นหาฝ่าย\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา ฝ่าย",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "UAT{{run.short}}S"
+    },
+    {
+      "title": "เลือกรายการ UAT{{run.short}}S",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}S\"))"
+    },
+    {
+      "title": "ช่อง ฝ่าย แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"ฝ่าย\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}S~ฝ่ายทดสอบ UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา แผนก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"แผนก\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง ค้นหาแผนก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"ค้นหาแผนก\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา แผนก",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{dp1_code}}"
+    },
+    {
+      "title": "เลือกรายการ {{dp1_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{dp1_code}}\"))"
+    },
+    {
+      "title": "ช่อง แผนก แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"แผนก\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{dp1_code}}~{{dp1_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก อนุมัติใบสั่งซื้อจากมูลค่า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #po_approve_from",
+      "value": "1000.50"
+    },
+    {
+      "title": "กรอก อนุมัติใบสั่งซื้อถึงมูลค่า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #po_approve_to",
+      "value": "500000.75"
+    },
+    {
+      "title": "กรอก วงเงินอนุมัติใบสั่งจองจากมูลค่า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sr_approve_from",
+      "value": "2000"
+    },
+    {
+      "title": "กรอก วงเงินอนุมัติใบสั่งจองถึงมูลค่า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sr_approve_to",
+      "value": "900000.25"
+    },
+    {
+      "title": "กรอก % อนุมัติใบสั่งจองเทียบมัดจำจาก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sr_approve_from_percent",
+      "value": "10.5"
+    },
+    {
+      "title": "กรอก % อนุมัติใบสั่งจองเทียบมัดจำถึง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sr_approve_to_percent",
+      "value": "90.25"
+    },
+    {
+      "title": "กรอก วงเงินอนุมัติใบสั่งขายจากมูลค่า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #ss_approve_from",
+      "value": "3000.1"
+    },
+    {
+      "title": "กรอก วงเงินอนุมัติใบสั่งขายถึงมูลค่า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #ss_approve_to",
+      "value": "700000.4"
+    },
+    {
+      "title": "กรอก วงเงินตรวจสอบวงเงินสินเชื่อจาก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #cr_approve_from",
+      "value": "4000"
+    },
+    {
+      "title": "กรอก วงเงินตรวจสอบวงเงินสินเชื่อถึง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #cr_approve_to",
+      "value": "800000.8"
+    },
+    {
+      "title": "กรอก เพดานสูงสุด",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #max_cr_approve",
+      "value": "1500000.5"
+    },
+    {
+      "title": "กรอก เปอร์เซ็นต์อนุมัติวงเงินสินเชื่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #load_approve_percent",
+      "value": "75.5"
+    },
+    {
+      "title": "กรอก เงินเดือน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #salary",
+      "value": "35000.75"
+    },
+    {
+      "title": "กรอก Sale Hub Users",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sale_hub_user",
+      "value": "SH{{run.short}}"
+    },
+    {
+      "title": "ภาพก่อนบันทึก A",
+      "do": "ui.screenshot",
+      "name": "emp-before-save-a"
+    },
+    {
+      "title": "กดบันทึก A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบแจ้งบันทึกสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "บันทึกข้อมูลเสร็จเรียบร้อย",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "หัวจอแสดง บันทึกล่าสุด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] header span:has-text(\"บันทึกล่าสุด\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "บันทึก A แล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: A ครบทุกคอลัมน์ ชื่อถูกตัดช่องว่าง รหัสผ่านตรงที่กรอก",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(id_card,'') as id_card, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(mobile,'') as mobile, coalesce(title,'') as title, coalesce(sale_hub_user,'') as sale_hub_user, coalesce(ic_wht,'') as ic_wht, coalesce(ic_shelf,'') as ic_shelf, coalesce(branch_code,'') as branch_code, coalesce(side,'') as side, coalesce(department,'') as department, coalesce(status,0) as status, coalesce(price_level_1,0) as price_level_1, coalesce(price_level_2,0) as price_level_2, coalesce(pos_cashier,0) as pos_cashier, coalesce(discount_level_1,0) as discount_level_1, coalesce(cancel_pos_bill_level,0) as cancel_pos_bill_level, coalesce(open_cash_drawer,0) as open_cash_drawer, coalesce(show_total_balance,0) as show_total_balance, coalesce(change_branch_code,0) as change_branch_code, coalesce(lock_bill,0) as lock_bill, coalesce(approve_ar_credit,0) as approve_ar_credit, coalesce(show_item_cost,0) as show_item_cost, coalesce(disable_edit_doc_no_doc_date_user,0) as disable_edit_doc_no_doc_date_user, coalesce(delete_item_pos,0) as delete_item_pos, coalesce(reset_print_log,0) as reset_print_log, coalesce(is_copy_doc,0) as is_copy_doc, coalesce(is_login_user,0) as is_login_user, coalesce(po_approve_from::numeric(18,2)::text,'NULL') as po_approve_from, coalesce(po_approve_to::numeric(18,2)::text,'NULL') as po_approve_to, coalesce(sr_approve_from::numeric(18,2)::text,'NULL') as sr_approve_from, coalesce(sr_approve_to::numeric(18,2)::text,'NULL') as sr_approve_to, coalesce(sr_approve_from_percent::numeric(18,2)::text,'NULL') as sr_approve_from_percent, coalesce(sr_approve_to_percent::numeric(18,2)::text,'NULL') as sr_approve_to_percent, coalesce(ss_approve_from::numeric(18,2)::text,'NULL') as ss_approve_from, coalesce(ss_approve_to::numeric(18,2)::text,'NULL') as ss_approve_to, coalesce(cr_approve_from::numeric(18,2)::text,'NULL') as cr_approve_from, coalesce(cr_approve_to::numeric(18,2)::text,'NULL') as cr_approve_to, coalesce(max_cr_approve::numeric(18,2)::text,'NULL') as max_cr_approve, coalesce(load_approve_percent::numeric(18,2)::text,'NULL') as load_approve_percent, coalesce(salary::numeric(18,2)::text,'NULL') as salary, case when coalesce(password,'') = :'pw1' then 1 else 0 end as pw_is_1, case when coalesce(password,'') = :'pw2' then 1 else 0 end as pw_is_2, case when coalesce(password,'') = '' then 1 else 0 end as pw_empty from erp_user where code = 'UAT' || :'run_short' || 'E1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}E1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "พนักงานทดสอบ ALPHA {{run.short}}"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT EMPLOYEE ALPHA {{run.short}}"
+        },
+        {
+          "col": "id_card",
+          "op": "eq",
+          "value": "0000000000001"
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110"
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": "02-000-0001"
+        },
+        {
+          "col": "mobile",
+          "op": "eq",
+          "value": "080-000-0001"
+        },
+        {
+          "col": "title",
+          "op": "eq",
+          "value": "ผู้จัดการฝ่ายทดสอบ {{run.short}}"
+        },
+        {
+          "col": "sale_hub_user",
+          "op": "eq",
+          "value": "SH{{run.short}}"
+        },
+        {
+          "col": "ic_wht",
+          "op": "eq",
+          "value": "{{wh1_code}}"
+        },
+        {
+          "col": "ic_shelf",
+          "op": "eq",
+          "value": "{{sh1_code}}"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": "{{br1_code}}"
+        },
+        {
+          "col": "side",
+          "op": "eq",
+          "value": "UAT{{run.short}}S"
+        },
+        {
+          "col": "department",
+          "op": "eq",
+          "value": "{{dp1_code}}"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "price_level_1",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "price_level_2",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "pos_cashier",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "discount_level_1",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "cancel_pos_bill_level",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "open_cash_drawer",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "show_total_balance",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "change_branch_code",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "lock_bill",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "approve_ar_credit",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "show_item_cost",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "disable_edit_doc_no_doc_date_user",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "delete_item_pos",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "reset_print_log",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "is_copy_doc",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "is_login_user",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "po_approve_from",
+          "op": "eq",
+          "value": "1000.50"
+        },
+        {
+          "col": "po_approve_to",
+          "op": "eq",
+          "value": "500000.75"
+        },
+        {
+          "col": "sr_approve_from",
+          "op": "eq",
+          "value": "2000.00"
+        },
+        {
+          "col": "sr_approve_to",
+          "op": "eq",
+          "value": "900000.25"
+        },
+        {
+          "col": "sr_approve_from_percent",
+          "op": "eq",
+          "value": "10.50"
+        },
+        {
+          "col": "sr_approve_to_percent",
+          "op": "eq",
+          "value": "90.25"
+        },
+        {
+          "col": "ss_approve_from",
+          "op": "eq",
+          "value": "3000.10"
+        },
+        {
+          "col": "ss_approve_to",
+          "op": "eq",
+          "value": "700000.40"
+        },
+        {
+          "col": "cr_approve_from",
+          "op": "eq",
+          "value": "4000.00"
+        },
+        {
+          "col": "cr_approve_to",
+          "op": "eq",
+          "value": "800000.80"
+        },
+        {
+          "col": "max_cr_approve",
+          "op": "eq",
+          "value": "1500000.50"
+        },
+        {
+          "col": "load_approve_percent",
+          "op": "eq",
+          "value": "75.50"
+        },
+        {
+          "col": "salary",
+          "op": "eq",
+          "value": "35000.75"
+        },
+        {
+          "col": "pw_is_1",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "pw_is_2",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "pw_empty",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกเป็นโหมดดู ช่องรหัสถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code[disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องชื่อ 1 หลังบันทึกไม่มีช่องว่างหน้าหลัง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1",
+      "value": "พนักงานทดสอบ ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกช่องรหัสผ่านถูกล้างจากหน้าจอ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #password",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดเพิ่มรายการใหม่ (ทดสอบรหัสซ้ำ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"เพิ่มรายการใหม่\"]"
+    },
+    {
+      "title": "กรอกรหัสซ้ำกับ A",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code",
+      "value": "UAT{{run.short}}E1"
+    },
+    {
+      "title": "กรอกชื่อ 1",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1",
+      "value": "รหัสซ้ำ ไม่ควรถูกบันทึก"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบแจ้งว่ารหัสมีอยู่ในระบบแล้ว",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "มีอยู่ในระบบแล้ว",
+      "continueOnFail": true
+    },
+    {
+      "title": "ข้อความบอกรหัส A",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "UAT{{run.short}}E1",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพแจ้งรหัสซ้ำ",
+      "do": "ui.screenshot",
+      "name": "emp-warn-dup"
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: รหัสซ้ำไม่ทำให้ชื่อ A ถูกทับ",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(id_card,'') as id_card, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(mobile,'') as mobile, coalesce(title,'') as title, coalesce(sale_hub_user,'') as sale_hub_user, coalesce(ic_wht,'') as ic_wht, coalesce(ic_shelf,'') as ic_shelf, coalesce(branch_code,'') as branch_code, coalesce(side,'') as side, coalesce(department,'') as department, coalesce(status,0) as status, coalesce(price_level_1,0) as price_level_1, coalesce(price_level_2,0) as price_level_2, coalesce(pos_cashier,0) as pos_cashier, coalesce(discount_level_1,0) as discount_level_1, coalesce(cancel_pos_bill_level,0) as cancel_pos_bill_level, coalesce(open_cash_drawer,0) as open_cash_drawer, coalesce(show_total_balance,0) as show_total_balance, coalesce(change_branch_code,0) as change_branch_code, coalesce(lock_bill,0) as lock_bill, coalesce(approve_ar_credit,0) as approve_ar_credit, coalesce(show_item_cost,0) as show_item_cost, coalesce(disable_edit_doc_no_doc_date_user,0) as disable_edit_doc_no_doc_date_user, coalesce(delete_item_pos,0) as delete_item_pos, coalesce(reset_print_log,0) as reset_print_log, coalesce(is_copy_doc,0) as is_copy_doc, coalesce(is_login_user,0) as is_login_user, coalesce(po_approve_from::numeric(18,2)::text,'NULL') as po_approve_from, coalesce(po_approve_to::numeric(18,2)::text,'NULL') as po_approve_to, coalesce(sr_approve_from::numeric(18,2)::text,'NULL') as sr_approve_from, coalesce(sr_approve_to::numeric(18,2)::text,'NULL') as sr_approve_to, coalesce(sr_approve_from_percent::numeric(18,2)::text,'NULL') as sr_approve_from_percent, coalesce(sr_approve_to_percent::numeric(18,2)::text,'NULL') as sr_approve_to_percent, coalesce(ss_approve_from::numeric(18,2)::text,'NULL') as ss_approve_from, coalesce(ss_approve_to::numeric(18,2)::text,'NULL') as ss_approve_to, coalesce(cr_approve_from::numeric(18,2)::text,'NULL') as cr_approve_from, coalesce(cr_approve_to::numeric(18,2)::text,'NULL') as cr_approve_to, coalesce(max_cr_approve::numeric(18,2)::text,'NULL') as max_cr_approve, coalesce(load_approve_percent::numeric(18,2)::text,'NULL') as load_approve_percent, coalesce(salary::numeric(18,2)::text,'NULL') as salary, case when coalesce(password,'') = :'pw1' then 1 else 0 end as pw_is_1, case when coalesce(password,'') = :'pw2' then 1 else 0 end as pw_is_2, case when coalesce(password,'') = '' then 1 else 0 end as pw_empty from erp_user where code = 'UAT' || :'run_short' || 'E1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "พนักงานทดสอบ ALPHA {{run.short}}"
+        },
+        {
+          "col": "pw_is_1",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปลี่ยนเป็นรหัส B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code",
+      "value": "UAT{{run.short}}E2"
+    },
+    {
+      "title": "กรอกชื่อ 1 ของ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1",
+      "value": "พนักงานสองทดสอบ BETA {{run.short}}"
+    },
+    {
+      "title": "เอาติ๊กสถานะออก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #status"
+    },
+    {
+      "title": "ช่องสถานะไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #status:not(:checked)",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดบันทึก B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง (บันทึก B)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: B มีเฉพาะรหัสกับชื่อ ที่เหลือว่าง/0/NULL และไม่มีรหัสผ่าน",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(id_card,'') as id_card, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(mobile,'') as mobile, coalesce(title,'') as title, coalesce(sale_hub_user,'') as sale_hub_user, coalesce(ic_wht,'') as ic_wht, coalesce(ic_shelf,'') as ic_shelf, coalesce(branch_code,'') as branch_code, coalesce(side,'') as side, coalesce(department,'') as department, coalesce(status,0) as status, coalesce(price_level_1,0) as price_level_1, coalesce(price_level_2,0) as price_level_2, coalesce(pos_cashier,0) as pos_cashier, coalesce(discount_level_1,0) as discount_level_1, coalesce(cancel_pos_bill_level,0) as cancel_pos_bill_level, coalesce(open_cash_drawer,0) as open_cash_drawer, coalesce(show_total_balance,0) as show_total_balance, coalesce(change_branch_code,0) as change_branch_code, coalesce(lock_bill,0) as lock_bill, coalesce(approve_ar_credit,0) as approve_ar_credit, coalesce(show_item_cost,0) as show_item_cost, coalesce(disable_edit_doc_no_doc_date_user,0) as disable_edit_doc_no_doc_date_user, coalesce(delete_item_pos,0) as delete_item_pos, coalesce(reset_print_log,0) as reset_print_log, coalesce(is_copy_doc,0) as is_copy_doc, coalesce(is_login_user,0) as is_login_user, coalesce(po_approve_from::numeric(18,2)::text,'NULL') as po_approve_from, coalesce(po_approve_to::numeric(18,2)::text,'NULL') as po_approve_to, coalesce(sr_approve_from::numeric(18,2)::text,'NULL') as sr_approve_from, coalesce(sr_approve_to::numeric(18,2)::text,'NULL') as sr_approve_to, coalesce(sr_approve_from_percent::numeric(18,2)::text,'NULL') as sr_approve_from_percent, coalesce(sr_approve_to_percent::numeric(18,2)::text,'NULL') as sr_approve_to_percent, coalesce(ss_approve_from::numeric(18,2)::text,'NULL') as ss_approve_from, coalesce(ss_approve_to::numeric(18,2)::text,'NULL') as ss_approve_to, coalesce(cr_approve_from::numeric(18,2)::text,'NULL') as cr_approve_from, coalesce(cr_approve_to::numeric(18,2)::text,'NULL') as cr_approve_to, coalesce(max_cr_approve::numeric(18,2)::text,'NULL') as max_cr_approve, coalesce(load_approve_percent::numeric(18,2)::text,'NULL') as load_approve_percent, coalesce(salary::numeric(18,2)::text,'NULL') as salary, case when coalesce(password,'') = :'pw1' then 1 else 0 end as pw_is_1, case when coalesce(password,'') = :'pw2' then 1 else 0 end as pw_is_2, case when coalesce(password,'') = '' then 1 else 0 end as pw_empty from erp_user where code = 'UAT' || :'run_short' || 'E2'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}E2"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "พนักงานสองทดสอบ BETA {{run.short}}"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "id_card",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "mobile",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "title",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "sale_hub_user",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "ic_wht",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "ic_shelf",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "side",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "department",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level_1",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level_2",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "pos_cashier",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "discount_level_1",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "cancel_pos_bill_level",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "open_cash_drawer",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "show_total_balance",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "change_branch_code",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "lock_bill",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "approve_ar_credit",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "show_item_cost",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "disable_edit_doc_no_doc_date_user",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "delete_item_pos",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "reset_print_log",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "is_copy_doc",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "is_login_user",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "po_approve_from",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "po_approve_to",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "sr_approve_from",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "sr_approve_to",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "sr_approve_from_percent",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "sr_approve_to_percent",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "ss_approve_from",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "ss_approve_to",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "cr_approve_from",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "cr_approve_to",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "max_cr_approve",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "load_approve_percent",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "salary",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "pw_is_1",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "pw_is_2",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "pw_empty",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: มี 2 รายการของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from erp_user where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "2"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "กดเพิ่มรายการใหม่ (ทดสอบรหัสฝ่ายยาวเกิน 10 ตัว)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"เพิ่มรายการใหม่\"]"
+    },
+    {
+      "title": "กรอกรหัสพนักงาน D",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code",
+      "value": "UAT{{run.short}}E4"
+    },
+    {
+      "title": "กรอกชื่อ 1 ของ D",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1",
+      "value": "รหัสฝ่ายยาว ไม่ควรถูกบันทึก"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา ฝ่าย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"ฝ่าย\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง ค้นหาฝ่าย",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"ค้นหาฝ่าย\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา ฝ่าย",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "UAT{{run.short}}SIDELONG"
+    },
+    {
+      "title": "เลือกรายการ UAT{{run.short}}SIDELONG",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}SIDELONG\"))"
+    },
+    {
+      "title": "ช่อง ฝ่าย แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"ฝ่าย\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}SIDELONG~ฝ่ายทดสอบรหัสยาว UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดบันทึก D ที่เลือกฝ่ายรหัสยาว 17 ตัว",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบต้องแจ้งเป็นข้อความตรวจสอบภาษาไทย ไม่ใช่ข้อความ SQL ดิบ (value too long / SQLSTATE)",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "^(?![\\s\\S]*(value too long|character varying|SQLSTATE|dynamicsql))[\\s\\S]*[ก-๙]",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพแจ้งเตือนรหัสฝ่ายยาวเกิน",
+      "do": "ui.screenshot",
+      "name": "emp-warn-longside"
+    },
+    {
+      "title": "กดตกลงปิดข้อความ (รหัสฝ่ายยาว)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: D ไม่ถูกบันทึกลง erp_user",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from erp_user where code = 'UAT' || :'run_short' || 'E4'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปิดหน้าจอ (ทิ้งการเพิ่ม D)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"ปิดหน้าจอ / ยกเลิกการแก้ไข (Esc)\"]"
+    },
+    {
+      "title": "ระบบถามก่อนทิ้งการแก้ไข D",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "มีการแก้ไขข้อมูลบางส่วน",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกตกลง (ทิ้ง D)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดแฝงหลังขั้นตอนรหัสฝ่ายยาว (HTTP 400 ที่คาดไว้ถูกรายงานในขั้นตอนข้างบนแล้ว)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "reset": true,
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: ยังมี 2 รายการของรอบนี้ (D ไม่เข้า)",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from erp_user where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "2"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยตัวนำหน้ารหัส UAT ของรอบนี้",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "ค้นหาด้วยตัวนำหน้ารหัส UAT ของรอบนี้ (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ตัวนับรายการเป็น 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว A",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว B",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยชื่อ ALPHA",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "ALPHA {{run.short}}"
+    },
+    {
+      "title": "ค้นหาด้วยชื่อ ALPHA (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ตัวนับเป็น 1/1 (ชื่อ ALPHA)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว A (ค้นจากชื่อ)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยชื่อไทยของ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "พนักงานสองทดสอบ BETA"
+    },
+    {
+      "title": "ค้นหาด้วยชื่อไทยของ B (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "เห็นแถว B (ค้นจากชื่อไทย)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่เห็นแถว A (ค้นจากชื่อไทยของ B)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาคำที่ไม่มีอยู่จริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "ZZNOHITXYZ"
+    },
+    {
+      "title": "ค้นหาคำที่ไม่มีอยู่จริง (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "แสดงข้อความ ไม่พบข้อมูลที่ค้นหา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> text=ไม่พบข้อมูลที่ค้นหา",
+      "continueOnFail": true
+    },
+    {
+      "title": "ตัวนับเป็น 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปุ่มล้างคำค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"ล้างคำค้นหา\"]"
+    },
+    {
+      "title": "ค้นหาใหม่ด้วย UAT ของรอบนี้",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "ค้นหาใหม่ด้วย UAT ของรอบนี้ (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "กลับมาเห็น 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกหัวคอลัมน์รหัส (น้อยไปมาก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "แถวแรกเป็น A",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr td[data-col-key=\"code\"]",
+      "text": "UAT{{run.short}}E1",
+      "nth": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกหัวคอลัมน์รหัสอีกครั้ง (มากไปน้อย)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "แถวแรกเป็น B",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr td[data-col-key=\"code\"]",
+      "text": "UAT{{run.short}}E2",
+      "nth": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกครั้งที่สามเพื่อยกเลิกการเรียง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "ช่วงรหัสจาก = B",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP01\"]",
+      "value": "UAT{{run.short}}E2"
+    },
+    {
+      "title": "ช่วงรหัสถึง = B",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP99\"]",
+      "value": "UAT{{run.short}}E2"
+    },
+    {
+      "title": "กดกรองข้อมูล",
+      "do": "ui.click",
+      "selector": "button:has-text(\"กรองข้อมูล\")"
+    },
+    {
+      "title": "กรองช่วงรหัสแล้วเหลือ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เหลือเฉพาะแถว B",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว A ถูกกรองออก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูงเพื่อล้าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "กดล้างตัวกรอง",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ล้างตัวกรอง\")"
+    },
+    {
+      "title": "ล้างตัวกรองแล้วกลับเป็น 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกแถว A เพื่อเปิดดู",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E1\"])"
+    },
+    {
+      "title": "เปิดดู A: รหัส",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code",
+      "value": "UAT{{run.short}}E1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ชื่อ 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1",
+      "value": "พนักงานทดสอบ ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ชื่อ 2",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_2",
+      "value": "UAT EMPLOYEE ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: เลขที่บัตรประชาชน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #id_card",
+      "value": "0000000000001",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ที่อยู่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #address",
+      "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: โทรศัพท์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #telephone",
+      "value": "02-000-0001",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: มือถือ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #mobile",
+      "value": "080-000-0001",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ตำแหน่ง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #title",
+      "value": "ผู้จัดการฝ่ายทดสอบ {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: Sale Hub Users",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sale_hub_user",
+      "value": "SH{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สถานะ ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #status:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สามารถแก้ไขราคาได้ ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #price_level_1:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สามารถถอนมีสิทธิ์ราคาตามกลุ่มลูกค้าได้ ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #price_level_2:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สามารถใช้ระบบ POS ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #pos_cashier:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สามารถแก้ไขส่วนลดสินค้าได้ ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #discount_level_1:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สามารถยกเลิกใบเสร็จ POS ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #cancel_pos_bill_level:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สามารถเปิดลิ้นชัก POS ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #open_cash_drawer:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สามารถแสดงยอดขาย POS ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #show_total_balance:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: อนุญาตให้เปลี่ยนสาขาได้ ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #change_branch_code:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: อนุญาตให้ล็อคเอกสาร ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #lock_bill:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สามารถถอนอนุมัติวงเงินเครดิตลูกค้า ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #approve_ar_credit:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สามารถดูต้นทุนสินค้า ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #show_item_cost:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ห้ามแก้ไขวันที่และเลขที่เอกสาร ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #disable_edit_doc_no_doc_date_user:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สามารถลบรายการสินค้า (POS) ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #delete_item_pos:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สามารถล้างประวัติการพิมพ์เอกสาร ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #reset_print_log:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สามารถ copy เอกสารได้ ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #is_copy_doc:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: เป็น Login User ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #is_login_user:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: คลังมาตรฐาน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"คลังมาตรฐาน\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{wh1_code}}~{{wh1_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ที่เก็บมาตรฐาน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"ที่เก็บมาตรฐาน\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{sh1_code}}~{{sh1_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สาขา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"สาขา\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{br1_code}}~{{br1_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ฝ่าย",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"ฝ่าย\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}S~ฝ่ายทดสอบ UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: แผนก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"แผนก\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{dp1_code}}~{{dp1_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: อนุมัติใบสั่งซื้อจากมูลค่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #po_approve_from",
+      "value": "1,000.5",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: อนุมัติใบสั่งซื้อถึงมูลค่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #po_approve_to",
+      "value": "500,000.75",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: วงเงินอนุมัติใบสั่งจองจากมูลค่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sr_approve_from",
+      "value": "2,000",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: วงเงินอนุมัติใบสั่งจองถึงมูลค่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sr_approve_to",
+      "value": "900,000.25",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: % อนุมัติใบสั่งจองเทียบมัดจำจาก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sr_approve_from_percent",
+      "value": "10.5",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: % อนุมัติใบสั่งจองเทียบมัดจำถึง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sr_approve_to_percent",
+      "value": "90.25",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: วงเงินอนุมัติใบสั่งขายจากมูลค่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #ss_approve_from",
+      "value": "3,000.1",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: วงเงินอนุมัติใบสั่งขายถึงมูลค่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #ss_approve_to",
+      "value": "700,000.4",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: วงเงินตรวจสอบวงเงินสินเชื่อจาก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #cr_approve_from",
+      "value": "4,000",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: วงเงินตรวจสอบวงเงินสินเชื่อถึง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #cr_approve_to",
+      "value": "800,000.8",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: เพดานสูงสุด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #max_cr_approve",
+      "value": "1,500,000.5",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: เปอร์เซ็นต์อนุมัติวงเงินสินเชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #load_approve_percent",
+      "value": "75.5",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: เงินเดือน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #salary",
+      "value": "35,000.75",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ช่องรหัสผ่านไม่แสดงรหัสที่เก็บไว้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #password",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องชื่อ 1 ถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1[disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องเงินเดือนถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #salary[disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ปุ่มค้นหาคลังถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"คลังมาตรฐาน\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพเปิดดู A",
+      "do": "ui.screenshot",
+      "name": "emp-view-a"
+    },
+    {
+      "title": "กดแก้ไขข้อมูล A (ทดสอบกล่อง Lock ก่อน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "กล่อง Lock ถามก่อนแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการ Lock รายการนี้ก่อนแก้ไขหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กล่อง Lock มีตัวเลือกแสดงหน้าจอนี้อีก",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการแสดงหน้าจอนี้อีกในครั้งต่อไป",
+      "continueOnFail": true
+    },
+    {
+      "title": "ตัวเลือกแสดงอีกติ๊กอยู่ตั้งต้น",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog] input[type=checkbox]:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เอาติ๊กตัวเลือกแสดงอีกออก",
+      "do": "ui.click",
+      "selector": "[role=dialog] input[type=checkbox]"
+    },
+    {
+      "title": "ตัวเลือกไม่ติ๊กแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog] input[type=checkbox]:checked",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ติ๊กตัวเลือกกลับคืน (ไม่ให้กระทบรอบอื่น)",
+      "do": "ui.click",
+      "selector": "[role=dialog] input[type=checkbox]"
+    },
+    {
+      "title": "ตัวเลือกกลับมาติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog] input[type=checkbox]:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพกล่อง Lock ก่อนแก้ไข",
+      "do": "ui.screenshot",
+      "name": "emp-lock-dialog"
+    },
+    {
+      "title": "กดยกเลิกในกล่อง Lock",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ยกเลิก\")"
+    },
+    {
+      "title": "กล่อง Lock ปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ยกเลิกแล้วยังเป็นโหมดดู ช่องชื่อ 1 ถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1[disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดแก้ไขข้อมูล A อีกครั้งแล้วยืนยัน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "ระบบถามว่าต้องการ Lock รายการก่อนแก้ไขหรือไม่",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการ Lock รายการนี้ก่อนแก้ไขหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงเข้าโหมดแก้ไข",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ช่องชื่อ 1 พร้อมแก้ไข (ไม่ถูกล็อก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1:not([disabled])",
+      "continueOnFail": true
+    },
+    {
+      "title": "รหัสแก้ไขไม่ได้ในโหมดแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code[disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นปุ่มบันทึกข้อมูล (กดไม่ได้จนกว่าจะแก้)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"บันทึกข้อมูล\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "แก้ชื่อ 1",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1",
+      "value": "พนักงานทดสอบ ALPHA {{run.short}} แก้ไข"
+    },
+    {
+      "title": "แก้ชื่อ 2",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_2",
+      "value": "UAT EMPLOYEE ALPHA {{run.short}} EDIT"
+    },
+    {
+      "title": "แก้เลขบัตรประชาชน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #id_card",
+      "value": "0000000000002"
+    },
+    {
+      "title": "แก้ที่อยู่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #address",
+      "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110 แก้ไข"
+    },
+    {
+      "title": "แก้โทรศัพท์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #telephone",
+      "value": "02-000-0002"
+    },
+    {
+      "title": "แก้มือถือ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #mobile",
+      "value": "080-000-0002"
+    },
+    {
+      "title": "แก้ตำแหน่ง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #title",
+      "value": "ผู้อำนวยการทดสอบ {{run.short}}"
+    },
+    {
+      "title": "แก้ Sale Hub Users",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sale_hub_user",
+      "value": "SX{{run.short}}"
+    },
+    {
+      "title": "เอาติ๊ก สถานะ ออก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #status"
+    },
+    {
+      "title": "เอาติ๊ก สามารถแก้ไขราคาได้ ออก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #price_level_1"
+    },
+    {
+      "title": "เอาติ๊ก สามารถใช้ระบบ POS ออก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #pos_cashier"
+    },
+    {
+      "title": "เอาติ๊ก อนุญาตให้ล็อคเอกสาร ออก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #lock_bill"
+    },
+    {
+      "title": "เอาติ๊ก เป็น Login User ออก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #is_login_user"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา คลังมาตรฐาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"คลังมาตรฐาน\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง ค้นหาคลังสินค้า",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"ค้นหาคลังสินค้า\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา คลังมาตรฐาน",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{wh2_code}}"
+    },
+    {
+      "title": "เลือกรายการ {{wh2_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{wh2_code}}\"))"
+    },
+    {
+      "title": "ช่อง คลังมาตรฐาน แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"คลังมาตรฐาน\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{wh2_code}}~{{wh2_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา ที่เก็บมาตรฐาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"ที่เก็บมาตรฐาน\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง ค้นหาที่เก็บสินค้า",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"ค้นหาที่เก็บสินค้า\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา ที่เก็บมาตรฐาน",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{sh2_code}}"
+    },
+    {
+      "title": "เลือกรายการ {{sh2_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{sh2_code}}\"))"
+    },
+    {
+      "title": "ช่อง ที่เก็บมาตรฐาน แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"ที่เก็บมาตรฐาน\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{sh2_code}}~{{sh2_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา สาขา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"สาขา\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง ค้นหาสาขา",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"ค้นหาสาขา\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา สาขา",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{br2_code}}"
+    },
+    {
+      "title": "เลือกรายการ {{br2_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{br2_code}}\"))"
+    },
+    {
+      "title": "ช่อง สาขา แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"สาขา\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{br2_code}}~{{br2_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ล้างช่องฝ่าย (พิมพ์ให้ว่าง)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"ฝ่าย\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": ""
+    },
+    {
+      "title": "ออกจากช่องฝ่าย",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"ฝ่าย\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "ช่องฝ่ายว่าง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"ฝ่าย\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสแผนกใหม่ตรงๆ (ไม่เปิดหน้าต่างค้นหา)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"แผนก\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{dp2_code}}"
+    },
+    {
+      "title": "ออกจากช่องแผนก",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"แผนก\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "ช่องแผนกค้นชื่อมาแสดงเอง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"แผนก\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{dp2_code}}~{{dp2_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก อนุมัติใบสั่งซื้อถึงมูลค่า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #po_approve_to",
+      "value": "600000.25"
+    },
+    {
+      "title": "กรอก % อนุมัติใบสั่งจองเทียบมัดจำถึง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sr_approve_to_percent",
+      "value": "95.5"
+    },
+    {
+      "title": "กรอก เพดานสูงสุด",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #max_cr_approve",
+      "value": "2500000.75"
+    },
+    {
+      "title": "กรอก เงินเดือน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #salary",
+      "value": "42000.5"
+    },
+    {
+      "title": "กรอก เปอร์เซ็นต์อนุมัติวงเงินสินเชื่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #load_approve_percent",
+      "value": "80.25"
+    },
+    {
+      "title": "ตั้งรหัสผ่านใหม่ (สุ่มตอนรัน)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #password",
+      "value": "{{pw2}}"
+    },
+    {
+      "title": "ภาพก่อนบันทึกแก้ไข A",
+      "do": "ui.screenshot",
+      "name": "emp-before-edit-a"
+    },
+    {
+      "title": "กดบันทึกการแก้ไข",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง (บันทึกการแก้ไข)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: A เปลี่ยนตามที่แก้ครบทุกคอลัมน์ รหัสผ่านเป็นตัวใหม่",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(id_card,'') as id_card, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(mobile,'') as mobile, coalesce(title,'') as title, coalesce(sale_hub_user,'') as sale_hub_user, coalesce(ic_wht,'') as ic_wht, coalesce(ic_shelf,'') as ic_shelf, coalesce(branch_code,'') as branch_code, coalesce(side,'') as side, coalesce(department,'') as department, coalesce(status,0) as status, coalesce(price_level_1,0) as price_level_1, coalesce(price_level_2,0) as price_level_2, coalesce(pos_cashier,0) as pos_cashier, coalesce(discount_level_1,0) as discount_level_1, coalesce(cancel_pos_bill_level,0) as cancel_pos_bill_level, coalesce(open_cash_drawer,0) as open_cash_drawer, coalesce(show_total_balance,0) as show_total_balance, coalesce(change_branch_code,0) as change_branch_code, coalesce(lock_bill,0) as lock_bill, coalesce(approve_ar_credit,0) as approve_ar_credit, coalesce(show_item_cost,0) as show_item_cost, coalesce(disable_edit_doc_no_doc_date_user,0) as disable_edit_doc_no_doc_date_user, coalesce(delete_item_pos,0) as delete_item_pos, coalesce(reset_print_log,0) as reset_print_log, coalesce(is_copy_doc,0) as is_copy_doc, coalesce(is_login_user,0) as is_login_user, coalesce(po_approve_from::numeric(18,2)::text,'NULL') as po_approve_from, coalesce(po_approve_to::numeric(18,2)::text,'NULL') as po_approve_to, coalesce(sr_approve_from::numeric(18,2)::text,'NULL') as sr_approve_from, coalesce(sr_approve_to::numeric(18,2)::text,'NULL') as sr_approve_to, coalesce(sr_approve_from_percent::numeric(18,2)::text,'NULL') as sr_approve_from_percent, coalesce(sr_approve_to_percent::numeric(18,2)::text,'NULL') as sr_approve_to_percent, coalesce(ss_approve_from::numeric(18,2)::text,'NULL') as ss_approve_from, coalesce(ss_approve_to::numeric(18,2)::text,'NULL') as ss_approve_to, coalesce(cr_approve_from::numeric(18,2)::text,'NULL') as cr_approve_from, coalesce(cr_approve_to::numeric(18,2)::text,'NULL') as cr_approve_to, coalesce(max_cr_approve::numeric(18,2)::text,'NULL') as max_cr_approve, coalesce(load_approve_percent::numeric(18,2)::text,'NULL') as load_approve_percent, coalesce(salary::numeric(18,2)::text,'NULL') as salary, case when coalesce(password,'') = :'pw1' then 1 else 0 end as pw_is_1, case when coalesce(password,'') = :'pw2' then 1 else 0 end as pw_is_2, case when coalesce(password,'') = '' then 1 else 0 end as pw_empty from erp_user where code = 'UAT' || :'run_short' || 'E1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}E1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "พนักงานทดสอบ ALPHA {{run.short}} แก้ไข"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT EMPLOYEE ALPHA {{run.short}} EDIT"
+        },
+        {
+          "col": "id_card",
+          "op": "eq",
+          "value": "0000000000002"
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110 แก้ไข"
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": "02-000-0002"
+        },
+        {
+          "col": "mobile",
+          "op": "eq",
+          "value": "080-000-0002"
+        },
+        {
+          "col": "title",
+          "op": "eq",
+          "value": "ผู้อำนวยการทดสอบ {{run.short}}"
+        },
+        {
+          "col": "sale_hub_user",
+          "op": "eq",
+          "value": "SX{{run.short}}"
+        },
+        {
+          "col": "ic_wht",
+          "op": "eq",
+          "value": "{{wh2_code}}"
+        },
+        {
+          "col": "ic_shelf",
+          "op": "eq",
+          "value": "{{sh2_code}}"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": "{{br2_code}}"
+        },
+        {
+          "col": "side",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "department",
+          "op": "eq",
+          "value": "{{dp2_code}}"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level_1",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level_2",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "pos_cashier",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "discount_level_1",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "cancel_pos_bill_level",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "open_cash_drawer",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "show_total_balance",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "change_branch_code",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "lock_bill",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "approve_ar_credit",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "show_item_cost",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "disable_edit_doc_no_doc_date_user",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "delete_item_pos",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "reset_print_log",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "is_copy_doc",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "is_login_user",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "po_approve_from",
+          "op": "eq",
+          "value": "1000.50"
+        },
+        {
+          "col": "po_approve_to",
+          "op": "eq",
+          "value": "600000.25"
+        },
+        {
+          "col": "sr_approve_from",
+          "op": "eq",
+          "value": "2000.00"
+        },
+        {
+          "col": "sr_approve_to",
+          "op": "eq",
+          "value": "900000.25"
+        },
+        {
+          "col": "sr_approve_from_percent",
+          "op": "eq",
+          "value": "10.50"
+        },
+        {
+          "col": "sr_approve_to_percent",
+          "op": "eq",
+          "value": "95.50"
+        },
+        {
+          "col": "ss_approve_from",
+          "op": "eq",
+          "value": "3000.10"
+        },
+        {
+          "col": "ss_approve_to",
+          "op": "eq",
+          "value": "700000.40"
+        },
+        {
+          "col": "cr_approve_from",
+          "op": "eq",
+          "value": "4000.00"
+        },
+        {
+          "col": "cr_approve_to",
+          "op": "eq",
+          "value": "800000.80"
+        },
+        {
+          "col": "max_cr_approve",
+          "op": "eq",
+          "value": "2500000.75"
+        },
+        {
+          "col": "load_approve_percent",
+          "op": "eq",
+          "value": "80.25"
+        },
+        {
+          "col": "salary",
+          "op": "eq",
+          "value": "42000.50"
+        },
+        {
+          "col": "pw_is_1",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "pw_is_2",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "pw_empty",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: รหัส",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code",
+      "value": "UAT{{run.short}}E1",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ชื่อ 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1",
+      "value": "พนักงานทดสอบ ALPHA {{run.short}} แก้ไข",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ชื่อ 2",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_2",
+      "value": "UAT EMPLOYEE ALPHA {{run.short}} EDIT",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: เลขที่บัตรประชาชน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #id_card",
+      "value": "0000000000002",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ที่อยู่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #address",
+      "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110 แก้ไข",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: โทรศัพท์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #telephone",
+      "value": "02-000-0002",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: มือถือ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #mobile",
+      "value": "080-000-0002",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ตำแหน่ง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #title",
+      "value": "ผู้อำนวยการทดสอบ {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: Sale Hub Users",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sale_hub_user",
+      "value": "SX{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สถานะ ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #status:not(:checked)",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สามารถแก้ไขราคาได้ ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #price_level_1:not(:checked)",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สามารถถอนมีสิทธิ์ราคาตามกลุ่มลูกค้าได้ ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #price_level_2:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สามารถใช้ระบบ POS ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #pos_cashier:not(:checked)",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สามารถแก้ไขส่วนลดสินค้าได้ ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #discount_level_1:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สามารถยกเลิกใบเสร็จ POS ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #cancel_pos_bill_level:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สามารถเปิดลิ้นชัก POS ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #open_cash_drawer:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สามารถแสดงยอดขาย POS ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #show_total_balance:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: อนุญาตให้เปลี่ยนสาขาได้ ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #change_branch_code:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: อนุญาตให้ล็อคเอกสาร ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #lock_bill:not(:checked)",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สามารถถอนอนุมัติวงเงินเครดิตลูกค้า ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #approve_ar_credit:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สามารถดูต้นทุนสินค้า ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #show_item_cost:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ห้ามแก้ไขวันที่และเลขที่เอกสาร ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #disable_edit_doc_no_doc_date_user:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สามารถลบรายการสินค้า (POS) ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #delete_item_pos:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สามารถล้างประวัติการพิมพ์เอกสาร ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #reset_print_log:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สามารถ copy เอกสารได้ ติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #is_copy_doc:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: เป็น Login User ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #is_login_user:not(:checked)",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: คลังมาตรฐาน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"คลังมาตรฐาน\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{wh2_code}}~{{wh2_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ที่เก็บมาตรฐาน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"ที่เก็บมาตรฐาน\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{sh2_code}}~{{sh2_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สาขา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"สาขา\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{br2_code}}~{{br2_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ฝ่าย",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"ฝ่าย\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: แผนก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] >> xpath=.//label[normalize-space(.)=\"แผนก\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{dp2_code}}~{{dp2_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: อนุมัติใบสั่งซื้อจากมูลค่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #po_approve_from",
+      "value": "1,000.5",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: อนุมัติใบสั่งซื้อถึงมูลค่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #po_approve_to",
+      "value": "600,000.25",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: วงเงินอนุมัติใบสั่งจองจากมูลค่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sr_approve_from",
+      "value": "2,000",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: วงเงินอนุมัติใบสั่งจองถึงมูลค่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sr_approve_to",
+      "value": "900,000.25",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: % อนุมัติใบสั่งจองเทียบมัดจำจาก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sr_approve_from_percent",
+      "value": "10.5",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: % อนุมัติใบสั่งจองเทียบมัดจำถึง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #sr_approve_to_percent",
+      "value": "95.5",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: วงเงินอนุมัติใบสั่งขายจากมูลค่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #ss_approve_from",
+      "value": "3,000.1",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: วงเงินอนุมัติใบสั่งขายถึงมูลค่า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #ss_approve_to",
+      "value": "700,000.4",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: วงเงินตรวจสอบวงเงินสินเชื่อจาก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #cr_approve_from",
+      "value": "4,000",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: วงเงินตรวจสอบวงเงินสินเชื่อถึง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #cr_approve_to",
+      "value": "800,000.8",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: เพดานสูงสุด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #max_cr_approve",
+      "value": "2,500,000.75",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: เปอร์เซ็นต์อนุมัติวงเงินสินเชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #load_approve_percent",
+      "value": "80.25",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: เงินเดือน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #salary",
+      "value": "42,000.5",
+      "op": "contains",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ช่องรหัสผ่านไม่แสดงรหัสที่เก็บไว้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #password",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดแก้ไขข้อมูล A อีกรอบ (ไม่แตะรหัสผ่าน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "ระบบถามว่าต้องการ Lock รายการก่อนแก้ไขหรือไม่",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการ Lock รายการนี้ก่อนแก้ไขหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงเข้าโหมดแก้ไข",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ช่องชื่อ 1 พร้อมแก้ไข (ไม่ถูกล็อก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1:not([disabled])",
+      "continueOnFail": true
+    },
+    {
+      "title": "แก้ตำแหน่งอย่างเดียว",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #title",
+      "value": "ตำแหน่งแก้รอบสอง {{run.short}}"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: ตำแหน่งเปลี่ยน รหัสผ่านเดิมยังอยู่ ช่องอื่นไม่เปลี่ยน",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(id_card,'') as id_card, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(mobile,'') as mobile, coalesce(title,'') as title, coalesce(sale_hub_user,'') as sale_hub_user, coalesce(ic_wht,'') as ic_wht, coalesce(ic_shelf,'') as ic_shelf, coalesce(branch_code,'') as branch_code, coalesce(side,'') as side, coalesce(department,'') as department, coalesce(status,0) as status, coalesce(price_level_1,0) as price_level_1, coalesce(price_level_2,0) as price_level_2, coalesce(pos_cashier,0) as pos_cashier, coalesce(discount_level_1,0) as discount_level_1, coalesce(cancel_pos_bill_level,0) as cancel_pos_bill_level, coalesce(open_cash_drawer,0) as open_cash_drawer, coalesce(show_total_balance,0) as show_total_balance, coalesce(change_branch_code,0) as change_branch_code, coalesce(lock_bill,0) as lock_bill, coalesce(approve_ar_credit,0) as approve_ar_credit, coalesce(show_item_cost,0) as show_item_cost, coalesce(disable_edit_doc_no_doc_date_user,0) as disable_edit_doc_no_doc_date_user, coalesce(delete_item_pos,0) as delete_item_pos, coalesce(reset_print_log,0) as reset_print_log, coalesce(is_copy_doc,0) as is_copy_doc, coalesce(is_login_user,0) as is_login_user, coalesce(po_approve_from::numeric(18,2)::text,'NULL') as po_approve_from, coalesce(po_approve_to::numeric(18,2)::text,'NULL') as po_approve_to, coalesce(sr_approve_from::numeric(18,2)::text,'NULL') as sr_approve_from, coalesce(sr_approve_to::numeric(18,2)::text,'NULL') as sr_approve_to, coalesce(sr_approve_from_percent::numeric(18,2)::text,'NULL') as sr_approve_from_percent, coalesce(sr_approve_to_percent::numeric(18,2)::text,'NULL') as sr_approve_to_percent, coalesce(ss_approve_from::numeric(18,2)::text,'NULL') as ss_approve_from, coalesce(ss_approve_to::numeric(18,2)::text,'NULL') as ss_approve_to, coalesce(cr_approve_from::numeric(18,2)::text,'NULL') as cr_approve_from, coalesce(cr_approve_to::numeric(18,2)::text,'NULL') as cr_approve_to, coalesce(max_cr_approve::numeric(18,2)::text,'NULL') as max_cr_approve, coalesce(load_approve_percent::numeric(18,2)::text,'NULL') as load_approve_percent, coalesce(salary::numeric(18,2)::text,'NULL') as salary, case when coalesce(password,'') = :'pw1' then 1 else 0 end as pw_is_1, case when coalesce(password,'') = :'pw2' then 1 else 0 end as pw_is_2, case when coalesce(password,'') = '' then 1 else 0 end as pw_empty from erp_user where code = 'UAT' || :'run_short' || 'E1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}E1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "พนักงานทดสอบ ALPHA {{run.short}} แก้ไข"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT EMPLOYEE ALPHA {{run.short}} EDIT"
+        },
+        {
+          "col": "id_card",
+          "op": "eq",
+          "value": "0000000000002"
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110 แก้ไข"
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": "02-000-0002"
+        },
+        {
+          "col": "mobile",
+          "op": "eq",
+          "value": "080-000-0002"
+        },
+        {
+          "col": "title",
+          "op": "eq",
+          "value": "ตำแหน่งแก้รอบสอง {{run.short}}"
+        },
+        {
+          "col": "sale_hub_user",
+          "op": "eq",
+          "value": "SX{{run.short}}"
+        },
+        {
+          "col": "ic_wht",
+          "op": "eq",
+          "value": "{{wh2_code}}"
+        },
+        {
+          "col": "ic_shelf",
+          "op": "eq",
+          "value": "{{sh2_code}}"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": "{{br2_code}}"
+        },
+        {
+          "col": "side",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "department",
+          "op": "eq",
+          "value": "{{dp2_code}}"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level_1",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level_2",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "pos_cashier",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "discount_level_1",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "cancel_pos_bill_level",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "open_cash_drawer",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "show_total_balance",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "change_branch_code",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "lock_bill",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "approve_ar_credit",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "show_item_cost",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "disable_edit_doc_no_doc_date_user",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "delete_item_pos",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "reset_print_log",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "is_copy_doc",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "is_login_user",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "po_approve_from",
+          "op": "eq",
+          "value": "1000.50"
+        },
+        {
+          "col": "po_approve_to",
+          "op": "eq",
+          "value": "600000.25"
+        },
+        {
+          "col": "sr_approve_from",
+          "op": "eq",
+          "value": "2000.00"
+        },
+        {
+          "col": "sr_approve_to",
+          "op": "eq",
+          "value": "900000.25"
+        },
+        {
+          "col": "sr_approve_from_percent",
+          "op": "eq",
+          "value": "10.50"
+        },
+        {
+          "col": "sr_approve_to_percent",
+          "op": "eq",
+          "value": "95.50"
+        },
+        {
+          "col": "ss_approve_from",
+          "op": "eq",
+          "value": "3000.10"
+        },
+        {
+          "col": "ss_approve_to",
+          "op": "eq",
+          "value": "700000.40"
+        },
+        {
+          "col": "cr_approve_from",
+          "op": "eq",
+          "value": "4000.00"
+        },
+        {
+          "col": "cr_approve_to",
+          "op": "eq",
+          "value": "800000.80"
+        },
+        {
+          "col": "max_cr_approve",
+          "op": "eq",
+          "value": "2500000.75"
+        },
+        {
+          "col": "load_approve_percent",
+          "op": "eq",
+          "value": "80.25"
+        },
+        {
+          "col": "salary",
+          "op": "eq",
+          "value": "42000.50"
+        },
+        {
+          "col": "pw_is_1",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "pw_is_2",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "pw_empty",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปุ่มดินสอแก้ไขแถว B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"แก้ไขรายการ UAT{{run.short}}E2\"]"
+    },
+    {
+      "title": "ระบบถามว่าต้องการ Lock รายการก่อนแก้ไข (ดินสอ)",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการ Lock รายการนี้ก่อนแก้ไขหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงเข้าโหมดแก้ไข B",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "หน้าจอโหลดข้อมูล B",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code",
+      "value": "UAT{{run.short}}E2",
+      "continueOnFail": true
+    },
+    {
+      "title": "แก้ชื่อ 2 ของ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_2",
+      "value": "UAT EMPLOYEE BETA {{run.short}} EDIT"
+    },
+    {
+      "title": "ติ๊กสามารถแก้ไขราคาได้ ของ B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #price_level_1"
+    },
+    {
+      "title": "กดบันทึก B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง (บันทึก B)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: B เปลี่ยนชื่อ 2 และสิทธิ์แก้ไขราคา ที่เหลือคงเดิม",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(id_card,'') as id_card, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(mobile,'') as mobile, coalesce(title,'') as title, coalesce(sale_hub_user,'') as sale_hub_user, coalesce(ic_wht,'') as ic_wht, coalesce(ic_shelf,'') as ic_shelf, coalesce(branch_code,'') as branch_code, coalesce(side,'') as side, coalesce(department,'') as department, coalesce(status,0) as status, coalesce(price_level_1,0) as price_level_1, coalesce(price_level_2,0) as price_level_2, coalesce(pos_cashier,0) as pos_cashier, coalesce(discount_level_1,0) as discount_level_1, coalesce(cancel_pos_bill_level,0) as cancel_pos_bill_level, coalesce(open_cash_drawer,0) as open_cash_drawer, coalesce(show_total_balance,0) as show_total_balance, coalesce(change_branch_code,0) as change_branch_code, coalesce(lock_bill,0) as lock_bill, coalesce(approve_ar_credit,0) as approve_ar_credit, coalesce(show_item_cost,0) as show_item_cost, coalesce(disable_edit_doc_no_doc_date_user,0) as disable_edit_doc_no_doc_date_user, coalesce(delete_item_pos,0) as delete_item_pos, coalesce(reset_print_log,0) as reset_print_log, coalesce(is_copy_doc,0) as is_copy_doc, coalesce(is_login_user,0) as is_login_user, coalesce(po_approve_from::numeric(18,2)::text,'NULL') as po_approve_from, coalesce(po_approve_to::numeric(18,2)::text,'NULL') as po_approve_to, coalesce(sr_approve_from::numeric(18,2)::text,'NULL') as sr_approve_from, coalesce(sr_approve_to::numeric(18,2)::text,'NULL') as sr_approve_to, coalesce(sr_approve_from_percent::numeric(18,2)::text,'NULL') as sr_approve_from_percent, coalesce(sr_approve_to_percent::numeric(18,2)::text,'NULL') as sr_approve_to_percent, coalesce(ss_approve_from::numeric(18,2)::text,'NULL') as ss_approve_from, coalesce(ss_approve_to::numeric(18,2)::text,'NULL') as ss_approve_to, coalesce(cr_approve_from::numeric(18,2)::text,'NULL') as cr_approve_from, coalesce(cr_approve_to::numeric(18,2)::text,'NULL') as cr_approve_to, coalesce(max_cr_approve::numeric(18,2)::text,'NULL') as max_cr_approve, coalesce(load_approve_percent::numeric(18,2)::text,'NULL') as load_approve_percent, coalesce(salary::numeric(18,2)::text,'NULL') as salary, case when coalesce(password,'') = :'pw1' then 1 else 0 end as pw_is_1, case when coalesce(password,'') = :'pw2' then 1 else 0 end as pw_is_2, case when coalesce(password,'') = '' then 1 else 0 end as pw_empty from erp_user where code = 'UAT' || :'run_short' || 'E2'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}E2"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "พนักงานสองทดสอบ BETA {{run.short}}"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT EMPLOYEE BETA {{run.short}} EDIT"
+        },
+        {
+          "col": "id_card",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "mobile",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "title",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "sale_hub_user",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "ic_wht",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "ic_shelf",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "side",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "department",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level_1",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "price_level_2",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "pos_cashier",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "discount_level_1",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "cancel_pos_bill_level",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "open_cash_drawer",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "show_total_balance",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "change_branch_code",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "lock_bill",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "approve_ar_credit",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "show_item_cost",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "disable_edit_doc_no_doc_date_user",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "delete_item_pos",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "reset_print_log",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "is_copy_doc",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "is_login_user",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "po_approve_from",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "po_approve_to",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "sr_approve_from",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "sr_approve_to",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "sr_approve_from_percent",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "sr_approve_to_percent",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "ss_approve_from",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "ss_approve_to",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "cr_approve_from",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "cr_approve_to",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "max_cr_approve",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "load_approve_percent",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "salary",
+          "op": "eq",
+          "value": "0.00"
+        },
+        {
+          "col": "pw_is_1",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "pw_is_2",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "pw_empty",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกแถว A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E1\"])"
+    },
+    {
+      "title": "กดแก้ไขข้อมูล A เพื่อทดสอบแก้ค้าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "ระบบถามว่าต้องการ Lock รายการก่อนแก้ไขหรือไม่",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการ Lock รายการนี้ก่อนแก้ไขหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงเข้าโหมดแก้ไข",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ช่องชื่อ 1 พร้อมแก้ไข (ไม่ถูกล็อก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1:not([disabled])",
+      "continueOnFail": true
+    },
+    {
+      "title": "แก้ชื่อ 2 แต่ยังไม่บันทึก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_2",
+      "value": "ต้องไม่ถูกบันทึก"
+    },
+    {
+      "title": "คลิกแถว B ขณะมีข้อมูลค้าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E2\"])"
+    },
+    {
+      "title": "ระบบถามก่อนเปลี่ยนรายการ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "มีการแก้ไขข้อมูลบางส่วน",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกยกเลิก (อยู่ที่เดิม)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ยกเลิก\")"
+    },
+    {
+      "title": "ข้อความที่แก้ค้างไว้ยังอยู่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_2",
+      "value": "ต้องไม่ถูกบันทึก",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปิดหน้าจอ (ยกเลิกการแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"ปิดหน้าจอ / ยกเลิกการแก้ไข (Esc)\"]"
+    },
+    {
+      "title": "ระบบถามก่อนทิ้งการแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "มีการแก้ไขข้อมูลบางส่วน",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกตกลง (ทิ้งการแก้ไข)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ชื่อ 2 กลับเป็นค่าที่บันทึกไว้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_2",
+      "value": "UAT EMPLOYEE ALPHA {{run.short}} EDIT",
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: ชื่อ 2 ของ A ไม่ถูกเปลี่ยนโดยการแก้ค้าง",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(id_card,'') as id_card, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(mobile,'') as mobile, coalesce(title,'') as title, coalesce(sale_hub_user,'') as sale_hub_user, coalesce(ic_wht,'') as ic_wht, coalesce(ic_shelf,'') as ic_shelf, coalesce(branch_code,'') as branch_code, coalesce(side,'') as side, coalesce(department,'') as department, coalesce(status,0) as status, coalesce(price_level_1,0) as price_level_1, coalesce(price_level_2,0) as price_level_2, coalesce(pos_cashier,0) as pos_cashier, coalesce(discount_level_1,0) as discount_level_1, coalesce(cancel_pos_bill_level,0) as cancel_pos_bill_level, coalesce(open_cash_drawer,0) as open_cash_drawer, coalesce(show_total_balance,0) as show_total_balance, coalesce(change_branch_code,0) as change_branch_code, coalesce(lock_bill,0) as lock_bill, coalesce(approve_ar_credit,0) as approve_ar_credit, coalesce(show_item_cost,0) as show_item_cost, coalesce(disable_edit_doc_no_doc_date_user,0) as disable_edit_doc_no_doc_date_user, coalesce(delete_item_pos,0) as delete_item_pos, coalesce(reset_print_log,0) as reset_print_log, coalesce(is_copy_doc,0) as is_copy_doc, coalesce(is_login_user,0) as is_login_user, coalesce(po_approve_from::numeric(18,2)::text,'NULL') as po_approve_from, coalesce(po_approve_to::numeric(18,2)::text,'NULL') as po_approve_to, coalesce(sr_approve_from::numeric(18,2)::text,'NULL') as sr_approve_from, coalesce(sr_approve_to::numeric(18,2)::text,'NULL') as sr_approve_to, coalesce(sr_approve_from_percent::numeric(18,2)::text,'NULL') as sr_approve_from_percent, coalesce(sr_approve_to_percent::numeric(18,2)::text,'NULL') as sr_approve_to_percent, coalesce(ss_approve_from::numeric(18,2)::text,'NULL') as ss_approve_from, coalesce(ss_approve_to::numeric(18,2)::text,'NULL') as ss_approve_to, coalesce(cr_approve_from::numeric(18,2)::text,'NULL') as cr_approve_from, coalesce(cr_approve_to::numeric(18,2)::text,'NULL') as cr_approve_to, coalesce(max_cr_approve::numeric(18,2)::text,'NULL') as max_cr_approve, coalesce(load_approve_percent::numeric(18,2)::text,'NULL') as load_approve_percent, coalesce(salary::numeric(18,2)::text,'NULL') as salary, case when coalesce(password,'') = :'pw1' then 1 else 0 end as pw_is_1, case when coalesce(password,'') = :'pw2' then 1 else 0 end as pw_is_2, case when coalesce(password,'') = '' then 1 else 0 end as pw_empty from erp_user where code = 'UAT' || :'run_short' || 'E1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT EMPLOYEE ALPHA {{run.short}} EDIT"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกแถว A ก่อนคัดลอก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E1\"])"
+    },
+    {
+      "title": "กดปุ่มคัดลอกรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-nav-copy-btn\"]"
+    },
+    {
+      "title": "หัวจอแสดง เพิ่มรายการใหม่ (จากการคัดลอก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] header span:has-text(\"เพิ่มรายการใหม่\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "คัดลอกแล้วช่องรหัสว่างให้กรอกใหม่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "คัดลอกแล้วชื่อ 1 ต่อท้าย (คัดลอก)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #name_1",
+      "value": "พนักงานทดสอบ ALPHA {{run.short}} แก้ไข (คัดลอก)",
+      "continueOnFail": true
+    },
+    {
+      "title": "คัดลอกแล้วที่อยู่ตามต้นฉบับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #address",
+      "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110 แก้ไข",
+      "continueOnFail": true
+    },
+    {
+      "title": "คัดลอกแล้วช่องรหัสผ่านว่าง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #password",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกรหัสใหม่ C",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] #code",
+      "value": "UAT{{run.short}}E3"
+    },
+    {
+      "title": "กดบันทึก C",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง (บันทึก C)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: C ได้ค่าทุกคอลัมน์ตามต้นฉบับ A และไม่มีรหัสผ่าน",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(id_card,'') as id_card, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(mobile,'') as mobile, coalesce(title,'') as title, coalesce(sale_hub_user,'') as sale_hub_user, coalesce(ic_wht,'') as ic_wht, coalesce(ic_shelf,'') as ic_shelf, coalesce(branch_code,'') as branch_code, coalesce(side,'') as side, coalesce(department,'') as department, coalesce(status,0) as status, coalesce(price_level_1,0) as price_level_1, coalesce(price_level_2,0) as price_level_2, coalesce(pos_cashier,0) as pos_cashier, coalesce(discount_level_1,0) as discount_level_1, coalesce(cancel_pos_bill_level,0) as cancel_pos_bill_level, coalesce(open_cash_drawer,0) as open_cash_drawer, coalesce(show_total_balance,0) as show_total_balance, coalesce(change_branch_code,0) as change_branch_code, coalesce(lock_bill,0) as lock_bill, coalesce(approve_ar_credit,0) as approve_ar_credit, coalesce(show_item_cost,0) as show_item_cost, coalesce(disable_edit_doc_no_doc_date_user,0) as disable_edit_doc_no_doc_date_user, coalesce(delete_item_pos,0) as delete_item_pos, coalesce(reset_print_log,0) as reset_print_log, coalesce(is_copy_doc,0) as is_copy_doc, coalesce(is_login_user,0) as is_login_user, coalesce(po_approve_from::numeric(18,2)::text,'NULL') as po_approve_from, coalesce(po_approve_to::numeric(18,2)::text,'NULL') as po_approve_to, coalesce(sr_approve_from::numeric(18,2)::text,'NULL') as sr_approve_from, coalesce(sr_approve_to::numeric(18,2)::text,'NULL') as sr_approve_to, coalesce(sr_approve_from_percent::numeric(18,2)::text,'NULL') as sr_approve_from_percent, coalesce(sr_approve_to_percent::numeric(18,2)::text,'NULL') as sr_approve_to_percent, coalesce(ss_approve_from::numeric(18,2)::text,'NULL') as ss_approve_from, coalesce(ss_approve_to::numeric(18,2)::text,'NULL') as ss_approve_to, coalesce(cr_approve_from::numeric(18,2)::text,'NULL') as cr_approve_from, coalesce(cr_approve_to::numeric(18,2)::text,'NULL') as cr_approve_to, coalesce(max_cr_approve::numeric(18,2)::text,'NULL') as max_cr_approve, coalesce(load_approve_percent::numeric(18,2)::text,'NULL') as load_approve_percent, coalesce(salary::numeric(18,2)::text,'NULL') as salary, case when coalesce(password,'') = :'pw1' then 1 else 0 end as pw_is_1, case when coalesce(password,'') = :'pw2' then 1 else 0 end as pw_is_2, case when coalesce(password,'') = '' then 1 else 0 end as pw_empty from erp_user where code = 'UAT' || :'run_short' || 'E3'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}E3"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "พนักงานทดสอบ ALPHA {{run.short}} แก้ไข (คัดลอก)"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT EMPLOYEE ALPHA {{run.short}} EDIT"
+        },
+        {
+          "col": "id_card",
+          "op": "eq",
+          "value": "0000000000002"
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110 แก้ไข"
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": "02-000-0002"
+        },
+        {
+          "col": "mobile",
+          "op": "eq",
+          "value": "080-000-0002"
+        },
+        {
+          "col": "title",
+          "op": "eq",
+          "value": "ตำแหน่งแก้รอบสอง {{run.short}}"
+        },
+        {
+          "col": "sale_hub_user",
+          "op": "eq",
+          "value": "SX{{run.short}}"
+        },
+        {
+          "col": "ic_wht",
+          "op": "eq",
+          "value": "{{wh2_code}}"
+        },
+        {
+          "col": "ic_shelf",
+          "op": "eq",
+          "value": "{{sh2_code}}"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": "{{br2_code}}"
+        },
+        {
+          "col": "side",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "department",
+          "op": "eq",
+          "value": "{{dp2_code}}"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level_1",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level_2",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "pos_cashier",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "discount_level_1",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "cancel_pos_bill_level",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "open_cash_drawer",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "show_total_balance",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "change_branch_code",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "lock_bill",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "approve_ar_credit",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "show_item_cost",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "disable_edit_doc_no_doc_date_user",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "delete_item_pos",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "reset_print_log",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "is_copy_doc",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "is_login_user",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "po_approve_from",
+          "op": "eq",
+          "value": "1000.50"
+        },
+        {
+          "col": "po_approve_to",
+          "op": "eq",
+          "value": "600000.25"
+        },
+        {
+          "col": "sr_approve_from",
+          "op": "eq",
+          "value": "2000.00"
+        },
+        {
+          "col": "sr_approve_to",
+          "op": "eq",
+          "value": "900000.25"
+        },
+        {
+          "col": "sr_approve_from_percent",
+          "op": "eq",
+          "value": "10.50"
+        },
+        {
+          "col": "sr_approve_to_percent",
+          "op": "eq",
+          "value": "95.50"
+        },
+        {
+          "col": "ss_approve_from",
+          "op": "eq",
+          "value": "3000.10"
+        },
+        {
+          "col": "ss_approve_to",
+          "op": "eq",
+          "value": "700000.40"
+        },
+        {
+          "col": "cr_approve_from",
+          "op": "eq",
+          "value": "4000.00"
+        },
+        {
+          "col": "cr_approve_to",
+          "op": "eq",
+          "value": "800000.80"
+        },
+        {
+          "col": "max_cr_approve",
+          "op": "eq",
+          "value": "2500000.75"
+        },
+        {
+          "col": "load_approve_percent",
+          "op": "eq",
+          "value": "80.25"
+        },
+        {
+          "col": "salary",
+          "op": "eq",
+          "value": "42000.50"
+        },
+        {
+          "col": "pw_is_1",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "pw_is_2",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "pw_empty",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: A ไม่ถูกแตะต้องจากการคัดลอก",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(id_card,'') as id_card, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(mobile,'') as mobile, coalesce(title,'') as title, coalesce(sale_hub_user,'') as sale_hub_user, coalesce(ic_wht,'') as ic_wht, coalesce(ic_shelf,'') as ic_shelf, coalesce(branch_code,'') as branch_code, coalesce(side,'') as side, coalesce(department,'') as department, coalesce(status,0) as status, coalesce(price_level_1,0) as price_level_1, coalesce(price_level_2,0) as price_level_2, coalesce(pos_cashier,0) as pos_cashier, coalesce(discount_level_1,0) as discount_level_1, coalesce(cancel_pos_bill_level,0) as cancel_pos_bill_level, coalesce(open_cash_drawer,0) as open_cash_drawer, coalesce(show_total_balance,0) as show_total_balance, coalesce(change_branch_code,0) as change_branch_code, coalesce(lock_bill,0) as lock_bill, coalesce(approve_ar_credit,0) as approve_ar_credit, coalesce(show_item_cost,0) as show_item_cost, coalesce(disable_edit_doc_no_doc_date_user,0) as disable_edit_doc_no_doc_date_user, coalesce(delete_item_pos,0) as delete_item_pos, coalesce(reset_print_log,0) as reset_print_log, coalesce(is_copy_doc,0) as is_copy_doc, coalesce(is_login_user,0) as is_login_user, coalesce(po_approve_from::numeric(18,2)::text,'NULL') as po_approve_from, coalesce(po_approve_to::numeric(18,2)::text,'NULL') as po_approve_to, coalesce(sr_approve_from::numeric(18,2)::text,'NULL') as sr_approve_from, coalesce(sr_approve_to::numeric(18,2)::text,'NULL') as sr_approve_to, coalesce(sr_approve_from_percent::numeric(18,2)::text,'NULL') as sr_approve_from_percent, coalesce(sr_approve_to_percent::numeric(18,2)::text,'NULL') as sr_approve_to_percent, coalesce(ss_approve_from::numeric(18,2)::text,'NULL') as ss_approve_from, coalesce(ss_approve_to::numeric(18,2)::text,'NULL') as ss_approve_to, coalesce(cr_approve_from::numeric(18,2)::text,'NULL') as cr_approve_from, coalesce(cr_approve_to::numeric(18,2)::text,'NULL') as cr_approve_to, coalesce(max_cr_approve::numeric(18,2)::text,'NULL') as max_cr_approve, coalesce(load_approve_percent::numeric(18,2)::text,'NULL') as load_approve_percent, coalesce(salary::numeric(18,2)::text,'NULL') as salary, case when coalesce(password,'') = :'pw1' then 1 else 0 end as pw_is_1, case when coalesce(password,'') = :'pw2' then 1 else 0 end as pw_is_2, case when coalesce(password,'') = '' then 1 else 0 end as pw_empty from erp_user where code = 'UAT' || :'run_short' || 'E1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}E1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "พนักงานทดสอบ ALPHA {{run.short}} แก้ไข"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT EMPLOYEE ALPHA {{run.short}} EDIT"
+        },
+        {
+          "col": "id_card",
+          "op": "eq",
+          "value": "0000000000002"
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110 แก้ไข"
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": "02-000-0002"
+        },
+        {
+          "col": "mobile",
+          "op": "eq",
+          "value": "080-000-0002"
+        },
+        {
+          "col": "title",
+          "op": "eq",
+          "value": "ตำแหน่งแก้รอบสอง {{run.short}}"
+        },
+        {
+          "col": "sale_hub_user",
+          "op": "eq",
+          "value": "SX{{run.short}}"
+        },
+        {
+          "col": "ic_wht",
+          "op": "eq",
+          "value": "{{wh2_code}}"
+        },
+        {
+          "col": "ic_shelf",
+          "op": "eq",
+          "value": "{{sh2_code}}"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": "{{br2_code}}"
+        },
+        {
+          "col": "side",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "department",
+          "op": "eq",
+          "value": "{{dp2_code}}"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level_1",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level_2",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "pos_cashier",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "discount_level_1",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "cancel_pos_bill_level",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "open_cash_drawer",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "show_total_balance",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "change_branch_code",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "lock_bill",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "approve_ar_credit",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "show_item_cost",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "disable_edit_doc_no_doc_date_user",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "delete_item_pos",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "reset_print_log",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "is_copy_doc",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "is_login_user",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "po_approve_from",
+          "op": "eq",
+          "value": "1000.50"
+        },
+        {
+          "col": "po_approve_to",
+          "op": "eq",
+          "value": "600000.25"
+        },
+        {
+          "col": "sr_approve_from",
+          "op": "eq",
+          "value": "2000.00"
+        },
+        {
+          "col": "sr_approve_to",
+          "op": "eq",
+          "value": "900000.25"
+        },
+        {
+          "col": "sr_approve_from_percent",
+          "op": "eq",
+          "value": "10.50"
+        },
+        {
+          "col": "sr_approve_to_percent",
+          "op": "eq",
+          "value": "95.50"
+        },
+        {
+          "col": "ss_approve_from",
+          "op": "eq",
+          "value": "3000.10"
+        },
+        {
+          "col": "ss_approve_to",
+          "op": "eq",
+          "value": "700000.40"
+        },
+        {
+          "col": "cr_approve_from",
+          "op": "eq",
+          "value": "4000.00"
+        },
+        {
+          "col": "cr_approve_to",
+          "op": "eq",
+          "value": "800000.80"
+        },
+        {
+          "col": "max_cr_approve",
+          "op": "eq",
+          "value": "2500000.75"
+        },
+        {
+          "col": "load_approve_percent",
+          "op": "eq",
+          "value": "80.25"
+        },
+        {
+          "col": "salary",
+          "op": "eq",
+          "value": "42000.50"
+        },
+        {
+          "col": "pw_is_1",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "pw_is_2",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "pw_empty",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "สร้างเอกสารทดสอบ 1 ใบ (เลขที่ UAT ของรอบนี้) ที่ระบุ A เป็นพนักงานขาย เพื่อทดสอบการกันลบ",
+      "do": "db.exec",
+      "sql": "insert into ic_trans (doc_no, doc_date, sale_code) values ('UAT' || :'run_short' || 'EMPD', current_date, 'UAT' || :'run_short' || 'E1')",
+      "affected": 1
+    },
+    {
+      "title": "เลือกแถว A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E1\"])"
+    },
+    {
+      "title": "กดลบรายการ A ที่ถูกใช้เป็นพนักงานขาย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันการลบ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการลบ [UAT{{run.short}}E1] จริงหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงยืนยันการลบ",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ระบบไม่ให้ลบเพราะถูกอ้างอิงในเอกสาร (พนักงานขาย)",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ไม่สามารถลบได้",
+      "continueOnFail": true
+    },
+    {
+      "title": "ข้อความบอกว่าเป็นพนักงานขาย",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "พนักงานขาย",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพกันลบพนักงานที่ถูกใช้",
+      "do": "ui.screenshot",
+      "name": "emp-delete-blocked"
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: A ยังอยู่หลังถูกกันลบ",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(id_card,'') as id_card, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(mobile,'') as mobile, coalesce(title,'') as title, coalesce(sale_hub_user,'') as sale_hub_user, coalesce(ic_wht,'') as ic_wht, coalesce(ic_shelf,'') as ic_shelf, coalesce(branch_code,'') as branch_code, coalesce(side,'') as side, coalesce(department,'') as department, coalesce(status,0) as status, coalesce(price_level_1,0) as price_level_1, coalesce(price_level_2,0) as price_level_2, coalesce(pos_cashier,0) as pos_cashier, coalesce(discount_level_1,0) as discount_level_1, coalesce(cancel_pos_bill_level,0) as cancel_pos_bill_level, coalesce(open_cash_drawer,0) as open_cash_drawer, coalesce(show_total_balance,0) as show_total_balance, coalesce(change_branch_code,0) as change_branch_code, coalesce(lock_bill,0) as lock_bill, coalesce(approve_ar_credit,0) as approve_ar_credit, coalesce(show_item_cost,0) as show_item_cost, coalesce(disable_edit_doc_no_doc_date_user,0) as disable_edit_doc_no_doc_date_user, coalesce(delete_item_pos,0) as delete_item_pos, coalesce(reset_print_log,0) as reset_print_log, coalesce(is_copy_doc,0) as is_copy_doc, coalesce(is_login_user,0) as is_login_user, coalesce(po_approve_from::numeric(18,2)::text,'NULL') as po_approve_from, coalesce(po_approve_to::numeric(18,2)::text,'NULL') as po_approve_to, coalesce(sr_approve_from::numeric(18,2)::text,'NULL') as sr_approve_from, coalesce(sr_approve_to::numeric(18,2)::text,'NULL') as sr_approve_to, coalesce(sr_approve_from_percent::numeric(18,2)::text,'NULL') as sr_approve_from_percent, coalesce(sr_approve_to_percent::numeric(18,2)::text,'NULL') as sr_approve_to_percent, coalesce(ss_approve_from::numeric(18,2)::text,'NULL') as ss_approve_from, coalesce(ss_approve_to::numeric(18,2)::text,'NULL') as ss_approve_to, coalesce(cr_approve_from::numeric(18,2)::text,'NULL') as cr_approve_from, coalesce(cr_approve_to::numeric(18,2)::text,'NULL') as cr_approve_to, coalesce(max_cr_approve::numeric(18,2)::text,'NULL') as max_cr_approve, coalesce(load_approve_percent::numeric(18,2)::text,'NULL') as load_approve_percent, coalesce(salary::numeric(18,2)::text,'NULL') as salary, case when coalesce(password,'') = :'pw1' then 1 else 0 end as pw_is_1, case when coalesce(password,'') = :'pw2' then 1 else 0 end as pw_is_2, case when coalesce(password,'') = '' then 1 else 0 end as pw_empty from erp_user where code = 'UAT' || :'run_short' || 'E1'",
+      "rows": 1,
+      "continueOnFail": true
+    },
+    {
+      "title": "เปลี่ยนเอกสารทดสอบให้ระบุ A เป็นผู้บันทึกแทน",
+      "do": "db.exec",
+      "sql": "update ic_trans set sale_code = '', creator_code = 'UAT' || :'run_short' || 'E1' where doc_no = 'UAT' || :'run_short' || 'EMPD'",
+      "affected": 1
+    },
+    {
+      "title": "กดลบรายการ A ที่ถูกใช้เป็นผู้บันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "กดตกลงยืนยันการลบ",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ระบบไม่ให้ลบเพราะถูกอ้างอิงในเอกสาร (ผู้บันทึก)",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ผู้บันทึก",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: A ยังอยู่หลังถูกกันลบรอบสอง",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(id_card,'') as id_card, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(mobile,'') as mobile, coalesce(title,'') as title, coalesce(sale_hub_user,'') as sale_hub_user, coalesce(ic_wht,'') as ic_wht, coalesce(ic_shelf,'') as ic_shelf, coalesce(branch_code,'') as branch_code, coalesce(side,'') as side, coalesce(department,'') as department, coalesce(status,0) as status, coalesce(price_level_1,0) as price_level_1, coalesce(price_level_2,0) as price_level_2, coalesce(pos_cashier,0) as pos_cashier, coalesce(discount_level_1,0) as discount_level_1, coalesce(cancel_pos_bill_level,0) as cancel_pos_bill_level, coalesce(open_cash_drawer,0) as open_cash_drawer, coalesce(show_total_balance,0) as show_total_balance, coalesce(change_branch_code,0) as change_branch_code, coalesce(lock_bill,0) as lock_bill, coalesce(approve_ar_credit,0) as approve_ar_credit, coalesce(show_item_cost,0) as show_item_cost, coalesce(disable_edit_doc_no_doc_date_user,0) as disable_edit_doc_no_doc_date_user, coalesce(delete_item_pos,0) as delete_item_pos, coalesce(reset_print_log,0) as reset_print_log, coalesce(is_copy_doc,0) as is_copy_doc, coalesce(is_login_user,0) as is_login_user, coalesce(po_approve_from::numeric(18,2)::text,'NULL') as po_approve_from, coalesce(po_approve_to::numeric(18,2)::text,'NULL') as po_approve_to, coalesce(sr_approve_from::numeric(18,2)::text,'NULL') as sr_approve_from, coalesce(sr_approve_to::numeric(18,2)::text,'NULL') as sr_approve_to, coalesce(sr_approve_from_percent::numeric(18,2)::text,'NULL') as sr_approve_from_percent, coalesce(sr_approve_to_percent::numeric(18,2)::text,'NULL') as sr_approve_to_percent, coalesce(ss_approve_from::numeric(18,2)::text,'NULL') as ss_approve_from, coalesce(ss_approve_to::numeric(18,2)::text,'NULL') as ss_approve_to, coalesce(cr_approve_from::numeric(18,2)::text,'NULL') as cr_approve_from, coalesce(cr_approve_to::numeric(18,2)::text,'NULL') as cr_approve_to, coalesce(max_cr_approve::numeric(18,2)::text,'NULL') as max_cr_approve, coalesce(load_approve_percent::numeric(18,2)::text,'NULL') as load_approve_percent, coalesce(salary::numeric(18,2)::text,'NULL') as salary, case when coalesce(password,'') = :'pw1' then 1 else 0 end as pw_is_1, case when coalesce(password,'') = :'pw2' then 1 else 0 end as pw_is_2, case when coalesce(password,'') = '' then 1 else 0 end as pw_empty from erp_user where code = 'UAT' || :'run_short' || 'E1'",
+      "rows": 1,
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบเอกสารทดสอบ",
+      "do": "db.exec",
+      "sql": "delete from ic_trans where doc_no = 'UAT' || :'run_short' || 'EMPD'",
+      "affected": 1
+    },
+    {
+      "title": "DB: ไม่เหลือเอกสารทดสอบ",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_trans where doc_no = 'UAT' || :'run_short' || 'EMPD'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกแถว C",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E3\"])"
+    },
+    {
+      "title": "กดลบรายการ C",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันการลบ C",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการลบ [UAT{{run.short}}E3] จริงหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดยกเลิกการลบก่อน",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ยกเลิก\")"
+    },
+    {
+      "title": "DB: ยกเลิกการลบแล้ว C ยังอยู่",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(id_card,'') as id_card, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(mobile,'') as mobile, coalesce(title,'') as title, coalesce(sale_hub_user,'') as sale_hub_user, coalesce(ic_wht,'') as ic_wht, coalesce(ic_shelf,'') as ic_shelf, coalesce(branch_code,'') as branch_code, coalesce(side,'') as side, coalesce(department,'') as department, coalesce(status,0) as status, coalesce(price_level_1,0) as price_level_1, coalesce(price_level_2,0) as price_level_2, coalesce(pos_cashier,0) as pos_cashier, coalesce(discount_level_1,0) as discount_level_1, coalesce(cancel_pos_bill_level,0) as cancel_pos_bill_level, coalesce(open_cash_drawer,0) as open_cash_drawer, coalesce(show_total_balance,0) as show_total_balance, coalesce(change_branch_code,0) as change_branch_code, coalesce(lock_bill,0) as lock_bill, coalesce(approve_ar_credit,0) as approve_ar_credit, coalesce(show_item_cost,0) as show_item_cost, coalesce(disable_edit_doc_no_doc_date_user,0) as disable_edit_doc_no_doc_date_user, coalesce(delete_item_pos,0) as delete_item_pos, coalesce(reset_print_log,0) as reset_print_log, coalesce(is_copy_doc,0) as is_copy_doc, coalesce(is_login_user,0) as is_login_user, coalesce(po_approve_from::numeric(18,2)::text,'NULL') as po_approve_from, coalesce(po_approve_to::numeric(18,2)::text,'NULL') as po_approve_to, coalesce(sr_approve_from::numeric(18,2)::text,'NULL') as sr_approve_from, coalesce(sr_approve_to::numeric(18,2)::text,'NULL') as sr_approve_to, coalesce(sr_approve_from_percent::numeric(18,2)::text,'NULL') as sr_approve_from_percent, coalesce(sr_approve_to_percent::numeric(18,2)::text,'NULL') as sr_approve_to_percent, coalesce(ss_approve_from::numeric(18,2)::text,'NULL') as ss_approve_from, coalesce(ss_approve_to::numeric(18,2)::text,'NULL') as ss_approve_to, coalesce(cr_approve_from::numeric(18,2)::text,'NULL') as cr_approve_from, coalesce(cr_approve_to::numeric(18,2)::text,'NULL') as cr_approve_to, coalesce(max_cr_approve::numeric(18,2)::text,'NULL') as max_cr_approve, coalesce(load_approve_percent::numeric(18,2)::text,'NULL') as load_approve_percent, coalesce(salary::numeric(18,2)::text,'NULL') as salary, case when coalesce(password,'') = :'pw1' then 1 else 0 end as pw_is_1, case when coalesce(password,'') = :'pw2' then 1 else 0 end as pw_is_2, case when coalesce(password,'') = '' then 1 else 0 end as pw_empty from erp_user where code = 'UAT' || :'run_short' || 'E3'",
+      "rows": 1,
+      "continueOnFail": true
+    },
+    {
+      "title": "กดลบรายการ C อีกครั้ง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "กดตกลงยืนยันการลบ",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ระบบแจ้งลบสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ลบข้อมูลเสร็จเรียบร้อย",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง (ลบ C สำเร็จ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: C ถูกลบ ไม่เหลือแถว",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(id_card,'') as id_card, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(mobile,'') as mobile, coalesce(title,'') as title, coalesce(sale_hub_user,'') as sale_hub_user, coalesce(ic_wht,'') as ic_wht, coalesce(ic_shelf,'') as ic_shelf, coalesce(branch_code,'') as branch_code, coalesce(side,'') as side, coalesce(department,'') as department, coalesce(status,0) as status, coalesce(price_level_1,0) as price_level_1, coalesce(price_level_2,0) as price_level_2, coalesce(pos_cashier,0) as pos_cashier, coalesce(discount_level_1,0) as discount_level_1, coalesce(cancel_pos_bill_level,0) as cancel_pos_bill_level, coalesce(open_cash_drawer,0) as open_cash_drawer, coalesce(show_total_balance,0) as show_total_balance, coalesce(change_branch_code,0) as change_branch_code, coalesce(lock_bill,0) as lock_bill, coalesce(approve_ar_credit,0) as approve_ar_credit, coalesce(show_item_cost,0) as show_item_cost, coalesce(disable_edit_doc_no_doc_date_user,0) as disable_edit_doc_no_doc_date_user, coalesce(delete_item_pos,0) as delete_item_pos, coalesce(reset_print_log,0) as reset_print_log, coalesce(is_copy_doc,0) as is_copy_doc, coalesce(is_login_user,0) as is_login_user, coalesce(po_approve_from::numeric(18,2)::text,'NULL') as po_approve_from, coalesce(po_approve_to::numeric(18,2)::text,'NULL') as po_approve_to, coalesce(sr_approve_from::numeric(18,2)::text,'NULL') as sr_approve_from, coalesce(sr_approve_to::numeric(18,2)::text,'NULL') as sr_approve_to, coalesce(sr_approve_from_percent::numeric(18,2)::text,'NULL') as sr_approve_from_percent, coalesce(sr_approve_to_percent::numeric(18,2)::text,'NULL') as sr_approve_to_percent, coalesce(ss_approve_from::numeric(18,2)::text,'NULL') as ss_approve_from, coalesce(ss_approve_to::numeric(18,2)::text,'NULL') as ss_approve_to, coalesce(cr_approve_from::numeric(18,2)::text,'NULL') as cr_approve_from, coalesce(cr_approve_to::numeric(18,2)::text,'NULL') as cr_approve_to, coalesce(max_cr_approve::numeric(18,2)::text,'NULL') as max_cr_approve, coalesce(load_approve_percent::numeric(18,2)::text,'NULL') as load_approve_percent, coalesce(salary::numeric(18,2)::text,'NULL') as salary, case when coalesce(password,'') = :'pw1' then 1 else 0 end as pw_is_1, case when coalesce(password,'') = :'pw2' then 1 else 0 end as pw_is_2, case when coalesce(password,'') = '' then 1 else 0 end as pw_empty from erp_user where code = 'UAT' || :'run_short' || 'E3'",
+      "rows": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว C หายจากรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E3\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ติ๊กเลือกแถว A ในรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E1\"]) td[data-col-key=\"__check__\"]"
+    },
+    {
+      "title": "ติ๊กเลือกแถว B ในรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E2\"]) td[data-col-key=\"__check__\"]"
+    },
+    {
+      "title": "กดปุ่มลบรายการที่เลือกในรายการซ้าย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-testid=\"sml-nav-delete-btn\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันการลบ 2 รายการ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "จำนวน: 2 รายการ",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงยืนยันการลบ",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ระบบแจ้งลบสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ลบข้อมูลเสร็จเรียบร้อย",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง (ลบ A และ B สำเร็จ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: ไม่เหลือพนักงานของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from erp_user where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว A หายจากรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว B หายจากรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_staff\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}E2\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบแล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/",
+        "ERR_QUIC_PROTOCOL_ERROR"
+      ],
+      "continueOnFail": true
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบเอกสารทดสอบที่ค้าง (เลขที่รูปแบบ UAT+6 ตัว+EMPD เท่านั้น)",
+      "do": "db.exec",
+      "sql": "delete from ic_trans where doc_no ~ '^UAT[0-9A-Z]{6}EMPD$'"
+    },
+    {
+      "title": "ลบพนักงานของสคริปต์นี้ที่ค้างจากรอบนี้หรือรอบที่ถูกขัดจังหวะ (รหัสรูปแบบ UAT+6 ตัว+E1/E2/E3/E4 เท่านั้น)",
+      "do": "db.exec",
+      "sql": "delete from erp_user where code ~ '^UAT[0-9A-Z]{6}E[1234]$'"
+    },
+    {
+      "title": "ลบฝ่าย UAT ที่สร้างไว้ให้ช่องฝ่าย (รหัสรูปแบบ UAT+6 ตัว+S หรือ SIDELONG เท่านั้น)",
+      "do": "db.exec",
+      "sql": "delete from erp_side_list where code ~ '^UAT[0-9A-Z]{6}(S|SIDELONG)$'"
+    },
+    {
+      "title": "DB: ไม่เหลือพนักงานของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from erp_user where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "DB: ไม่เหลือฝ่าย UAT ของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from erp_side_list where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "DB: ไม่เหลือเอกสารทดสอบของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_trans where doc_no = 'UAT' || :'run_short' || 'EMPD'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

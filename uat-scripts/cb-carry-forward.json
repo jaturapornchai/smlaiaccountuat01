@@ -1,0 +1,1151 @@
+{
+  "id": "cb-carry-forward",
+  "title": "เอกสารยกมา (ลูกหนี้ เจ้าหนี้ เช็ครับ เช็คจ่าย เงินสด เงินฝาก) และบัตรเครดิตรับ: บันทึกได้ ขึ้นทะเบียน/รายงานคงค้างถูก ขึ้นเงินบัตรถูก แล้วลบคืนไม่เหลือเศษ",
+  "module": "recon",
+  "lens": "api",
+  "severityOnFail": "S2",
+  "description": "ทำงานผ่าน API ตัวเดียวกับหน้าจอ: ตั้งหนี้ลูกหนี้ยกมา (93) และเจ้าหนี้ยกมา (81) ต้องขึ้นรายงานใบส่งของค้างชำระ/ค้างจ่ายเต็มยอด · เช็ครับยกมา (405) และเช็คจ่ายยกมา (406) ต้องขึ้นทะเบียนเช็คสถานะเช็คในมือ ขึ้นรายงานเช็ค และเลือกไปนำฝาก/ผ่านได้ · ยกมาเงินสด (602) และเงินฝากธนาคารยกมา (604) ต้องบันทึกได้ (หน้าจอกรอกยอดที่หัวเอกสาร) และเงินฝากยกมาต้องขึ้น Bank Statement · รับชำระหนี้ยกมาด้วยบัตรเครดิต (239) → บัตรขึ้นทะเบียนรอขึ้นเงิน → ขึ้นเงินบัตร (461) → สถานะ/รายงานบัตร/GL/Bank Statement ถูก · ลูกค้า เจ้าหนี้ ยอดเงินดึงจากเอกสารยกมาจริง เช็คจริง และ cb_trans จริงล่าสุด สมุดจาก erp_pass_book ที่ผังบัญชีมีจริง เลขเช็ค/บัตรเป็นของรอบนี้ · cleanup ลบทุกใบผ่าน API ย้อนลำดับ แล้วตรวจว่าไม่เหลือแถว",
+  "steps": [
+    {
+      "title": "กำหนดเลขตั้งหนี้ลูกหนี้ยกมาทดสอบ",
+      "do": "set",
+      "name": "ea",
+      "value": "UAT-{{run.short}}-EA"
+    },
+    {
+      "title": "กำหนดเลขตั้งหนี้เจ้าหนี้ยกมาทดสอบ",
+      "do": "set",
+      "name": "da",
+      "value": "UAT-{{run.short}}-DA"
+    },
+    {
+      "title": "กำหนดเลขเช็ครับยกมาทดสอบ",
+      "do": "set",
+      "name": "chb",
+      "value": "UAT-{{run.short}}-CHB"
+    },
+    {
+      "title": "กำหนดเลขเช็คจ่ายยกมาทดสอบ",
+      "do": "set",
+      "name": "cpb",
+      "value": "UAT-{{run.short}}-CPB"
+    },
+    {
+      "title": "กำหนดเลขยกมาเงินสดทดสอบ",
+      "do": "set",
+      "name": "cab",
+      "value": "UAT-{{run.short}}-CAB"
+    },
+    {
+      "title": "กำหนดเลขเงินฝากธนาคารยกมาทดสอบ",
+      "do": "set",
+      "name": "bbl",
+      "value": "UAT-{{run.short}}-BBL"
+    },
+    {
+      "title": "กำหนดเลขใบรับชำระด้วยบัตรเครดิตทดสอบ",
+      "do": "set",
+      "name": "ee",
+      "value": "UAT-{{run.short}}-EE"
+    },
+    {
+      "title": "กำหนดเลขบันทึกขึ้นเงินบัตรเครดิตทดสอบ",
+      "do": "set",
+      "name": "crd",
+      "value": "UAT-{{run.short}}-CRD"
+    },
+    {
+      "title": "กำหนดเลขเช็ครับยกมาของรอบนี้",
+      "do": "set",
+      "name": "chqr",
+      "value": "UAT{{run.short}}B"
+    },
+    {
+      "title": "กำหนดเลขเช็คจ่ายยกมาของรอบนี้",
+      "do": "set",
+      "name": "chqp",
+      "value": "UAT{{run.short}}Q"
+    },
+    {
+      "title": "กำหนดเลขบัตรเครดิตของรอบนี้",
+      "do": "set",
+      "name": "card",
+      "value": "UAT{{run.short}}K"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ดึงลูกหนี้/เจ้าหนี้และยอดจากเอกสารยกมาจริง ยอดเช็ครับ/จ่ายจากทะเบียนเช็คจริง ยอดเงินสด/เงินโอนจาก cb_trans จริง สมุดและผังบัญชีจริง",
+      "do": "db.query",
+      "sql": "with ar as (select t.cust_code, round(t.total_amount, 2) as amt, coalesce(t.doc_format_code, '') as fmt from ic_trans t join ar_customer c on c.code = t.cust_code where t.trans_flag = 93 and t.doc_no not like 'UAT%' and t.last_status = 0 and t.total_amount > 0 order by t.doc_date desc, t.roworder desc limit 1), ap as (select t.cust_code, round(t.total_amount, 2) as amt, coalesce(t.doc_format_code, '') as fmt from ic_trans t join ap_supplier s on s.code = t.cust_code where t.trans_flag = 81 and t.doc_no not like 'UAT%' and t.last_status = 0 and t.total_amount > 0 order by t.doc_date desc, t.roworder desc limit 1), ci as (select q.ap_ar_code, q.amount from cb_chq_list q join ar_customer c on c.code = q.ap_ar_code where q.chq_type = 1 and q.chq_number not like 'UAT%' and q.amount > 0 order by q.roworder desc limit 1), co as (select q.ap_ar_code, q.amount from cb_chq_list q join ap_supplier s on s.code = q.ap_ar_code where q.chq_type = 2 and q.chq_number not like 'UAT%' and q.amount > 0 order by q.roworder desc limit 1), b as (select p.code, p.account_code_1 as acc from erp_pass_book p join gl_chart_of_account c on c.code = p.account_code_1 order by p.code limit 1) select ar.cust_code as cust, ar.amt::text as amt_ar, (-ar.amt)::text as neg_ar, ar.fmt as eafmt, ap.cust_code as supp, ap.amt::text as amt_ap, ap.fmt as dafmt, ci.ap_ar_code as chq_cust, round(ci.amount, 2)::text as amt_ci, co.ap_ar_code as chq_supp, round(co.amount, 2)::text as amt_co, (select round(cash_amount, 2)::text from cb_trans where doc_no not like 'UAT%' and cash_amount > 0 order by roworder desc limit 1) as amt_cash, (select round(tranfer_amount, 2)::text from cb_trans where doc_no not like 'UAT%' and tranfer_amount > 0 order by roworder desc limit 1) as amt_bank, (select doc_format_code from ap_ar_trans where trans_flag = 239 and doc_no not like 'UAT%' and coalesce(doc_format_code, '') <> '' order by roworder desc limit 1) as eefmt, b.code as book, b.acc, (select code from gl_chart_of_account where name_1 like 'ลูกหนี้การค้า%' order by code limit 1) as ar_acc, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today from ar, ap, ci, co, b",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "amt_ar",
+          "op": "gt",
+          "value": "0"
+        },
+        {
+          "col": "amt_ap",
+          "op": "gt",
+          "value": "0"
+        },
+        {
+          "col": "amt_ci",
+          "op": "gt",
+          "value": "0"
+        },
+        {
+          "col": "amt_co",
+          "op": "gt",
+          "value": "0"
+        },
+        {
+          "col": "amt_cash",
+          "op": "gt",
+          "value": "0"
+        },
+        {
+          "col": "amt_bank",
+          "op": "gt",
+          "value": "0"
+        },
+        {
+          "col": "eefmt",
+          "op": "exists"
+        },
+        {
+          "col": "book",
+          "op": "exists"
+        }
+      ],
+      "save": {
+        "cust": "cust",
+        "amt_ar": "amt_ar",
+        "neg_ar": "neg_ar",
+        "eafmt": "eafmt",
+        "supp": "supp",
+        "amt_ap": "amt_ap",
+        "dafmt": "dafmt",
+        "chq_cust": "chq_cust",
+        "amt_ci": "amt_ci",
+        "chq_supp": "chq_supp",
+        "amt_co": "amt_co",
+        "amt_cash": "amt_cash",
+        "amt_bank": "amt_bank",
+        "eefmt": "eefmt",
+        "book": "book",
+        "acc": "acc",
+        "ar_acc": "ar_acc",
+        "today": "today"
+      }
+    },
+    {
+      "title": "บันทึกตั้งหนี้ลูกหนี้ยกมา (93) กรอกยอดที่หัวเอกสาร",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{ea}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 93,
+        "inquiryType": 0,
+        "custCode": "{{cust}}",
+        "docFormatCode": "{{eafmt}}",
+        "dueDate": "{{today}}",
+        "remark": "{{run.tag}}",
+        "totalAmount": "{{amt_ar}}",
+        "lines": []
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{ea}}"
+        }
+      ]
+    },
+    {
+      "title": "รายงานใบส่งของค้างชำระ: ลูกหนี้ยกมาค้างเต็มยอด",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_ar_report_invoice_remain_pay",
+        "mode": "summary",
+        "dateFrom": "{{today}}",
+        "dateTo": "{{today}}",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "{{ea}}",
+        "viewDetail": false
+      },
+      "expect": [
+        {
+          "path": "data.rows.0.doc_no",
+          "op": "eq",
+          "value": "{{ea}}"
+        },
+        {
+          "path": "data.rows.0.รหัสลูกหนี้",
+          "op": "eq",
+          "value": "{{cust}}"
+        },
+        {
+          "path": "data.rows.0.ยอดคงเหลือ",
+          "op": "eq",
+          "value": "{{amt_ar}}"
+        }
+      ]
+    },
+    {
+      "title": "บันทึกตั้งหนี้เจ้าหนี้ยกมา (81) กรอกยอดที่หัวเอกสาร",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{da}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 81,
+        "inquiryType": 0,
+        "custCode": "{{supp}}",
+        "docFormatCode": "{{dafmt}}",
+        "dueDate": "{{today}}",
+        "remark": "{{run.tag}}",
+        "totalAmount": "{{amt_ap}}",
+        "lines": []
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{da}}"
+        }
+      ]
+    },
+    {
+      "title": "รายงานใบส่งของค้างจ่ายชำระ: เจ้าหนี้ยกมาค้างเต็มยอด",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_invoice_arrears_by_date",
+        "mode": "summary",
+        "dateFrom": "{{today}}",
+        "dateTo": "{{today}}",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "{{da}}",
+        "viewDetail": false
+      },
+      "expect": [
+        {
+          "path": "data.rows.0.doc_no",
+          "op": "eq",
+          "value": "{{da}}"
+        },
+        {
+          "path": "data.rows.0.รหัสเจ้าหนี้",
+          "op": "eq",
+          "value": "{{supp}}"
+        },
+        {
+          "path": "data.rows.0.ยอดคงเหลือ",
+          "op": "eq",
+          "value": "{{amt_ap}}"
+        }
+      ]
+    },
+    {
+      "title": "บันทึกเช็ครับยกมา (405) 1 ใบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{chb}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 405,
+        "inquiryType": 0,
+        "custCode": "{{chq_cust}}",
+        "docFormatCode": "CHB",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{chqr}}",
+            "qty": "1",
+            "standValue": "1",
+            "divideValue": "1",
+            "price": "{{amt_ci}}",
+            "sumAmount": "{{amt_ci}}",
+            "taxType": 0,
+            "dateDue": "{{today}}"
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{chb}}"
+        }
+      ]
+    },
+    {
+      "title": "ทะเบียนเช็ครับ: เช็คยกมาขึ้น 1 ใบ สถานะเช็คในมือ ยอด/ลูกหนี้/เอกสารอ้างอิงตรง",
+      "do": "db.query",
+      "sql": "select chq_type, status, amount, doc_ref, ap_ar_code, trans_flag from cb_chq_list where chq_number = :'chqr'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "chq_type",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{amt_ci}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "eq",
+          "value": "{{chb}}"
+        },
+        {
+          "col": "ap_ar_code",
+          "op": "eq",
+          "value": "{{chq_cust}}"
+        },
+        {
+          "col": "trans_flag",
+          "op": "eq",
+          "value": "405"
+        }
+      ]
+    },
+    {
+      "title": "รายงานรายละเอียดเช็ครับ: เช็คยกมาสถานะเช็คในมือ ยอดตรง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_cb_report_chq_in_receive_by_date",
+        "mode": "summary",
+        "dateFrom": "{{today}}",
+        "dateTo": "{{today}}",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "{{chqr}}",
+        "viewDetail": false
+      },
+      "expect": [
+        {
+          "path": "data.rows.0.เลขที่เช็ค",
+          "op": "eq",
+          "value": "{{chqr}}"
+        },
+        {
+          "path": "data.rows.0.สถานะเช็ค",
+          "op": "eq",
+          "value": "เช็คในมือ"
+        },
+        {
+          "path": "data.rows.0.เอกสารอ้างอิง",
+          "op": "eq",
+          "value": "{{chb}}"
+        },
+        {
+          "path": "data.rows.0.จำนวนเงิน",
+          "op": "eq",
+          "value": "{{amt_ci}}"
+        }
+      ]
+    },
+    {
+      "title": "ตัวเลือกเช็คหน้านำฝาก (410) เห็นเช็ครับยกมาใบนี้",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/cheque/candidates",
+      "body": {
+        "transFlag": 410,
+        "custCode": "",
+        "passBookCode": "{{book}}",
+        "search": "{{chqr}}"
+      },
+      "expect": [
+        {
+          "path": "data.0.chqNumber",
+          "op": "eq",
+          "value": "{{chqr}}"
+        },
+        {
+          "path": "data.0.amount",
+          "op": "eq",
+          "value": "{{amt_ci}}"
+        }
+      ]
+    },
+    {
+      "title": "บันทึกเช็คจ่ายยกมา (406) 1 ใบ จากสมุดธนาคาร",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{cpb}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 406,
+        "inquiryType": 0,
+        "custCode": "{{chq_supp}}",
+        "docFormatCode": "CPB",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{book}}",
+            "qty": "1",
+            "standValue": "1",
+            "divideValue": "1",
+            "price": "{{amt_co}}",
+            "sumAmount": "{{amt_co}}",
+            "taxType": 0,
+            "chqNumber": "{{chqp}}",
+            "dateDue": "{{today}}"
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{cpb}}"
+        }
+      ]
+    },
+    {
+      "title": "ทะเบียนเช็คจ่าย: เช็คยกมาขึ้น 1 ใบ สถานะ 0 ยอด/เจ้าหนี้/สมุดตรง",
+      "do": "db.query",
+      "sql": "select chq_type, status, amount, doc_ref, ap_ar_code, pass_book_code from cb_chq_list where chq_number = :'chqp'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "chq_type",
+          "op": "eq",
+          "value": "2"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{amt_co}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "eq",
+          "value": "{{cpb}}"
+        },
+        {
+          "col": "ap_ar_code",
+          "op": "eq",
+          "value": "{{chq_supp}}"
+        },
+        {
+          "col": "pass_book_code",
+          "op": "eq",
+          "value": "{{book}}"
+        }
+      ]
+    },
+    {
+      "title": "รายงานรายละเอียดเช็คจ่าย: เช็คจ่ายยกมาสถานะเช็คในมือ ยอดตรง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_cb_report_chq_out_payment_by_date",
+        "mode": "summary",
+        "dateFrom": "{{today}}",
+        "dateTo": "{{today}}",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "{{chqp}}",
+        "viewDetail": false
+      },
+      "expect": [
+        {
+          "path": "data.rows.0.เลขที่เช็ค",
+          "op": "eq",
+          "value": "{{chqp}}"
+        },
+        {
+          "path": "data.rows.0.สถานะเช็ค",
+          "op": "eq",
+          "value": "เช็คในมือ"
+        },
+        {
+          "path": "data.rows.0.จำนวนเงิน",
+          "op": "eq",
+          "value": "{{amt_co}}"
+        }
+      ]
+    },
+    {
+      "title": "ตัวเลือกเช็คหน้าเช็คจ่ายผ่าน (451) ของสมุดนี้ เห็นเช็คจ่ายยกมาใบนี้",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/cheque/candidates",
+      "body": {
+        "transFlag": 451,
+        "custCode": "",
+        "passBookCode": "{{book}}",
+        "search": "{{chqp}}"
+      },
+      "expect": [
+        {
+          "path": "data.0.chqNumber",
+          "op": "eq",
+          "value": "{{chqp}}"
+        },
+        {
+          "path": "data.0.amount",
+          "op": "eq",
+          "value": "{{amt_co}}"
+        }
+      ]
+    },
+    {
+      "title": "บันทึกยกมาเงินสด (602) กรอกยอดที่หัวเอกสารแบบหน้าจอ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{cab}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 602,
+        "inquiryType": 0,
+        "custCode": "",
+        "docFormatCode": "CAB",
+        "remark": "{{run.tag}}",
+        "totalAmount": "{{amt_cash}}",
+        "lines": []
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{cab}}"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "บันทึกเงินฝากธนาคารยกมา (604) ของสมุดนี้ กรอกยอดที่หัวเอกสารแบบหน้าจอ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{bbl}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 604,
+        "inquiryType": 0,
+        "custCode": "",
+        "passBookCode": "{{book}}",
+        "docFormatCode": "BBL",
+        "remark": "{{run.tag}}",
+        "totalAmount": "{{amt_bank}}",
+        "lines": []
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{bbl}}"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "Bank Statement (ค้นเลขเงินฝากยกมา): สมุดนี้เงินเข้า = ยอดยกมา",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "_menu_bank_statement",
+        "mode": "summary",
+        "dateFrom": "{{today}}",
+        "dateTo": "{{today}}",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "{{bbl}}",
+        "viewDetail": false
+      },
+      "expect": [
+        {
+          "path": "data.rows.0.รหัสสมุด",
+          "op": "eq",
+          "value": "{{book}}"
+        },
+        {
+          "path": "data.rows.0.เงินเข้า",
+          "op": "eq",
+          "value": "{{amt_bank}}"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "รับชำระหนี้ลูกหนี้ยกมาเต็มจำนวนด้วยบัตรเครดิต เข้าสมุดธนาคาร (239)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/save",
+      "body": {
+        "kind": "ap_ar_trans",
+        "isNew": true,
+        "docNo": "{{ee}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 239,
+        "custCode": "{{cust}}",
+        "docFormatCode": "{{eefmt}}",
+        "remark": "{{run.tag}}",
+        "bills": [
+          {
+            "billingNo": "{{ea}}",
+            "billingDate": "{{today}}",
+            "billType": 93,
+            "sumDebtAmount": "{{amt_ar}}",
+            "balanceRef": "{{amt_ar}}",
+            "sumPayMoney": "{{amt_ar}}"
+          }
+        ],
+        "pay": {
+          "cards": [
+            {
+              "cardNumber": "{{card}}",
+              "passBookCode": "{{book}}",
+              "amount": "{{amt_ar}}",
+              "charge": "0"
+            }
+          ]
+        }
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{ee}}"
+        }
+      ]
+    },
+    {
+      "title": "รายละเอียดการรับเงินของใบรับชำระ: บัตรใบนี้บันทึกเป็นรายการบัตรเครดิต 1 แถว ยอด/สมุดตรง (ข้อมูลต้นทางของทะเบียนบัตร)",
+      "do": "db.query",
+      "sql": "select doc_type, trans_number, amount, pass_book_code from cb_trans_detail where doc_no = :'ee' and doc_type = 3",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "trans_number",
+          "op": "eq",
+          "value": "{{card}}"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{amt_ar}}"
+        },
+        {
+          "col": "pass_book_code",
+          "op": "eq",
+          "value": "{{book}}"
+        }
+      ]
+    },
+    {
+      "title": "ทะเบียนบัตรเครดิต: บัตรใบนี้ขึ้น 1 แถว สถานะรอขึ้นเงิน ยอด/ลูกหนี้/สมุดตรง",
+      "do": "db.query",
+      "sql": "select chq_type, status, amount, doc_ref, ap_ar_code, pass_book_code from cb_chq_list where chq_number = :'card'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "chq_type",
+          "op": "eq",
+          "value": "3"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{amt_ar}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "eq",
+          "value": "{{ee}}"
+        },
+        {
+          "col": "ap_ar_code",
+          "op": "eq",
+          "value": "{{cust}}"
+        },
+        {
+          "col": "pass_book_code",
+          "op": "eq",
+          "value": "{{book}}"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "รายงานใบส่งของค้างชำระ: หลังรับด้วยบัตร ลูกหนี้ยกมาไม่ค้าง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_ar_report_invoice_remain_pay",
+        "mode": "summary",
+        "dateFrom": "{{today}}",
+        "dateTo": "{{today}}",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "{{ea}}",
+        "viewDetail": false
+      },
+      "expect": [
+        {
+          "path": "data.rows.0",
+          "op": "empty"
+        }
+      ]
+    },
+    {
+      "title": "รายงานรายละเอียดบัตรเครดิต: บัตรใบนี้สถานะรอขึ้นเงิน ยอดตรง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_report_chq_card_enddate_card",
+        "mode": "summary",
+        "dateFrom": "{{today}}",
+        "dateTo": "{{today}}",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "{{card}}",
+        "viewDetail": false
+      },
+      "expect": [
+        {
+          "path": "data.rows.0.เลขที่บัตรเครดิต",
+          "op": "eq",
+          "value": "{{card}}"
+        },
+        {
+          "path": "data.rows.0.สถานะ",
+          "op": "eq",
+          "value": "รอขึ้นเงิน"
+        },
+        {
+          "path": "data.rows.0.จำนวนเงิน",
+          "op": "eq",
+          "value": "{{amt_ar}}"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ตัวเลือกบัตรหน้าขึ้นเงินบัตรเครดิต (461) เห็นบัตรใบนี้ อ้างใบรับชำระ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/cheque/candidates",
+      "body": {
+        "transFlag": 461,
+        "custCode": "",
+        "passBookCode": "{{book}}",
+        "search": "{{card}}"
+      },
+      "expect": [
+        {
+          "path": "data.0.chqNumber",
+          "op": "eq",
+          "value": "{{card}}"
+        },
+        {
+          "path": "data.0.docRef",
+          "op": "eq",
+          "value": "{{ee}}"
+        },
+        {
+          "path": "data.0.amount",
+          "op": "eq",
+          "value": "{{amt_ar}}"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "บันทึกขึ้นเงินบัตรเครดิต (461) บัตรใบนี้เต็มจำนวนเข้าสมุดเดียวกัน",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{crd}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 461,
+        "inquiryType": 0,
+        "custCode": "",
+        "passBookCode": "{{book}}",
+        "docFormatCode": "CRD",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{book}}",
+            "qty": "1",
+            "standValue": "1",
+            "divideValue": "1",
+            "price": "{{amt_ar}}",
+            "sumAmount": "{{amt_ar}}",
+            "taxType": 0,
+            "chqNumber": "{{card}}",
+            "docRef": "{{ee}}",
+            "refRow": 1,
+            "dateDue": "{{today}}"
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{crd}}"
+        }
+      ]
+    },
+    {
+      "title": "หลังขึ้นเงิน: สถานะบัตรในทะเบียน = 1 ขึ้นเงินแล้ว (ตาม C# _docFlowThread.cs:900-903)",
+      "do": "db.query",
+      "sql": "select status from cb_chq_list where chq_number = :'card'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "GL ขึ้นเงินบัตร (461): เดบิตบัญชีเงินฝากของสมุด เครดิตลูกหนี้การค้า = ยอดบัตร และสมดุล",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit) filter (where account_code = :'acc'), 0) as dr_bank, coalesce(sum(credit) filter (where account_code = :'ar_acc'), 0) as cr_ar from gl_journal_detail where doc_no = :'crd'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "gt",
+          "value": "0"
+        },
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "dr_bank",
+          "op": "eq",
+          "value": "{{amt_ar}}"
+        },
+        {
+          "col": "cr_ar",
+          "op": "eq",
+          "value": "{{amt_ar}}"
+        }
+      ]
+    },
+    {
+      "title": "GL รับชำระด้วยบัตร+ขึ้นเงิน: ลูกหนี้สุทธิลดลงเท่ายอดหนี้ยกมา และเงินฝากเพิ่มเท่ายอดบัตร",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit - credit) filter (where account_code = :'ar_acc'), 0) as ar_net, coalesce(sum(debit - credit) filter (where account_code = :'acc'), 0) as bank_net, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff from gl_journal_detail where doc_no in (:'ee', :'crd')",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "ar_net",
+          "op": "eq",
+          "value": "{{neg_ar}}"
+        },
+        {
+          "col": "bank_net",
+          "op": "eq",
+          "value": "{{amt_ar}}"
+        },
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "Bank Statement (ค้นเลขขึ้นเงินบัตร): สมุดนี้เงินเข้า = ยอดบัตร",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "_menu_bank_statement",
+        "mode": "summary",
+        "dateFrom": "{{today}}",
+        "dateTo": "{{today}}",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "{{crd}}",
+        "viewDetail": false
+      },
+      "expect": [
+        {
+          "path": "data.rows.0.รหัสสมุด",
+          "op": "eq",
+          "value": "{{book}}"
+        },
+        {
+          "path": "data.rows.0.เงินเข้า",
+          "op": "eq",
+          "value": "{{amt_ar}}"
+        },
+        {
+          "path": "data.rows.1",
+          "op": "empty"
+        }
+      ]
+    },
+    {
+      "title": "รายงานรายละเอียดบัตรเครดิต: หลังขึ้นเงิน บัตรใบนี้ต้องแสดงสถานะ ขึ้นเงินแล้ว",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_report_chq_card_enddate_card",
+        "mode": "summary",
+        "dateFrom": "{{today}}",
+        "dateTo": "{{today}}",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "{{card}}",
+        "viewDetail": false
+      },
+      "expect": [
+        {
+          "path": "data.rows.0.เลขที่บัตรเครดิต",
+          "op": "eq",
+          "value": "{{card}}"
+        },
+        {
+          "path": "data.rows.0.สถานะ",
+          "op": "eq",
+          "value": "ขึ้นเงินแล้ว"
+        }
+      ],
+      "continueOnFail": true
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบบันทึกขึ้นเงินบัตรเครดิตทดสอบ (461)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{crd}}",
+        "transFlag": 461
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบรับชำระด้วยบัตรทดสอบ (239)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/delete",
+      "body": {
+        "kind": "ap_ar_trans",
+        "docNo": "{{ee}}",
+        "transFlag": 239
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบเงินฝากธนาคารยกมาทดสอบ (604)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{bbl}}",
+        "transFlag": 604
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบยกมาเงินสดทดสอบ (602)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{cab}}",
+        "transFlag": 602
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบเช็คจ่ายยกมาทดสอบ (406)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{cpb}}",
+        "transFlag": 406
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบเช็ครับยกมาทดสอบ (405)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{chb}}",
+        "transFlag": 405
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบตั้งหนี้เจ้าหนี้ยกมาทดสอบ (81)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{da}}",
+        "transFlag": 81
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบตั้งหนี้ลูกหนี้ยกมาทดสอบ (93)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{ea}}",
+        "transFlag": 93
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารยกมา/เช็ค/บัตรทดสอบใน smldemo (เอกสาร การรับชำระ ทะเบียนเช็ค-บัตร GL ภาษี)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'ea', :'da', :'chb', :'cpb', :'cab', :'bbl', :'crd')) + (select count(*) from ic_trans_detail where doc_no in (:'ea', :'da', :'chb', :'cpb', :'cab', :'bbl', :'crd')) + (select count(*) from ap_ar_trans where doc_no = :'ee') + (select count(*) from ap_ar_trans_detail where doc_no = :'ee' or billing_no in (:'ea', :'da')) + (select count(*) from cb_trans where doc_no in (:'ee', :'chb', :'cpb', :'cab', :'bbl', :'crd')) + (select count(*) from cb_trans_detail where doc_no in (:'ee', :'chb', :'cpb', :'cab', :'bbl', :'crd')) + (select count(*) from cb_chq_list where chq_number in (:'chqr', :'chqp', :'card') or doc_ref in (:'ee', :'chb', :'cpb', :'crd')) + (select count(*) from gl_journal where doc_no in (:'ea', :'da', :'ee', :'chb', :'cpb', :'cab', :'bbl', :'crd')) + (select count(*) from gl_journal_detail where doc_no in (:'ea', :'da', :'ee', :'chb', :'cpb', :'cab', :'bbl', :'crd')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'ee', :'crd')) + (select count(*) from gl_journal_vat_sale where doc_no = :'ee') as left_rows",
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1466 @@
+{
+ "module": "reports",
+ "lens": "screen",
+ "severityOnFail": "S1",
+ "timeoutMs": 900000,
+ "id": "ui-rpt-cheque",
+ "title": "รายงานเช็ครับ (ตามวันที่รับ / ตามวันที่ครบกำหนด) + สรุปการรับเงิน บนหน้าจอ: เช็ค 2 ใบ ยอดตรงทุกเงื่อนไข และพิมพ์ PDF",
+ "description": "เลือกลูกหนี้จริงที่ยังไม่มีเอกสาร ธนาคาร/สาขาจากทะเบียนจริง สินค้า/ราคา/ภาษีจากบิลขายจริงล่าสุด แล้วบันทึกบิลขายเชื่อเมื่อวาน 2 หน่วย และใบรับชำระวันนี้รับด้วยเช็ค 2 ใบ (ใบที่ 1 = มูลค่าก่อนภาษี ครบกำหนดต้นเดือนหน้า, ใบที่ 2 = ภาษี ครบกำหนดวันนี้) · menu_cb_report_chq_in_receive_by_date: ทุกคอลัมน์ของเช็คทั้ง 2 ใบ ยอดรวม เรียงลำดับ จัดกลุ่มตามลูกหนี้ คำค้น/วันที่/รหัสที่ไม่ตรงต้องตัดออก CSV และพิมพ์ PDF · menu_report_chq_receive_due_date: ช่วงวันที่ครบกำหนดแยกเช็คถูกใบ · menu_summary_received: ยอดเช็คและรวมรับของใบรับ · ลบเอกสารผ่าน API แล้วตรวจว่าไม่เหลือแถว (รวม cb_chq_list)",
+ "steps": [
+  {
+   "title": "กำหนดเลขบิลขายทดสอบ",
+   "do": "set",
+   "name": "inv",
+   "value": "UAT-{{run.short}}-CQI"
+  },
+  {
+   "title": "กำหนดเลขใบรับชำระทดสอบ",
+   "do": "set",
+   "name": "pay",
+   "value": "UAT-{{run.short}}-CQP"
+  },
+  {
+   "title": "กำหนดเลขที่เช็คใบที่ 1",
+   "do": "set",
+   "name": "chq1",
+   "value": "UAT-{{run.short}}-Q1"
+  },
+  {
+   "title": "กำหนดเลขที่เช็คใบที่ 2",
+   "do": "set",
+   "name": "chq2",
+   "value": "UAT-{{run.short}}-Q2"
+  },
+  {
+   "title": "กำหนดหมายเหตุเช็คใบที่ 1",
+   "do": "set",
+   "name": "n1",
+   "value": "UAT-{{run.short}}-N1"
+  },
+  {
+   "title": "กำหนดหมายเหตุเช็คใบที่ 2",
+   "do": "set",
+   "name": "n2",
+   "value": "UAT-{{run.short}}-N2"
+  },
+  {
+   "title": "เก็บรหัสรอบสำหรับสุ่ม",
+   "do": "set",
+   "name": "rs",
+   "value": "{{run.short}}"
+  },
+  {
+   "title": "วันที่วันนี้/เมื่อวาน/เดือนก่อน (ปฏิทินไทย พ.ศ. สำหรับช่องวันที่)",
+   "do": "db.query",
+   "sql": "with b as (select (now() at time zone 'Asia/Bangkok')::date d), x as (select d, d - 1 as y, (date_trunc('month', d) - interval '1 month')::date as pf, (date_trunc('month', d)::date - 1) as pt, (date_trunc('month', d) + interval '1 month')::date as nf, (date_trunc('month', d) + interval '2 month')::date - 1 as nt from b) select to_char(d, 'YYYY-MM-DD') as today, to_char(d, 'DD/MM/') || (extract(year from d)::int + 543) as today_th, to_char(y, 'DD/MM/') || (extract(year from y)::int + 543) as yday_th, to_char(pf, 'DD/MM/') || (extract(year from pf)::int + 543) as pm_from_th, to_char(pt, 'DD/MM/') || (extract(year from pt)::int + 543) as pm_to_th, to_char(nf, 'DD/MM/') || (extract(year from nf)::int + 543) as nm_from_th, to_char(nt, 'DD/MM/') || (extract(year from nt)::int + 543) as nm_to_th, to_char(y, 'YYYY-MM-DD') as yday from x",
+   "rows": 1,
+   "save": {
+    "today": "today",
+    "today_th": "today_th",
+    "yday_th": "yday_th",
+    "pm_from_th": "pm_from_th",
+    "pm_to_th": "pm_to_th",
+    "nm_from_th": "nm_from_th",
+    "nm_to_th": "nm_to_th",
+    "yday": "yday"
+   }
+  },
+  {
+   "title": "วันที่ในรูปแบบที่รายงานแสดง (ตาม erp_option.year_type)",
+   "do": "db.query",
+   "sql": "with b as (select (now() at time zone 'Asia/Bangkok')::date as d, case when (select coalesce(year_type::text, '0') from erp_option limit 1) = '1' then 543 else 0 end as k), x as (select d, k, (date_trunc('month', d) + interval '1 month')::date as nf from b) select to_char(d, 'DD/MM/') || (extract(year from d)::int + k) as today_r, to_char(nf, 'DD/MM/') || (extract(year from nf)::int + k) as nm_from_r from x",
+   "rows": 1,
+   "save": {
+    "today_r": "today_r",
+    "nm_from_r": "nm_from_r"
+   }
+  },
+  {
+   "title": "วันที่ครบกำหนดเช็คใบที่ 1 = วันแรกของเดือนหน้า",
+   "do": "db.query",
+   "sql": "select to_char(date_trunc('month', (now() at time zone 'Asia/Bangkok')::date) + interval '1 month', 'YYYY-MM-DD') as due1",
+   "rows": 1,
+   "save": {
+    "due1": "due1"
+   }
+  },
+  {
+   "title": "เลือกลูกหนี้จริงที่ยังไม่มีเอกสารเลยและไม่ติดวงเงิน (สุ่มตามรอบ)",
+   "do": "db.query",
+   "sql": "select m.code as party, (select '^\\s*' || string_agg('\\u' || lpad(to_hex(ascii(z.ch)), 4, '0'), '\\u200b*' order by z.i) || '\\s*$' from regexp_split_to_table(m.name_1, '') with ordinality z(ch, i)) as party_rx from ar_customer m where m.code not like 'UAT%' and m.code ~ '^[A-Za-z0-9._/-]+$' and coalesce(m.name_1, '') <> '' and m.name_1 = btrim(m.name_1) and m.name_1 !~ '\\s\\s' and not exists (select 1 from ic_trans x where x.cust_code = m.code) and not exists (select 1 from ap_ar_trans y where y.cust_code = m.code) and not exists (select 1 from cb_chq_list c where c.ap_ar_code = m.code) and not exists (select 1 from ar_customer_detail cd where cd.ar_code = m.code and (coalesce(cd.credit_status, 0) <> 0 or coalesce(cd.credit_money, 0) <> 0)) order by md5(m.code || :'rs') limit 1",
+   "rows": 1,
+   "save": {
+    "party": "party",
+    "party_rx": "party_rx"
+   }
+  },
+  {
+   "title": "เลือกสินค้า/คลัง/ราคา/อัตราภาษี/รูปแบบเลขเอกสารจากบิลขายเชื่อจริงล่าสุด",
+   "do": "db.query",
+   "sql": "select coalesce(nullif(t.doc_format_code, ''), 'SI') as fmt, d.item_code as item, d.unit_code as unit, d.wh_code as wh, d.shelf_code as shelf, d.stand_value::text as stand, d.divide_value::text as divide, d.price::text as price, t.vat_rate::text as vat_rate, coalesce((select p.doc_format_code from ap_ar_trans p where p.trans_flag = 239 and p.doc_no not like 'UAT%' and coalesce(p.doc_format_code, '') <> '' order by p.doc_date desc limit 1), 'EE') as pay_fmt from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag join ic_inventory i on i.code = d.item_code where t.trans_flag = 44 and t.inquiry_type = 0 and t.vat_type = 0 and t.vat_rate > 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 and d.price > 0 and d.price = round(d.price, 2) and d.tax_type = 0 and d.stand_value > 0 and d.divide_value > 0 order by t.doc_date desc, t.roworder desc limit 1",
+   "rows": 1,
+   "save": {
+    "fmt": "fmt",
+    "item": "item",
+    "unit": "unit",
+    "wh": "wh",
+    "shelf": "shelf",
+    "stand": "stand",
+    "divide": "divide",
+    "price": "price",
+    "vat_rate": "vat_rate",
+    "pay_fmt": "pay_fmt"
+   }
+  },
+  {
+   "title": "เลือกธนาคารจากทะเบียนจริง (หรือธนาคารบนเช็ครับจริง) และสาขาของธนาคารนั้นถ้ามี (สุ่มตามรอบ)",
+   "do": "db.query",
+   "sql": "with cand as (select b.code as bank, b.name_1 as nm, 0 as pri from erp_bank b where coalesce(b.code, '') <> '' and coalesce(btrim(b.name_1), '') <> '' and (select count(*) from erp_bank x where x.code = b.code) = 1 union all select distinct c.bank_code, (select b.name_1 from erp_bank b where b.code = c.bank_code limit 1), 1 from cb_chq_list c where c.chq_type = 1 and coalesce(c.bank_code, '') <> '' and (select count(*) from erp_bank x where x.code = c.bank_code) <= 1), pick as (select k.bank, k.nm, br.code as branch, br.name_1 as bnm from cand k left join lateral (select x.code, x.name_1 from erp_bank_branch x where x.bank_code = k.bank and coalesce(x.code, '') <> '' and coalesce(btrim(x.name_1), '') <> '' and (select count(*) from erp_bank_branch y where y.bank_code = x.bank_code and y.code = x.code) = 1 order by md5(x.code || :'rs') limit 1) br on true order by k.pri, (br.code is not null) desc, md5(k.bank || :'rs') limit 1) select bank, coalesce(branch, '') as branch, case when coalesce(btrim(nm), '') = '' then '^\\s*$' else (select '^\\s*' || string_agg('\\u' || lpad(to_hex(ascii(z.ch)), 4, '0'), '\\u200b*' order by z.i) || '\\s*$' from regexp_split_to_table(regexp_replace(btrim(nm), '\\s+', ' ', 'g'), '') with ordinality z(ch, i)) end as bank_rx, case when coalesce(btrim(bnm), '') = '' then '^\\s*$' else (select '^\\s*' || string_agg('\\u' || lpad(to_hex(ascii(z.ch)), 4, '0'), '\\u200b*' order by z.i) || '\\s*$' from regexp_split_to_table(regexp_replace(btrim(bnm), '\\s+', ' ', 'g'), '') with ordinality z(ch, i)) end as branch_rx from pick",
+   "rows": 1,
+   "save": {
+    "bank": "bank",
+    "branch": "branch",
+    "bank_rx": "bank_rx",
+    "branch_rx": "branch_rx"
+   }
+  },
+  {
+   "title": "คำนวณยอดที่คาด: บิล = 2 × ราคา + ภาษี, เช็คใบที่ 1 = มูลค่าก่อนภาษี, เช็คใบที่ 2 = ภาษี",
+   "do": "db.query",
+   "sql": "with c as (select round(2 * :'price'::numeric, 2) as b), v as (select b, round(b * :'vat_rate'::numeric / 100, 2) as vt from c) select b::text as base, (b + vt)::text as total, b::text as c1, vt::text as c2, to_char(b + vt, 'FM999,999,999,990.00') as total_f, to_char(b, 'FM999,999,999,990.00') as c1_f, to_char(vt, 'FM999,999,999,990.00') as c2_f from v",
+   "rows": 1,
+   "save": {
+    "base": "base",
+    "total": "total",
+    "c1": "c1",
+    "c2": "c2",
+    "total_f": "total_f",
+    "c1_f": "c1_f",
+    "c2_f": "c2_f"
+   },
+   "expect": [
+    {
+     "col": "c2",
+     "op": "gt",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "บันทึกบิลขายเชื่อเมื่อวาน 2 หน่วย",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/save",
+   "body": {
+    "isNew": true,
+    "confirmed": true,
+    "docNo": "{{inv}}",
+    "docDate": "{{yday}}",
+    "transType": 2,
+    "transFlag": 44,
+    "inquiryType": 0,
+    "custCode": "{{party}}",
+    "docFormatCode": "{{fmt}}",
+    "taxDocNo": "{{inv}}",
+    "taxDocDate": "{{yday}}",
+    "vatType": 0,
+    "vatRate": "{{vat_rate}}",
+    "remark": "{{run.tag}}",
+    "lines": [
+     {
+      "itemCode": "{{item}}",
+      "unitCode": "{{unit}}",
+      "whCode": "{{wh}}",
+      "shelfCode": "{{shelf}}",
+      "standValue": "{{stand}}",
+      "divideValue": "{{divide}}",
+      "qty": "2",
+      "price": "{{price}}",
+      "sumAmount": "{{base}}",
+      "taxType": 0
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "data.docNo",
+     "op": "eq",
+     "value": "{{inv}}"
+    }
+   ]
+  },
+  {
+   "title": "บันทึกใบรับชำระวันนี้ รับด้วยเช็ค 2 ใบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/save",
+   "body": {
+    "kind": "ap_ar_trans",
+    "isNew": true,
+    "docNo": "{{pay}}",
+    "docDate": "{{today}}",
+    "transType": 2,
+    "transFlag": 239,
+    "custCode": "{{party}}",
+    "docFormatCode": "{{pay_fmt}}",
+    "remark": "{{run.tag}}",
+    "bills": [
+     {
+      "billingNo": "{{inv}}",
+      "billingDate": "{{yday}}",
+      "billType": 44,
+      "sumDebtAmount": "{{total}}",
+      "balanceRef": "{{total}}",
+      "sumPayMoney": "{{total}}"
+     }
+    ],
+    "pay": {
+     "cheques": [
+      {
+       "chqNumber": "{{chq1}}",
+       "bankCode": "{{bank}}",
+       "bankBranch": "{{branch}}",
+       "chqDueDate": "{{due1}}",
+       "amount": "{{c1}}",
+       "remark": "{{n1}}"
+      },
+      {
+       "chqNumber": "{{chq2}}",
+       "bankCode": "{{bank}}",
+       "bankBranch": "{{branch}}",
+       "chqDueDate": "{{today}}",
+       "amount": "{{c2}}",
+       "remark": "{{n2}}"
+      }
+     ]
+    }
+   },
+   "expect": [
+    {
+     "path": "data.docNo",
+     "op": "eq",
+     "value": "{{pay}}"
+    }
+   ]
+  },
+  {
+   "title": "ฐานข้อมูล: ทะเบียนเช็ค 2 ใบ ยอดรวม = บิล, ใบที่ 1 ครบทุกช่อง",
+   "do": "db.query",
+   "sql": "select count(*)::text as n, sum(amount)::text as s, max(case when chq_number = :'chq1' then amount end)::text as a1, max(case when chq_number = :'chq2' then amount end)::text as a2, max(case when chq_number = :'chq1' then status end)::text as st1, max(case when chq_number = :'chq1' then chq_type end)::text as t1, max(case when chq_number = :'chq1' then bank_code end) as bk, max(case when chq_number = :'chq1' then bank_branch end) as br, max(case when chq_number = :'chq1' then ap_ar_code end) as cc, to_char(max(chq_get_date), 'YYYY-MM-DD') as gd, to_char(max(case when chq_number = :'chq1' then chq_due_date end), 'YYYY-MM-DD') as dd1, max(case when chq_number = :'chq1' then remark end) as rm from cb_chq_list where doc_ref = :'pay'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "2"
+    },
+    {
+     "col": "s",
+     "op": "eq",
+     "value": "{{total}}"
+    },
+    {
+     "col": "a1",
+     "op": "eq",
+     "value": "{{c1}}"
+    },
+    {
+     "col": "a2",
+     "op": "eq",
+     "value": "{{c2}}"
+    },
+    {
+     "col": "st1",
+     "op": "eq",
+     "value": "0"
+    },
+    {
+     "col": "t1",
+     "op": "eq",
+     "value": "1"
+    },
+    {
+     "col": "bk",
+     "op": "same",
+     "value": "{{bank}}"
+    },
+    {
+     "col": "br",
+     "op": "same",
+     "value": "{{branch}}"
+    },
+    {
+     "col": "cc",
+     "op": "same",
+     "value": "{{party}}"
+    },
+    {
+     "col": "gd",
+     "op": "same",
+     "value": "{{today}}"
+    },
+    {
+     "col": "dd1",
+     "op": "same",
+     "value": "{{due1}}"
+    },
+    {
+     "col": "rm",
+     "op": "same",
+     "value": "{{n1}}"
+    }
+   ]
+  },
+  {
+   "title": "เปิดเมนู รายละเอียดเช็ครับ ตามวันที่รับ",
+   "do": "ui.openMenu",
+   "key": "menu_cb_report_chq_in_receive_by_date"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขใบรับ/จ่ายชำระทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{pay}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวม 2 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(2 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 1: สถานะ เช็คในมือ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=1",
+   "op": "matches",
+   "text": "^เ\\u200b*ช\\u200b*็\\u200b*ค\\u200b*ใ\\u200b*น\\u200b*ม\\u200b*ื\\u200b*อ$",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 1: วันที่รับเช็ค = วันนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=2",
+   "op": "same",
+   "text": "{{today_r}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 1: เลขที่เช็ค",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=3",
+   "op": "same",
+   "text": "{{chq1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 1: วันที่ครบกำหนด",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=4",
+   "op": "same",
+   "text": "{{nm_from_r}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 1: เอกสารอ้างอิง = ใบรับชำระ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=5",
+   "op": "same",
+   "text": "{{pay}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 1: รหัสลูกหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=6",
+   "op": "same",
+   "text": "{{party}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 1: ชื่อลูกหนี้ตรงทะเบียน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=7",
+   "op": "matches",
+   "text": "{{party_rx}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 1: ชื่อธนาคารตรงทะเบียน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=8",
+   "op": "matches",
+   "text": "{{bank_rx}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 1: ชื่อสาขาตรงทะเบียน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=9",
+   "op": "matches",
+   "text": "{{branch_rx}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 1: จำนวนเงิน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=10",
+   "op": "eq",
+   "text": "{{c1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 1: หมายเหตุ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=11",
+   "op": "same",
+   "text": "{{n1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 2: สถานะ เช็คในมือ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq2}}\") >> td >> nth=1",
+   "op": "matches",
+   "text": "^เ\\u200b*ช\\u200b*็\\u200b*ค\\u200b*ใ\\u200b*น\\u200b*ม\\u200b*ื\\u200b*อ$",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 2: วันที่รับเช็ค = วันนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq2}}\") >> td >> nth=2",
+   "op": "same",
+   "text": "{{today_r}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 2: เลขที่เช็ค",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq2}}\") >> td >> nth=3",
+   "op": "same",
+   "text": "{{chq2}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 2: วันที่ครบกำหนด",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq2}}\") >> td >> nth=4",
+   "op": "same",
+   "text": "{{today_r}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 2: เอกสารอ้างอิง = ใบรับชำระ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq2}}\") >> td >> nth=5",
+   "op": "same",
+   "text": "{{pay}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 2: รหัสลูกหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq2}}\") >> td >> nth=6",
+   "op": "same",
+   "text": "{{party}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 2: ชื่อลูกหนี้ตรงทะเบียน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq2}}\") >> td >> nth=7",
+   "op": "matches",
+   "text": "{{party_rx}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 2: ชื่อธนาคารตรงทะเบียน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq2}}\") >> td >> nth=8",
+   "op": "matches",
+   "text": "{{bank_rx}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 2: ชื่อสาขาตรงทะเบียน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq2}}\") >> td >> nth=9",
+   "op": "matches",
+   "text": "{{branch_rx}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 2: จำนวนเงิน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq2}}\") >> td >> nth=10",
+   "op": "eq",
+   "text": "{{c2}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เช็คใบที่ 2: หมายเหตุ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq2}}\") >> td >> nth=11",
+   "op": "same",
+   "text": "{{n2}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมจำนวนเงิน = ยอดบิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงค่าเริ่มต้น (สถานะ, เลขที่เช็ค): แถวแรกคือเช็คใบที่ 1",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{chq1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวที่สองคือเช็คใบที่ 2",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr >> nth=1",
+   "op": "contains",
+   "text": "{{chq2}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "มีข้อมูล ปุ่ม ส่งออก CSV กดได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] button:has-text(\"ส่งออก CSV\"):not([disabled])",
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ cheque-by-date",
+   "do": "ui.screenshot",
+   "name": "cheque-by-date",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงตาม จำนวนเงิน (ประมวลผลทันที)",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] select:has(option:has-text(\"ค่าเริ่มต้นตามระบบ\"))",
+   "value": "จำนวนเงิน",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงจำนวนเงินน้อยไปมาก: แถวแรกคือเช็คใบที่ 2 (ภาษี)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{chq2}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับไปเรียงค่าเริ่มต้น",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] select:has(option:has-text(\"ค่าเริ่มต้นตามระบบ\"))",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงค่าเริ่มต้นอีกครั้ง: แถวแรกคือเช็คใบที่ 1",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{chq1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จัดกลุ่มชั้นที่ 1 ตาม รหัสลูกหนี้",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "รหัสลูกหนี้",
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวรวมกลุ่มลูกหนี้ (2 รายการ) = ยอดบิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{party}} (2\")",
+   "op": "contains",
+   "text": "{{total_f}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ cheque-by-date-group",
+   "do": "ui.screenshot",
+   "name": "cheque-by-date-group",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับเป็นตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เช็คใบที่ 1",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{chq1}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค้นหาเลขที่เช็คใบที่ 1",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นเลขที่เช็ค: มีเช็คใบที่ 1",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นเลขที่เช็ค: ไม่มีเช็คใบที่ 2",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq2}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นเลขที่เช็ค: รวมจำนวนเงิน = เช็คใบที่ 1",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{c1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = หมายเหตุใบที่ 2",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{n2}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค้นหาหมายเหตุเช็คใบที่ 2",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหมายเหตุ: มีเช็คใบที่ 2",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq2}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหมายเหตุ: ไม่มีเช็คใบที่ 1",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = UAT-NOPE-ค่าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "UAT-NOPE-{{run.short}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค้นหาคำที่ไม่มี",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีข้อมูล ปุ่ม ส่งออก CSV ต้องกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] button:has-text(\"ส่งออก CSV\")[disabled]",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขใบรับ/จ่ายชำระทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{pay}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "วันที่รับเช็คเมื่อวาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "วันที่รับไม่ตรง: ไม่มีเช็คใบที่ 1",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสคู่ค้าทดสอบZ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{party}}Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสคู่ค้าทดสอบZ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{party}}Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "รหัสลูกหนี้อื่น",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รหัสลูกหนี้ไม่ตรง: ไม่มีเช็คใบที่ 1",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับครบทุกเงื่อนไข",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับครบทุกเงื่อนไข: เช็คใบที่ 1 กลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tbody tr:has-text(\"{{chq1}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับครบทุกเงื่อนไข: รวมจำนวนเงิน = ยอดบิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดแท็บ รูปแบบรายงาน (Studio)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] button:has-text(\"รูปแบบรายงาน (\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งชื่อหัวรายงานกำหนดเอง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"เช่น รายงานตรวจนับสินค้าคงคลังประจำเดือน...\"]",
+   "value": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งคำโปรยหัวกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"เช่น สำหรับฝ่ายบริหารและผู้สอบบัญชี...\"]",
+   "value": "UAT-{{run.short}}-SUB",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งหมายเหตุท้ายกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] input[placeholder=\"เช่น เอกสารภายในองค์กร ห้ามเผยแพร่...\"]",
+   "value": "UAT-{{run.short}}-FOOT",
+   "continueOnFail": true
+  },
+  {
+   "title": "หัวรายงานบนจอเปลี่ยนเป็นชื่อที่ตั้ง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] h1",
+   "op": "contains",
+   "text": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม พิมพ์รายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_cb_report_chq_in_receive_by_date\"] button:has-text(\"พิมพ์รายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าต่างตั้งค่าหน้ากระดาษเปิด",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"][aria-label=\"หน้าต่างตั้งค่าหน้ากระดาษและพิมพ์รายงาน PDF ส่วนกลาง\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวนอน",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวนอน ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวนอน: มีเลขเอกสาร ยอดเงิน หัว/ท้ายรายงานที่ตั้ง",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{chq1}}",
+    "{{chq2}}",
+    "{{pay}}",
+    "{{party}}",
+    "{{c1_f}}",
+    "{{c2_f}}",
+    "{{total_f}}",
+    "UAT-{{run.short}}-TITLE",
+    "UAT-{{run.short}}-SUB",
+    "UAT-{{run.short}}-FOOT"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวตั้ง",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวตั้ง ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวตั้ง: ยังมีเลขเอกสารและยอดเงินครบ",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{chq1}}",
+    "{{chq2}}",
+    "{{pay}}",
+    "{{party}}",
+    "{{c1_f}}",
+    "{{c2_f}}",
+    "{{total_f}}",
+    "UAT-{{run.short}}-TITLE"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "ปิดหน้าต่างพิมพ์",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"ปิดหน้าต่าง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดเมนู รายละเอียดเช็ครับ ตามวันที่ครบกำหนด",
+   "do": "ui.openMenu",
+   "key": "menu_report_chq_receive_due_date"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันแรกของเดือนหน้า",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{nm_from_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันสุดท้ายของเดือนหน้า",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{nm_to_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขใบรับ/จ่ายชำระทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{pay}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบกำหนดเดือนหน้า",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบกำหนดเดือนหน้า: มีเช็คใบที่ 1",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] table tbody tr:has-text(\"{{chq1}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบกำหนดเดือนหน้า: ไม่มีเช็คใบที่ 2",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] table tbody tr:has-text(\"{{chq2}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบกำหนด: วันที่บนเช็คใบที่ 1",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=1",
+   "op": "same",
+   "text": "{{nm_from_r}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบกำหนด: วันที่รับเช็คใบที่ 1 = วันนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=3",
+   "op": "same",
+   "text": "{{today_r}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบกำหนด: จำนวนเงินเช็คใบที่ 1",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] table tbody tr:has-text(\"{{chq1}}\") >> td >> nth=10",
+   "op": "eq",
+   "text": "{{c1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบกำหนดเดือนหน้า: รวมจำนวนเงิน = เช็คใบที่ 1",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{c1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบกำหนดวันนี้",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบกำหนดวันนี้: มีเช็คใบที่ 2",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] table tbody tr:has-text(\"{{chq2}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบกำหนดวันนี้: ไม่มีเช็คใบที่ 1",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] table tbody tr:has-text(\"{{chq1}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบกำหนดวันนี้: รวมจำนวนเงิน = เช็คใบที่ 2",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{c2}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันสุดท้ายของเดือนหน้า",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{nm_to_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบกำหนดวันนี้ถึงสิ้นเดือนหน้า",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงตามวันที่บนเช็ค: แถวแรกคือเช็คใบที่ 2 (วันนี้)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{chq2}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวที่สองคือเช็คใบที่ 1 (เดือนหน้า)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] table tbody tr >> nth=1",
+   "op": "contains",
+   "text": "{{chq1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบกำหนดทั้ง 2 ใบ: รวมจำนวนเงิน = ยอดบิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_chq_receive_due_date\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดเมนู สรุปการรับเงิน",
+   "do": "ui.openMenu",
+   "key": "menu_summary_received"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = เลขใบรับ/จ่ายชำระทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{pay}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = เลขใบรับ/จ่ายชำระทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{pay}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขใบรับ/จ่ายชำระทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{pay}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "สรุปการรับเงิน: รวม 1 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(1 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "สรุปการรับเงิน: วันที่เอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] table tbody tr:has-text(\"{{pay}}\") >> td >> nth=1",
+   "op": "same",
+   "text": "{{today_r}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "สรุปการรับเงิน: รวมยอดเงิน = ยอดบิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] table tbody tr:has-text(\"{{pay}}\") >> td >> nth=4",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "สรุปการรับเงิน: เงินสด ว่าง (ไม่ได้รับเงินสด)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] table tbody tr:has-text(\"{{pay}}\") >> td >> nth=5",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "สรุปการรับเงิน: เช็ค = ยอดบิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] table tbody tr:has-text(\"{{pay}}\") >> td >> nth=8",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "สรุปการรับเงิน: รวมรับ = ยอดบิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] table tbody tr:has-text(\"{{pay}}\") >> td >> nth=13",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "สรุปการรับเงิน: ท้ายตาราง เช็ค",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] table tfoot tr >> td >> nth=5",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "สรุปการรับเงิน: ท้ายตาราง รวมรับ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] table tfoot tr >> td >> nth=10",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "วันที่เมื่อวาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "วันที่ไม่ตรง: ไม่มีใบรับทดสอบ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] table tbody tr:has-text(\"{{pay}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีข้อมูล ปุ่ม ส่งออก CSV ต้องกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_summary_received\"] button:has-text(\"ส่งออก CSV\")[disabled]",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบใบรับชำระทดสอบ (รวมทะเบียนเช็ค)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/delete",
+   "body": {
+    "kind": "ap_ar_trans",
+    "docNo": "{{pay}}",
+    "transFlag": 239
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ลบบิลขายทดสอบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/delete",
+   "body": {
+    "docNo": "{{inv}}",
+    "transFlag": 44
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือแถวของเอกสารทดสอบในทุกตารางที่แตะ (รวม cb_chq_list)",
+   "do": "db.query",
+   "sql": "select (select count(*) from ic_trans where doc_no in (:'inv', :'pay')) + (select count(*) from ic_trans_detail where doc_no in (:'inv', :'pay')) + (select count(*) from ap_ar_trans where doc_no in (:'inv', :'pay')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'inv', :'pay')) + (select count(*) from cb_trans where doc_no in (:'inv', :'pay')) + (select count(*) from cb_trans_detail where doc_no in (:'inv', :'pay')) + (select count(*) from gl_journal where doc_no in (:'inv', :'pay')) + (select count(*) from gl_journal_detail where doc_no in (:'inv', :'pay')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'inv', :'pay')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'inv', :'pay')) + (select count(*) from ic_trans_shipment where doc_no in (:'inv', :'pay')) + (select count(*) from cb_chq_list where doc_ref in (:'inv', :'pay') or chq_number in (:'chq1', :'chq2')) as left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}

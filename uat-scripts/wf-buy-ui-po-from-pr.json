@@ -1,0 +1,2058 @@
+{
+  "id": "wf-buy-ui-po-from-pr",
+  "module": "purchase",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 900000,
+  "title": "หน้าจอใบสั่งซื้อ: ดึงใบอนุมัติใบเสนอซื้อ (ยอดคงเหลือ) สั่ง 2 ใบจนครบ ดึงซ้ำไม่เจอ เปิดซ้ำ พิมพ์ Document Flow รายงาน PDF อนุมัติ/ยกเลิกอนุมัติใบสั่งซื้อ และลบผ่านหน้าจอ",
+  "description": "ทำผ่านหน้าจอจริงแบบผู้ใช้ Demo: เตรียมใบเสนอซื้อ 10 และอนุมัติ 8 ผ่าน API ตัวเดียวกับหน้าจอ (หน้าจออนุมัติทดสอบแล้วใน wf-buy-ui-pr-approve) เจ้าหนี้ สินค้า ราคา อัตราภาษี อ่านจากข้อมูลจริงตอนรัน ยอดที่คาดหวังคำนวณด้วย SQL · ใบสั่งซื้อใบที่ 1 ดึงใบอนุมัติได้ 8 แก้เหลือ 5 → ใบที่ 2 ดึงได้คงเหลือ 3 → ใบอนุมัติปิด ดึงอีกไม่พบ · ตรวจฐานข้อมูลทุกการบันทึก ลบผ่านหน้าจอแล้วยอดคงเหลือคืน · cleanup ผ่าน API พิสูจน์ว่าไม่เหลือแถว",
+  "steps": [
+    {
+      "title": "กำหนดเลขที่ใบเสนอซื้อทดสอบ",
+      "do": "set",
+      "name": "pr",
+      "value": "UAT-{{run.short}}-PPR"
+    },
+    {
+      "title": "ตั้งค่าเริ่มต้นเลขใบอนุมัติ (ระบบออกเลขจริงให้ภายหลัง)",
+      "do": "set",
+      "name": "pra",
+      "value": "UAT-{{run.short}}-NOPRA"
+    },
+    {
+      "title": "กำหนดเลขที่ใบสั่งซื้อทดสอบใบที่ 1",
+      "do": "set",
+      "name": "po1",
+      "value": "UAT-{{run.short}}-UPO1"
+    },
+    {
+      "title": "กำหนดเลขที่ใบสั่งซื้อทดสอบใบที่ 2",
+      "do": "set",
+      "name": "po2",
+      "value": "UAT-{{run.short}}-UPO2"
+    },
+    {
+      "title": "กำหนดเลขที่เอกสารใหม่ (ไม่บันทึก) สำหรับดึงยอดคงเหลือ",
+      "do": "set",
+      "name": "po3",
+      "value": "UAT-{{run.short}}-UPO3"
+    },
+    {
+      "title": "จำนวนที่ขอซื้อ",
+      "do": "set",
+      "name": "q_pr",
+      "value": "10"
+    },
+    {
+      "title": "จำนวนที่อนุมัติ",
+      "do": "set",
+      "name": "q_appr",
+      "value": "8"
+    },
+    {
+      "title": "จำนวนสั่งซื้อใบที่ 1",
+      "do": "set",
+      "name": "q_po1",
+      "value": "5"
+    },
+    {
+      "title": "จำนวนคงเหลือที่สั่งในใบที่ 2",
+      "do": "set",
+      "name": "q_po2",
+      "value": "3"
+    },
+    {
+      "title": "ตัวคูณหน่วย 1:1",
+      "do": "set",
+      "name": "stand",
+      "value": "1"
+    },
+    {
+      "title": "ตัวหารหน่วย 1:1",
+      "do": "set",
+      "name": "divide",
+      "value": "1"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "วันที่วันนี้ (ค.ศ./พ.ศ.) และวันที่ +15/+7 วัน สำหรับเทียบช่องวันที่บนหน้าจอ",
+      "do": "db.query",
+      "sql": "with d as (select (now() at time zone 'Asia/Bangkok')::date as t)\n   select to_char(t, 'YYYY-MM-DD') as today, to_char(t, 'DD/MM/') || (extract(year from t)::int + 543)::text as today_be,\n     to_char(t + 15, 'DD/MM/') || (extract(year from t + 15)::int + 543)::text as exp_be, to_char(t + 7, 'DD/MM/') || (extract(year from t + 7)::int + 543)::text as send_be from d",
+      "rows": 1,
+      "save": {
+        "today": "today",
+        "today_be": "today_be",
+        "exp_be": "exp_be",
+        "send_be": "send_be"
+      }
+    },
+    {
+      "title": "เลือกเจ้าหนี้จริงที่ไม่มีเอกสารเจ้าหนี้ค้าง ไม่มีส่วนลดตั้งต้น และชื่อบางส่วนค้นแล้วเจอรายเดียว",
+      "do": "db.query",
+      "sql": "with cand as (select s.code, s.name_1, substr(s.name_1, 2) as frag from ap_supplier s left join ap_supplier_detail sd on sd.ap_code = s.code\n   where coalesce(s.status, 0) = 0 and length(coalesce(s.name_1, '')) >= 6 and s.code ~ '^[A-Z0-9-]+$' and coalesce(trim(sd.discount_item), '') in ('', '0')\n     and not exists (select 1 from ic_trans t where t.cust_code = s.code and coalesce(t.last_status, 0) = 0 and t.trans_flag in (10, 11, 12, 14, 16, 20, 25, 81, 83, 85, 87, 89, 91, 260, 262, 264, 310, 315, 316, 317))\n     and not exists (select 1 from ap_ar_trans a where a.cust_code = s.code and coalesce(a.last_status, 0) = 0))\n   select code as supp, name_1 as sname, frag as sfrag from cand\n   where (select count(*) from ap_supplier x where x.name_1 ilike '%' || replace(replace(cand.frag, '%', '\\%'), '_', '\\_') || '%') = 1\n   order by code desc offset 1 limit 1",
+      "rows": 1,
+      "save": {
+        "supp": "supp",
+        "sname": "sname",
+        "sfrag": "sfrag"
+      }
+    },
+    {
+      "title": "เลือกสินค้าจริงลำดับที่ 6 (เรียงตามรหัส) จากบิลซื้อจริง: หน่วยซื้อเริ่มต้น = หน่วยมาตรฐาน 1:1 ไม่มีส่วนลดตั้งต้น ไม่ระงับซื้อ พร้อมราคาซื้อและอัตราภาษีล่าสุด",
+      "do": "db.query",
+      "sql": "select x.item, x.iname, x.unit, x.price, x.rate from (select distinct on (d.item_code) d.item_code as item, i.name_1 as iname, d.unit_code as unit, d.price::text as price, t.vat_rate::text as rate\n from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag join ic_inventory i on i.code = d.item_code\n join ic_unit_use u on u.ic_code = d.item_code and u.code = d.unit_code and u.stand_value = 1 and u.divide_value = 1\n left join lateral (select start_purchase_unit, discount, is_hold_purchase from ic_inventory_detail where ic_code = i.code limit 1) dt on true\n where t.trans_flag = 12 and t.inquiry_type = 0 and t.vat_type = 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 and d.price > 0 and coalesce(d.discount, '') = ''\n   and d.stand_value = 1 and d.divide_value = 1 and coalesce(d.tax_type, 0) = 0 and coalesce(i.tax_type, 0) = 0 and coalesce(i.item_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0\n   and i.unit_standard = d.unit_code and coalesce(nullif(trim(dt.start_purchase_unit), ''), i.unit_standard) = i.unit_standard and coalesce(trim(dt.discount), '') in ('', '0')\n   and coalesce(dt.is_hold_purchase, 0) = 0 and coalesce(i.name_1, '') <> '' and i.code ~ '^[A-Z0-9-]+$'\n order by d.item_code, t.doc_date desc, t.roworder desc) x order by x.item offset 5 limit 1",
+      "rows": 1,
+      "save": {
+        "item": "item",
+        "iname": "iname",
+        "unit": "unit",
+        "price": "price",
+        "rate": "rate"
+      }
+    },
+    {
+      "title": "คำนวณยอดที่คาดหวัง: ใบเสนอซื้อ 10 / ดึงมา 8 / ใบที่ 1 จำนวน 5 / ใบที่ 2 จำนวน 3 (ราคาจริง × จำนวน ภาษีแยกนอกตามอัตราจริง)",
+      "do": "db.query",
+      "sql": "select round(:'q_pr'::numeric * :'price'::numeric, 2)::text as pr_sum, round(:'q_appr'::numeric * :'price'::numeric, 2)::text as q8_sum, round(round(:'q_appr'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as q8_vat, (round(:'q_appr'::numeric * :'price'::numeric, 2) + round(round(:'q_appr'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as q8_total, round(:'q_po1'::numeric * :'price'::numeric, 2)::text as po1_sum, round(round(:'q_po1'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as po1_vat, (round(:'q_po1'::numeric * :'price'::numeric, 2) + round(round(:'q_po1'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as po1_total, round(:'q_po2'::numeric * :'price'::numeric, 2)::text as po2_sum, round(round(:'q_po2'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as po2_vat, (round(:'q_po2'::numeric * :'price'::numeric, 2) + round(round(:'q_po2'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as po2_total, to_char(round(:'q_po1'::numeric * :'price'::numeric, 2), 'FM999,999,999,990.00') as po1_sum_fmt",
+      "rows": 1,
+      "save": {
+        "pr_sum": "pr_sum",
+        "q8_sum": "q8_sum",
+        "q8_vat": "q8_vat",
+        "q8_total": "q8_total",
+        "po1_sum": "po1_sum",
+        "po1_vat": "po1_vat",
+        "po1_total": "po1_total",
+        "po2_sum": "po2_sum",
+        "po2_vat": "po2_vat",
+        "po2_total": "po2_total",
+        "po1_sum_fmt": "po1_sum_fmt"
+      }
+    },
+    {
+      "title": "บันทึกใบขอซื้อ/เสนอซื้อ (PR)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{pr}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 2,
+        "inquiryType": 0,
+        "custCode": "{{supp}}",
+        "docFormatCode": "PR",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "standValue": "{{stand}}",
+            "divideValue": "{{divide}}",
+            "qty": "{{q_pr}}",
+            "price": "{{price}}",
+            "sumAmount": "{{pr_sum}}",
+            "taxType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{pr}}"
+        }
+      ]
+    },
+    {
+      "title": "อนุมัติใบเสนอซื้อ โดยแก้จำนวนอนุมัติเหลือ 8",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/approve",
+      "body": {
+        "flag": 4,
+        "origFlag": 2,
+        "docRef": "{{pr}}",
+        "docFormat": "PRA",
+        "screenCode": "PRA",
+        "docDate": "{{today}}",
+        "remark": "{{run.tag}}",
+        "undo": false,
+        "notApprove": false,
+        "menuName": "menu_purchase_requisition_approval",
+        "approveLines": [
+          {
+            "lineNumber": 1,
+            "qty": "{{q_appr}}",
+            "price": "{{price}}",
+            "discount": ""
+          }
+        ]
+      }
+    },
+    {
+      "title": "หาเลขใบอนุมัติที่ระบบออกให้ (อ้างถึงใบขอซื้อนี้)",
+      "do": "db.query",
+      "sql": "select doc_no as pra from ic_trans where trans_flag = 4 and doc_ref = :'pr' and coalesce(last_status, 0) = 0",
+      "rows": 1,
+      "save": {
+        "pra": "pra"
+      }
+    },
+    {
+      "title": "ฐานข้อมูล: ใบอนุมัติยังไม่ถูกใช้ ยังไม่ปิด",
+      "do": "db.query",
+      "sql": "select coalesce(used_status, 0)::text as used_status, coalesce(doc_success, 0)::text as doc_success from ic_trans where doc_no = :'pra' and trans_flag = 4",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "doc_success",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอใบสั่งซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_order"
+    },
+    {
+      "title": "กดปุ่มเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] button:text-is(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "อยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "กรอกเลขที่ใบสั่งซื้อทดสอบ PO1",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{po1}}"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาเจ้าหนี้ (ด้วยชื่อบางส่วน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] button[title=\"ค้นหา\"]"
+    },
+    {
+      "title": "หน้าต่างค้นหาเจ้าหนี้ (ด้วยชื่อบางส่วน)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาเจ้าหนี้ (ด้วยชื่อบางส่วน): {{sfrag}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{sfrag}}"
+    },
+    {
+      "title": "ผลค้นหามีแถวรหัส {{supp}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{supp}}\"))"
+    },
+    {
+      "title": "คลิกเลือกแถวรหัส {{supp}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{supp}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาเจ้าหนี้ (ด้วยชื่อบางส่วน)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสเจ้าหนี้ = รหัสที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{supp}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปุ่ม ดึงเอกสาร",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] button[title=\"ค้นหาและดึงรายการจากเอกสารอ้างอิง\"]"
+    },
+    {
+      "title": "หน้าต่างเลือกเอกสารอ้างอิงเปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) [data-testid=\"ref-doc-search\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "ค้นหาใบอนุมัติของเราด้วยเลขที่ {{pra}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) [data-testid=\"ref-doc-search\"]",
+      "value": "{{pra}}"
+    },
+    {
+      "title": "รายการแสดงใบอนุมัติ {{pra}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) button:has(div.font-mono:text-is(\"{{pra}}\"))",
+      "timeout": 30000
+    },
+    {
+      "title": "คลิกเลือกใบอนุมัติ {{pra}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) button:has(div.font-mono:text-is(\"{{pra}}\"))"
+    },
+    {
+      "title": "หน้าต่างเลือกเอกสารอ้างอิงปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\"))",
+      "visible": false
+    },
+    {
+      "title": "ช่องเอกสารอ้างอิง = เลขที่ใบอนุมัติ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] input[placeholder=\"เลขที่เอกสารอ้างอิง...\"]",
+      "value": "{{pra}}",
+      "op": "eq"
+    },
+    {
+      "title": "วันที่เอกสารอ้างอิง = วันที่ใบอนุมัติ (วันนี้)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"เอกสารอ้างอิงวันที่:\")) input",
+      "value": "{{today_be}}",
+      "op": "eq"
+    },
+    {
+      "title": "ตาราง: รหัสสินค้าที่ดึงมา",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//input",
+      "value": "{{item}}",
+      "op": "eq"
+    },
+    {
+      "title": "ตาราง: หน่วยนับที่ดึงมา",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"หน่วยนับ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"หน่วยนับ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{unit}}",
+      "op": "eq"
+    },
+    {
+      "title": "ตาราง: จำนวนที่ดึงมา = คงเหลือให้สั่ง 8",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "8",
+      "op": "eq"
+    },
+    {
+      "title": "ตาราง: ราคาที่ดึงมา = ราคาอนุมัติ",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"ราคา/หน่วย\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ราคา/หน่วย\"]/preceding-sibling::th)+1]//input",
+      "value": "{{price}}",
+      "op": "eq"
+    },
+    {
+      "title": "ตารางมีรายการเดียว (ไม่มีแถวที่ 2)",
+      "do": "ui.expectVisible",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[2]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//input",
+      "visible": false
+    },
+    {
+      "title": "ประเภทรายการคัดลอกจากใบอนุมัติ: ซื้อสินค้าเงินเชื่อ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [role=\"radiogroup\"] span:has-text(\"0: ซื้อสินค้าเงินเชื่อ\") input:checked"
+    },
+    {
+      "title": "ประเภทภาษีคัดลอกจากใบอนุมัติ: แยกนอก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [role=\"radiogroup\"] span:has-text(\"0: แยกนอก\") input:checked"
+    },
+    {
+      "title": "หมายเหตุคัดลอกจากใบอนุมัติ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}}",
+      "op": "eq"
+    },
+    {
+      "title": "กรอกอัตราภาษีตามบิลซื้อจริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] input[title=\"อัตราภาษี (%)\"]",
+      "value": "{{rate}}"
+    },
+    {
+      "title": "ออกจากช่องอัตราภาษี",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] input[title=\"อัตราภาษี (%)\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "หลังดึงใบอนุมัติ (8): รวมมูลค่าสินค้า = ราคา × จำนวน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"รวมมูลค่าสินค้า:\") + div",
+      "text": "{{q8_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "หลังดึงใบอนุมัติ (8): ยอดเงินก่อนภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"ยอดเงินก่อนภาษี:\") + div",
+      "text": "{{q8_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "หลังดึงใบอนุมัติ (8): ยอดภาษีมูลค่าเพิ่ม = ฐาน × อัตราจริง",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"ยอดภาษีมูลค่าเพิ่ม:\") + div",
+      "text": "{{q8_vat}}",
+      "op": "eq"
+    },
+    {
+      "title": "หลังดึงใบอนุมัติ (8): มูลค่าหลังคิดภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"มูลค่าหลังคิดภาษี:\") + div",
+      "text": "{{q8_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "แก้จำนวนสั่งซื้อเหลือ 5",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "5"
+    },
+    {
+      "title": "Enter ยืนยันจำนวน",
+      "do": "ui.press",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "key": "Enter"
+    },
+    {
+      "title": "จำนวนแถว 1 แสดง 5",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "5",
+      "op": "eq"
+    },
+    {
+      "title": "ราคาไม่เปลี่ยนหลังแก้จำนวน (บรรทัดอ้างอิงใบอนุมัติ)",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"ราคา/หน่วย\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ราคา/หน่วย\"]/preceding-sibling::th)+1]//input",
+      "value": "{{price}}",
+      "op": "eq"
+    },
+    {
+      "title": "กรอกผู้ติดต่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"ผู้ติดต่อ:\")) > input",
+      "value": "UAT ผู้ติดต่อ {{run.short}}"
+    },
+    {
+      "title": "กรอกวันหมดอายุ 15 วัน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"วันหมดอายุ:\")) > input",
+      "value": "15"
+    },
+    {
+      "title": "วันที่หมดอายุคำนวณ = วันที่เอกสาร + 15",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"วันที่หมดอายุ:\")) input",
+      "value": "{{exp_be}}",
+      "op": "eq"
+    },
+    {
+      "title": "กรอกรับ/ส่งภายใน 7 วัน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"รับ/ส่ง (วัน):\")) > input",
+      "value": "7"
+    },
+    {
+      "title": "วันที่รับ/ส่งคำนวณ = วันที่เอกสาร + 7",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"วันที่รับ/ส่ง:\")) input",
+      "value": "{{send_be}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก PO1: รวมมูลค่าสินค้า = ราคา × จำนวน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"รวมมูลค่าสินค้า:\") + div",
+      "text": "{{po1_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก PO1: ยอดเงินก่อนภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"ยอดเงินก่อนภาษี:\") + div",
+      "text": "{{po1_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก PO1: ยอดภาษีมูลค่าเพิ่ม = ฐาน × อัตราจริง",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"ยอดภาษีมูลค่าเพิ่ม:\") + div",
+      "text": "{{po1_vat}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก PO1: มูลค่าหลังคิดภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"มูลค่าหลังคิดภาษี:\") + div",
+      "text": "{{po1_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปุ่มบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] button:text-is(\"บันทึก\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งบันทึกเอกสาร {{po1}} เรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] span.whitespace-pre-line",
+      "text": "บันทึกเอกสาร {{po1}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "หน้าต่างถามพิมพ์ฟอร์ม: กด ยังไม่พิมพ์",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")"
+    },
+    {
+      "title": "ปิดหน้าต่างถามพิมพ์แล้ว",
+      "do": "ui.expectVisible",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+      "visible": false
+    },
+    {
+      "title": "หลังบันทึกเป็นโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "ฐานข้อมูล: หัวใบสั่งซื้อ PO1 ตรงทุกช่องและยอดเงินตรงที่คำนวณ อ้างใบอนุมัติ",
+      "do": "db.query",
+      "sql": "select trans_flag::text, cust_code, remark, coalesce(contactor, '') as contactor, coalesce(inquiry_type, 0)::text as inquiry_type, coalesce(vat_type, 0)::text as vat_type, vat_rate::text,\n       expire_day::text, send_day::text, to_char(doc_date, 'YYYY-MM-DD') as doc_date, doc_ref, to_char(doc_ref_date, 'YYYY-MM-DD') as doc_ref_date,\n       total_value::text, total_before_vat::text, total_vat_value::text, total_after_vat::text, total_amount::text, coalesce(approve_status, 0)::text as approve_status\n     from ic_trans where doc_no = :'po1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "trans_flag",
+          "op": "eq",
+          "value": "6"
+        },
+        {
+          "col": "cust_code",
+          "op": "eq",
+          "value": "{{supp}}"
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "{{run.tag}}"
+        },
+        {
+          "col": "contactor",
+          "op": "same",
+          "value": "UAT ผู้ติดต่อ {{run.short}}"
+        },
+        {
+          "col": "inquiry_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "vat_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "vat_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "expire_day",
+          "op": "eq",
+          "value": "15"
+        },
+        {
+          "col": "send_day",
+          "op": "eq",
+          "value": "7"
+        },
+        {
+          "col": "doc_date",
+          "op": "eq",
+          "value": "{{today}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "eq",
+          "value": "{{pra}}"
+        },
+        {
+          "col": "doc_ref_date",
+          "op": "eq",
+          "value": "{{today}}"
+        },
+        {
+          "col": "total_value",
+          "op": "eq",
+          "value": "{{po1_sum}}"
+        },
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{po1_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{po1_vat}}"
+        },
+        {
+          "col": "total_after_vat",
+          "op": "eq",
+          "value": "{{po1_total}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{po1_total}}"
+        },
+        {
+          "col": "approve_status",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: บรรทัดใบสั่งซื้อ PO1 1 บรรทัด จำนวน 5 อ้างบรรทัดที่ 1 ของใบอนุมัติ มีคลังรับ",
+      "do": "db.query",
+      "sql": "select item_code, unit_code, qty::text, price::text, sum_amount::text, ref_doc_no, ref_row::text, coalesce(wh_code, '') as wh from ic_trans_detail where doc_no = :'po1' and trans_flag = 6 order by line_number",
+      "rows": 1,
+      "save": {
+        "po_wh": "wh"
+      },
+      "expect": [
+        {
+          "col": "item_code",
+          "op": "eq",
+          "value": "{{item}}"
+        },
+        {
+          "col": "unit_code",
+          "op": "eq",
+          "value": "{{unit}}"
+        },
+        {
+          "col": "qty",
+          "op": "eq",
+          "value": "5"
+        },
+        {
+          "col": "price",
+          "op": "eq",
+          "value": "{{price}}"
+        },
+        {
+          "col": "sum_amount",
+          "op": "eq",
+          "value": "{{po1_sum}}"
+        },
+        {
+          "col": "ref_doc_no",
+          "op": "eq",
+          "value": "{{pra}}"
+        },
+        {
+          "col": "ref_row",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "wh",
+          "op": "exists",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: ใบอนุมัติถูกใช้แล้วแต่ยังไม่ปิด (สั่ง 5 จาก 8)",
+      "do": "db.query",
+      "sql": "select coalesce(used_status, 0)::text as used_status, coalesce(doc_success, 0)::text as doc_success from ic_trans where doc_no = :'pra' and trans_flag = 4",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "doc_success",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "หน้าจอไม่มีข้อผิดพลาดแฝงหลังบันทึกใบที่ 1",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "กดปุ่มเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] button:text-is(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "อยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "กรอกเลขที่ใบสั่งซื้อทดสอบ PO2",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{po2}}"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาเจ้าหนี้ (ด้วยชื่อบางส่วน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] button[title=\"ค้นหา\"]"
+    },
+    {
+      "title": "หน้าต่างค้นหาเจ้าหนี้ (ด้วยชื่อบางส่วน)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาเจ้าหนี้ (ด้วยชื่อบางส่วน): {{sfrag}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{sfrag}}"
+    },
+    {
+      "title": "ผลค้นหามีแถวรหัส {{supp}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{supp}}\"))"
+    },
+    {
+      "title": "คลิกเลือกแถวรหัส {{supp}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{supp}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาเจ้าหนี้ (ด้วยชื่อบางส่วน)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสเจ้าหนี้ = รหัสที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{supp}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปุ่ม ดึงเอกสาร",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] button[title=\"ค้นหาและดึงรายการจากเอกสารอ้างอิง\"]"
+    },
+    {
+      "title": "หน้าต่างเลือกเอกสารอ้างอิงเปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) [data-testid=\"ref-doc-search\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "ค้นหาใบอนุมัติของเราด้วยเลขที่ {{pra}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) [data-testid=\"ref-doc-search\"]",
+      "value": "{{pra}}"
+    },
+    {
+      "title": "รายการแสดงใบอนุมัติ {{pra}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) button:has(div.font-mono:text-is(\"{{pra}}\"))",
+      "timeout": 30000
+    },
+    {
+      "title": "คลิกเลือกใบอนุมัติ {{pra}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) button:has(div.font-mono:text-is(\"{{pra}}\"))"
+    },
+    {
+      "title": "หน้าต่างเลือกเอกสารอ้างอิงปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\"))",
+      "visible": false
+    },
+    {
+      "title": "ช่องเอกสารอ้างอิง = เลขที่ใบอนุมัติ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] input[placeholder=\"เลขที่เอกสารอ้างอิง...\"]",
+      "value": "{{pra}}",
+      "op": "eq"
+    },
+    {
+      "title": "วันที่เอกสารอ้างอิง = วันที่ใบอนุมัติ (วันนี้)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"เอกสารอ้างอิงวันที่:\")) input",
+      "value": "{{today_be}}",
+      "op": "eq"
+    },
+    {
+      "title": "ตาราง: รหัสสินค้าที่ดึงมา",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//input",
+      "value": "{{item}}",
+      "op": "eq"
+    },
+    {
+      "title": "ตาราง: หน่วยนับที่ดึงมา",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"หน่วยนับ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"หน่วยนับ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{unit}}",
+      "op": "eq"
+    },
+    {
+      "title": "ตาราง: จำนวนที่ดึงมา = คงเหลือให้สั่ง 3",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "3",
+      "op": "eq"
+    },
+    {
+      "title": "ตาราง: ราคาที่ดึงมา = ราคาอนุมัติ",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"ราคา/หน่วย\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ราคา/หน่วย\"]/preceding-sibling::th)+1]//input",
+      "value": "{{price}}",
+      "op": "eq"
+    },
+    {
+      "title": "ตารางมีรายการเดียว (ไม่มีแถวที่ 2)",
+      "do": "ui.expectVisible",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[2]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//input",
+      "visible": false
+    },
+    {
+      "title": "ประเภทรายการคัดลอกจากใบอนุมัติ: ซื้อสินค้าเงินเชื่อ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [role=\"radiogroup\"] span:has-text(\"0: ซื้อสินค้าเงินเชื่อ\") input:checked"
+    },
+    {
+      "title": "ประเภทภาษีคัดลอกจากใบอนุมัติ: แยกนอก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [role=\"radiogroup\"] span:has-text(\"0: แยกนอก\") input:checked"
+    },
+    {
+      "title": "หมายเหตุคัดลอกจากใบอนุมัติ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}}",
+      "op": "eq"
+    },
+    {
+      "title": "กรอกอัตราภาษีตามบิลซื้อจริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] input[title=\"อัตราภาษี (%)\"]",
+      "value": "{{rate}}"
+    },
+    {
+      "title": "ออกจากช่องอัตราภาษี",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] input[title=\"อัตราภาษี (%)\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกผู้ติดต่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"ผู้ติดต่อ:\")) > input",
+      "value": "UAT ผู้ติดต่อ {{run.short}}"
+    },
+    {
+      "title": "กรอกวันหมดอายุ 15 วัน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"วันหมดอายุ:\")) > input",
+      "value": "15"
+    },
+    {
+      "title": "วันที่หมดอายุคำนวณ = วันที่เอกสาร + 15",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"วันที่หมดอายุ:\")) input",
+      "value": "{{exp_be}}",
+      "op": "eq"
+    },
+    {
+      "title": "กรอกรับ/ส่งภายใน 7 วัน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"รับ/ส่ง (วัน):\")) > input",
+      "value": "7"
+    },
+    {
+      "title": "วันที่รับ/ส่งคำนวณ = วันที่เอกสาร + 7",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"วันที่รับ/ส่ง:\")) input",
+      "value": "{{send_be}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก PO2: รวมมูลค่าสินค้า = ราคา × จำนวน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"รวมมูลค่าสินค้า:\") + div",
+      "text": "{{po2_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก PO2: ยอดเงินก่อนภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"ยอดเงินก่อนภาษี:\") + div",
+      "text": "{{po2_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก PO2: ยอดภาษีมูลค่าเพิ่ม = ฐาน × อัตราจริง",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"ยอดภาษีมูลค่าเพิ่ม:\") + div",
+      "text": "{{po2_vat}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก PO2: มูลค่าหลังคิดภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"มูลค่าหลังคิดภาษี:\") + div",
+      "text": "{{po2_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปุ่มบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] button:text-is(\"บันทึก\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งบันทึกเอกสาร {{po2}} เรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] span.whitespace-pre-line",
+      "text": "บันทึกเอกสาร {{po2}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "หน้าต่างถามพิมพ์ฟอร์ม: กด ยังไม่พิมพ์",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")"
+    },
+    {
+      "title": "ปิดหน้าต่างถามพิมพ์แล้ว",
+      "do": "ui.expectVisible",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+      "visible": false
+    },
+    {
+      "title": "หลังบันทึกเป็นโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "ฐานข้อมูล: หัวใบสั่งซื้อ PO2 ตรงทุกช่องและยอดเงินตรงที่คำนวณ อ้างใบอนุมัติ",
+      "do": "db.query",
+      "sql": "select trans_flag::text, cust_code, remark, coalesce(contactor, '') as contactor, coalesce(inquiry_type, 0)::text as inquiry_type, coalesce(vat_type, 0)::text as vat_type, vat_rate::text,\n       expire_day::text, send_day::text, to_char(doc_date, 'YYYY-MM-DD') as doc_date, doc_ref, to_char(doc_ref_date, 'YYYY-MM-DD') as doc_ref_date,\n       total_value::text, total_before_vat::text, total_vat_value::text, total_after_vat::text, total_amount::text, coalesce(approve_status, 0)::text as approve_status\n     from ic_trans where doc_no = :'po2'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "trans_flag",
+          "op": "eq",
+          "value": "6"
+        },
+        {
+          "col": "cust_code",
+          "op": "eq",
+          "value": "{{supp}}"
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "{{run.tag}}"
+        },
+        {
+          "col": "contactor",
+          "op": "same",
+          "value": "UAT ผู้ติดต่อ {{run.short}}"
+        },
+        {
+          "col": "inquiry_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "vat_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "vat_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "expire_day",
+          "op": "eq",
+          "value": "15"
+        },
+        {
+          "col": "send_day",
+          "op": "eq",
+          "value": "7"
+        },
+        {
+          "col": "doc_date",
+          "op": "eq",
+          "value": "{{today}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "eq",
+          "value": "{{pra}}"
+        },
+        {
+          "col": "doc_ref_date",
+          "op": "eq",
+          "value": "{{today}}"
+        },
+        {
+          "col": "total_value",
+          "op": "eq",
+          "value": "{{po2_sum}}"
+        },
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{po2_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{po2_vat}}"
+        },
+        {
+          "col": "total_after_vat",
+          "op": "eq",
+          "value": "{{po2_total}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{po2_total}}"
+        },
+        {
+          "col": "approve_status",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: บรรทัดใบสั่งซื้อ PO2 1 บรรทัด จำนวน 3 อ้างบรรทัดที่ 1 ของใบอนุมัติ มีคลังรับ",
+      "do": "db.query",
+      "sql": "select item_code, unit_code, qty::text, price::text, sum_amount::text, ref_doc_no, ref_row::text, coalesce(wh_code, '') as wh from ic_trans_detail where doc_no = :'po2' and trans_flag = 6 order by line_number",
+      "rows": 1,
+      "save": {},
+      "expect": [
+        {
+          "col": "item_code",
+          "op": "eq",
+          "value": "{{item}}"
+        },
+        {
+          "col": "unit_code",
+          "op": "eq",
+          "value": "{{unit}}"
+        },
+        {
+          "col": "qty",
+          "op": "eq",
+          "value": "3"
+        },
+        {
+          "col": "price",
+          "op": "eq",
+          "value": "{{price}}"
+        },
+        {
+          "col": "sum_amount",
+          "op": "eq",
+          "value": "{{po2_sum}}"
+        },
+        {
+          "col": "ref_doc_no",
+          "op": "eq",
+          "value": "{{pra}}"
+        },
+        {
+          "col": "ref_row",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "wh",
+          "op": "exists",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: ใบอนุมัติปิดแล้ว (สั่งครบ 8)",
+      "do": "db.query",
+      "sql": "select coalesce(used_status, 0)::text as used_status, coalesce(doc_success, 0)::text as doc_success from ic_trans where doc_no = :'pra' and trans_flag = 4",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "doc_success",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: ใบเสนอซื้อถูกใช้และปิดแล้ว",
+      "do": "db.query",
+      "sql": "select coalesce(used_status, 0)::text as used_status, coalesce(doc_success, 0)::text as doc_success from ic_trans where doc_no = :'pr' and trans_flag = 2",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "doc_success",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "กดปุ่มเพิ่มใหม่ (ใบที่ 3 ไม่บันทึก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] button:text-is(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "อยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "กดปุ่ม ดึงเอกสาร",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] button[title=\"ค้นหาและดึงรายการจากเอกสารอ้างอิง\"]"
+    },
+    {
+      "title": "หน้าต่างเลือกเอกสารอ้างอิงเปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) [data-testid=\"ref-doc-search\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "ค้นหาใบอนุมัติที่สั่งครบแล้ว {{pra}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) [data-testid=\"ref-doc-search\"]",
+      "value": "{{pra}}"
+    },
+    {
+      "title": "ใบอนุมัติที่ปิดแล้วไม่แสดงให้ดึง: ไม่พบเอกสารอ้างอิงในระบบ",
+      "do": "ui.expectText",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\"))",
+      "text": "ไม่พบเอกสารอ้างอิงในระบบ",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ไม่มีแถวใบอนุมัติ {{pra}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) button:has(div.font-mono:text-is(\"{{pra}}\"))",
+      "visible": false
+    },
+    {
+      "title": "ค้นหาใบเสนอซื้อที่ปิดแล้ว {{pr}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) [data-testid=\"ref-doc-search\"]",
+      "value": "{{pr}}"
+    },
+    {
+      "title": "ใบเสนอซื้อที่ปิดแล้วไม่แสดงให้ดึง",
+      "do": "ui.expectText",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\"))",
+      "text": "ไม่พบเอกสารอ้างอิงในระบบ",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ปิดหน้าต่างเลือกเอกสารอ้างอิง",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) h3 + button"
+    },
+    {
+      "title": "หน้าต่างเลือกเอกสารอ้างอิงปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\"))",
+      "visible": false
+    },
+    {
+      "title": "API ยืนยัน: ดึงใบอนุมัติที่สั่งครบแล้วได้คงเหลือ 0",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/transgrid/refimport",
+      "body": {
+        "transFlag": 6,
+        "docDate": "{{today}}",
+        "custCode": "{{supp}}",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "inquiryType": 0,
+        "docNo": "{{po3}}",
+        "refDocs": [
+          {
+            "docNo": "{{pra}}",
+            "transFlag": 4,
+            "docRefType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.lines.0.qty",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "path": "data.lines.1",
+          "op": "empty",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอใหม่ (ล้างแท็บเดิม)",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_order"
+    },
+    {
+      "title": "ค้นหาในรายการด้วยเลขที่ที่ไม่มีอยู่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{po1}}-NONE"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ไม่พบเอกสาร: ตัวนับ 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "ค้นหาในรายการใบสั่งซื้อด้วยเลขที่ {{po1}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{po1}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบใบสั่งซื้อของเรา 1 ใบ: ตัวนับ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถว ใบสั่งซื้อ {{po1}} ในรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] tr:has(button[title=\"แก้ไขรายการ {{po1}}\"]) td:has-text(\"{{po1}}\")"
+    },
+    {
+      "title": "เปิดในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เปิดซ้ำ: เลขที่เอกสาร",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{po1}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: รหัสเจ้าหนี้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{supp}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ชื่อเจ้าหนี้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] textarea[placeholder=\"ชื่อเจ้าหนี้ / ลูกหนี้...\"]",
+      "value": "{{sname}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ผู้ติดต่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"ผู้ติดต่อ:\")) > input",
+      "value": "UAT ผู้ติดต่อ {{run.short}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: เอกสารอ้างอิง = ใบอนุมัติ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] input[placeholder=\"เลขที่เอกสารอ้างอิง...\"]",
+      "value": "{{pra}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: หมายเหตุ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: วันหมดอายุ 15",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"วันหมดอายุ:\")) > input",
+      "value": "15",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: รับ/ส่ง 7 วัน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:text-is(\"รับ/ส่ง (วัน):\")) > input",
+      "value": "7",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: รหัสสินค้า",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//input",
+      "value": "{{item}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: คลังรับ = ที่บันทึก",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"คลัง\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"คลัง\"]/preceding-sibling::th)+1]//input",
+      "value": "{{po_wh}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: จำนวน 5",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "5",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ราคา",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order\"]//table[thead//th[normalize-space()=\"ราคา/หน่วย\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ราคา/หน่วย\"]/preceding-sibling::th)+1]//input",
+      "value": "{{price}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: รวมมูลค่าสินค้า = ราคา × จำนวน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"รวมมูลค่าสินค้า:\") + div",
+      "text": "{{po1_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ยอดเงินก่อนภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"ยอดเงินก่อนภาษี:\") + div",
+      "text": "{{po1_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ยอดภาษีมูลค่าเพิ่ม = ฐาน × อัตราจริง",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"ยอดภาษีมูลค่าเพิ่ม:\") + div",
+      "text": "{{po1_vat}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: มูลค่าหลังคิดภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] label:text-is(\"มูลค่าหลังคิดภาษี:\") + div",
+      "text": "{{po1_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดหน้าต่างพิมพ์ฟอร์ม (ไม่สั่งพิมพ์จริง เพราะสั่งพิมพ์จะบันทึกประวัติการพิมพ์ลงฐาน)",
+      "do": "ui.click",
+      "selector": "[data-testid=\"trans-open-doc-form-print-btn\"]"
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มเปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มอยู่ในโหมดข้อมูลที่บันทึกแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"doc-form-mode-badge-saved\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "ตัวอย่างฟอร์มแสดงเลขที่เอกสาร {{po1}}",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "text": "{{po1}}",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ภาพตัวอย่างฟอร์มพิมพ์",
+      "do": "ui.screenshot",
+      "name": "form-po1"
+    },
+    {
+      "title": "ปิดหน้าต่างพิมพ์ฟอร์ม",
+      "do": "ui.click",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] button:has(span:text-is(\"ปิด\"))"
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "visible": false
+    },
+    {
+      "title": "เปิด Document Flow",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] button:has-text(\"Document Flow\")"
+    },
+    {
+      "title": "หน้าต่างผังเส้นทางเอกสารเปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 h2:has-text(\"ผังเส้นทางเอกสาร\")",
+      "timeout": 30000
+    },
+    {
+      "title": "ผังเส้นทางมีเอกสาร {{po1}}",
+      "do": "ui.expectText",
+      "selector": "div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))",
+      "text": "{{po1}}",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ผังเส้นทางมีเอกสาร {{pra}}",
+      "do": "ui.expectText",
+      "selector": "div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))",
+      "text": "{{pra}}",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ผังเส้นทางมีเอกสาร {{pr}}",
+      "do": "ui.expectText",
+      "selector": "div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))",
+      "text": "{{pr}}",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ผังเส้นทางมีเอกสาร {{po2}}",
+      "do": "ui.expectText",
+      "selector": "div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))",
+      "text": "{{po2}}",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ภาพผังเส้นทางเอกสาร",
+      "do": "ui.screenshot",
+      "name": "flow-po1"
+    },
+    {
+      "title": "ปิดหน้าต่างผังเส้นทาง",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 button:has-text(\"ปิดหน้าต่าง\")"
+    },
+    {
+      "title": "หน้าต่างผังเส้นทางปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 h2:has-text(\"ผังเส้นทางเอกสาร\")",
+      "visible": false
+    },
+    {
+      "title": "เปิดรายงาน",
+      "do": "ui.openMenu",
+      "key": "menu_po_report_purchase_order"
+    },
+    {
+      "title": "กรองรายงานด้วยเลขที่ {{po1}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase_order\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+      "value": "{{po1}}"
+    },
+    {
+      "title": "กดประมวลผลรายงาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase_order\"] button:has-text(\"ประมวลผลรายงาน\")"
+    },
+    {
+      "title": "ตารางรายงานแสดงเอกสาร {{po1}}",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase_order\"]",
+      "text": "{{po1}}",
+      "op": "contains",
+      "timeout": 60000
+    },
+    {
+      "title": "กดพิมพ์รายงาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase_order\"] button:has-text(\"พิมพ์รายงาน\")"
+    },
+    {
+      "title": "ดาวน์โหลด PDF รายงาน มีเลขที่และยอดเงินของเอกสาร",
+      "do": "ui.pdf",
+      "selector": "button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+      "contains": [
+        "{{po1}}",
+        "{{po1_sum_fmt}}"
+      ],
+      "timeout": 120000
+    },
+    {
+      "title": "เปิดหน้าจออนุมัติใบสั่งซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_order_approve"
+    },
+    {
+      "title": "อยู่ในโหมดอนุมัติเอกสาร",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] header span:text-is(\"โหมดอนุมัติเอกสาร\")"
+    },
+    {
+      "title": "ค้นหาในรายการใบสั่งซื้อด้วยเลขที่ {{po1}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{po1}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบใบสั่งซื้อของเรา 1 ใบ: ตัวนับ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถว ใบสั่งซื้อ {{po1}} ในรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] tr:has(button[title=\"แก้ไขรายการ {{po1}}\"]) td:has-text(\"{{po1}}\")"
+    },
+    {
+      "title": "ช่องเลขที่ใบสั่งซื้อ = ใบของเรา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] div:has(> label:text-is(\"เลขที่ใบสั่งซื้อ\"))",
+      "text": "{{po1}}",
+      "op": "contains"
+    },
+    {
+      "title": "ตาราง: รหัสสินค้าตามใบสั่งซื้อ",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order_approve\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//input",
+      "value": "{{item}}",
+      "op": "eq"
+    },
+    {
+      "title": "ตาราง: จำนวน = 5 ตามใบสั่งซื้อ",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order_approve\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "5",
+      "op": "eq"
+    },
+    {
+      "title": "ตาราง: จำนวนเงิน = ยอดก่อนภาษีของใบสั่งซื้อ",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_po_purchase_order_approve\"]//table[thead//th[normalize-space()=\"จำนวนเงิน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวนเงิน\"]/preceding-sibling::th)+1]",
+      "text": "{{po1_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "ยอดรวม: ยอดภาษีมูลค่าเพิ่มตามใบสั่งซื้อ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] label:text-is(\"ยอดภาษีมูลค่าเพิ่ม:\") + div",
+      "text": "{{po1_vat}}",
+      "op": "eq"
+    },
+    {
+      "title": "ยอดรวม: รวมมูลค่าทั้งสิ้นตามใบสั่งซื้อ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] label:text-is(\"รวมมูลค่าทั้งสิ้น:\") + div",
+      "text": "{{po1_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "ยอดรวม: มูลค่าหลังคิดภาษีตามใบสั่งซื้อ (ฐาน + ภาษี)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] label:text-is(\"มูลค่าหลังคิดภาษี:\") + div",
+      "text": "{{po1_total}}",
+      "op": "eq",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกหมายเหตุการอนุมัติ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] input[placeholder=\"ระบุหมายเหตุการอนุมัติ\"]",
+      "value": "{{run.tag}}"
+    },
+    {
+      "title": "กด บันทึกอนุมัติ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] button:has-text(\"บันทึกอนุมัติ\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งอนุมัติเรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] header span.text-emerald-700",
+      "text": "อนุมัติเอกสาร {{po1}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ฐานข้อมูล: ใบสั่งซื้อใบที่ 1 อนุมัติแล้ว และมีหัวใบอนุมัติใบสั่งซื้อ 1 ใบ อ้างใบสั่งซื้อ พร้อมหมายเหตุที่กรอก",
+      "do": "db.query",
+      "sql": "select coalesce(h.approve_status, 0)::text as approve_status, (select count(*) from ic_trans a where a.trans_flag = 8 and a.doc_ref = h.doc_no and coalesce(a.last_status, 0) = 0)::text as poa,\n           (select a.remark from ic_trans a where a.trans_flag = 8 and a.doc_ref = h.doc_no order by a.roworder desc limit 1) as poa_remark from ic_trans h where h.doc_no = :'po1' and h.trans_flag = 6",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "approve_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "poa",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "poa_remark",
+          "op": "same",
+          "value": "{{run.tag}}"
+        }
+      ]
+    },
+    {
+      "title": "กด ยกเลิกการอนุมัติ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] button:has-text(\"ยกเลิกการอนุมัติ\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งยกเลิกการอนุมัติเรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order_approve\"] header span.text-emerald-700",
+      "text": "ยกเลิกการอนุมัติเอกสาร {{po1}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ฐานข้อมูล: ใบอนุมัติใบสั่งซื้อถูกลบ ใบสั่งซื้อกลับเป็นรออนุมัติ",
+      "do": "db.query",
+      "sql": "select coalesce(h.approve_status, 0)::text as approve_status, (select count(*) from ic_trans a where a.trans_flag = 8 and a.doc_ref = :'po1')::text as appr_docs from ic_trans h where h.doc_no = :'po1' and h.trans_flag = 6",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "approve_status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "appr_docs",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "หน้าจออนุมัติไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "เปิดหน้าจอใหม่ (ล้างแท็บเดิม)",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_order"
+    },
+    {
+      "title": "ค้นหาในรายการเอกสารด้วยเลขที่ {{po2}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{po2}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบเอกสารของเรา 1 ใบ: ตัวนับ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถว เอกสาร {{po2}} ในรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] tr:has(button[title=\"แก้ไขรายการ {{po2}}\"]) td:has-text(\"{{po2}}\")"
+    },
+    {
+      "title": "เปิดในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารที่เปิดตรงกับของเรา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{po2}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดลบเอกสาร (ยืนยันกล่องถามอัตโนมัติ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] button:text-is(\"ลบ\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งลบเอกสารเรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] span.whitespace-pre-line",
+      "text": "ลบเอกสาร {{po2}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ฐานข้อมูล: ลบ PO2 แล้วไม่เหลือหัว/บรรทัด",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ic_trans where doc_no = :'po2') + (select count(*) from ic_trans_detail where doc_no = :'po2'))::text as n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: ลบใบที่ 2 แล้วใบอนุมัติกลับมาเปิด (ยังถูกใช้โดยใบที่ 1)",
+      "do": "db.query",
+      "sql": "select coalesce(used_status, 0)::text as used_status, coalesce(doc_success, 0)::text as doc_success from ic_trans where doc_no = :'pra' and trans_flag = 4",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "doc_success",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "API ยืนยัน: หลังลบใบที่ 2 ดึงใบอนุมัติได้คงเหลือ 3 อีกครั้ง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/transgrid/refimport",
+      "body": {
+        "transFlag": 6,
+        "docDate": "{{today}}",
+        "custCode": "{{supp}}",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "inquiryType": 0,
+        "docNo": "{{po3}}",
+        "refDocs": [
+          {
+            "docNo": "{{pra}}",
+            "transFlag": 4,
+            "docRefType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.lines.0.qty",
+          "op": "eq",
+          "value": "{{q_po2}}"
+        },
+        {
+          "path": "data.lines.1",
+          "op": "empty",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอใหม่ (ล้างแท็บเดิม)",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_order"
+    },
+    {
+      "title": "ค้นหาในรายการเอกสารด้วยเลขที่ {{po1}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{po1}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบเอกสารของเรา 1 ใบ: ตัวนับ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถว เอกสาร {{po1}} ในรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] tr:has(button[title=\"แก้ไขรายการ {{po1}}\"]) td:has-text(\"{{po1}}\")"
+    },
+    {
+      "title": "เปิดในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารที่เปิดตรงกับของเรา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{po1}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดลบเอกสาร (ยืนยันกล่องถามอัตโนมัติ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] button:text-is(\"ลบ\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งลบเอกสารเรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] span.whitespace-pre-line",
+      "text": "ลบเอกสาร {{po1}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ฐานข้อมูล: ลบ PO1 แล้วไม่เหลือหัว/บรรทัด",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ic_trans where doc_no = :'po1') + (select count(*) from ic_trans_detail where doc_no = :'po1'))::text as n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: ลบครบแล้วใบอนุมัติไม่ถูกใช้และไม่ปิด",
+      "do": "db.query",
+      "sql": "select coalesce(used_status, 0)::text as used_status, coalesce(doc_success, 0)::text as doc_success from ic_trans where doc_no = :'pra' and trans_flag = 4",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "doc_success",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ค้นหาเลขที่ที่ลบแล้วในรายการ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{po1}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ไม่พบเอกสาร: ตัวนับ 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_po_purchase_order\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอไม่มีข้อผิดพลาดแฝงหลังลบ",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ยกเลิกการอนุมัติใบสั่งซื้อผ่าน API (สำรอง)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/approve",
+      "body": {
+        "flag": 8,
+        "origFlag": 6,
+        "docRef": "{{po1}}",
+        "docFormat": "POA",
+        "screenCode": "POA",
+        "docDate": "",
+        "remark": "{{run.tag}}",
+        "undo": true,
+        "notApprove": false,
+        "menuName": "menu_po_purchase_order_approve"
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบสั่งซื้อทดสอบ PO2",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{po2}}",
+        "transFlag": 6
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบสั่งซื้อทดสอบ PO1",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{po1}}",
+        "transFlag": 6
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ยกเลิกการอนุมัติใบขอซื้อ (ลบใบอนุมัติที่ระบบออก)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/approve",
+      "body": {
+        "flag": 4,
+        "origFlag": 2,
+        "docRef": "{{pr}}",
+        "docFormat": "PRA",
+        "screenCode": "PRA",
+        "docDate": "",
+        "remark": "{{run.tag}}",
+        "undo": true,
+        "notApprove": false,
+        "menuName": "menu_purchase_requisition_approval"
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบขอซื้อทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{pr}}",
+        "transFlag": 2
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo (หัว รายการ เจ้าหนี้ จ่ายชำระ มัดจำ GL ภาษีซื้อ หัก ณ ที่จ่าย)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'pr', :'pra', :'po1', :'po2')) + (select count(*) from ic_trans_detail where doc_no in (:'pr', :'pra', :'po1', :'po2')) + (select count(*) from ap_ar_trans where doc_no in (:'pr', :'pra', :'po1', :'po2')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'pr', :'pra', :'po1', :'po2')) + (select count(*) from cb_trans where doc_no in (:'pr', :'pra', :'po1', :'po2')) + (select count(*) from cb_trans_detail where doc_no in (:'pr', :'pra', :'po1', :'po2')) + (select count(*) from gl_journal where doc_no in (:'pr', :'pra', :'po1', :'po2')) + (select count(*) from gl_journal_detail where doc_no in (:'pr', :'pra', :'po1', :'po2')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'pr', :'pra', :'po1', :'po2')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'pr', :'pra', :'po1', :'po2')) + (select count(*) from gl_wht_list where doc_no in (:'pr', :'pra', :'po1', :'po2')) + (select count(*) from gl_wht_list_detail where doc_no in (:'pr', :'pra', :'po1', :'po2')) + (select count(*) from ic_trans where trans_flag = 4 and doc_ref = :'pr') + (select count(*) from ic_trans where trans_flag = 8 and doc_ref = :'po1') as left_rows",
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

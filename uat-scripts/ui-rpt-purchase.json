@@ -1,0 +1,1150 @@
+{
+ "module": "reports",
+ "lens": "screen",
+ "severityOnFail": "S1",
+ "timeoutMs": 900000,
+ "id": "ui-rpt-purchase",
+ "title": "รายงานซื้อสินค้าและบริการ + รายงานภาษีซื้อ บนหน้าจอ: ช่วงวันที่ เงื่อนไขทุกช่อง ยอดตรงเอกสาร เรียง/จัดกลุ่ม และพิมพ์ PDF",
+ "description": "สร้างใบซื้อเชื่อ 2 ใบของผู้จำหน่าย/สินค้า/ราคาทุน/อัตราภาษีจากใบซื้อจริงล่าสุด: PUA วันนี้ 2 หน่วย, PUB เมื่อวาน 3 หน่วย แล้วเปิด menu_po_report_purchase ผ่านหน้าจอ: กรอกช่วงวันที่ จาก-ถึงรหัสเจ้าหนี้ คำค้นหา ช่วงรหัสเจ้าหนี้เพิ่มเติม แสดงเอกสารยกเลิก → ยอดแต่ละแถวและรวมท้ายตารางตรงกับ จำนวน×ราคา, ช่วงวันที่วันนี้ต้องตัด PUB ออก, เงื่อนไขรหัสที่ไม่ตรงต้องตัดออก, เรียงตามมูลค่าสุทธิ, แสดงรายละเอียดสินค้า, จัดกลุ่มตามรหัสเจ้าหนี้พร้อมยอดรวมกลุ่ม, ตั้งหัว/ท้ายรายงาน + แนวพิมพ์แล้วดาวน์โหลด PDF · รายงานภาษีซื้อ (menu_report_vat_buy) ยอดตรงและตัดออกเมื่อเลือกงวดเดือนหน้า · ลบเอกสารผ่าน API แล้วตรวจว่าไม่เหลือแถว",
+ "steps": [
+  {
+   "title": "กำหนดเลขใบซื้อทดสอบวันนี้",
+   "do": "set",
+   "name": "pa",
+   "value": "UAT-{{run.short}}-PUA"
+  },
+  {
+   "title": "กำหนดเลขใบซื้อทดสอบเมื่อวาน",
+   "do": "set",
+   "name": "pb",
+   "value": "UAT-{{run.short}}-PUB"
+  },
+  {
+   "title": "กำหนดคำค้นหาเฉพาะเอกสารรอบนี้",
+   "do": "set",
+   "name": "kw",
+   "value": "UAT-{{run.short}}-PU"
+  },
+  {
+   "title": "วันที่วันนี้/เมื่อวาน/เดือนก่อน (ปฏิทินไทย พ.ศ. สำหรับช่องวันที่)",
+   "do": "db.query",
+   "sql": "with b as (select (now() at time zone 'Asia/Bangkok')::date d), x as (select d, d - 1 as y, (date_trunc('month', d) - interval '1 month')::date as pf, (date_trunc('month', d)::date - 1) as pt, (date_trunc('month', d) + interval '1 month')::date as nf, (date_trunc('month', d) + interval '2 month')::date - 1 as nt from b) select to_char(d, 'YYYY-MM-DD') as today, to_char(d, 'DD/MM/') || (extract(year from d)::int + 543) as today_th, to_char(y, 'DD/MM/') || (extract(year from y)::int + 543) as yday_th, to_char(pf, 'DD/MM/') || (extract(year from pf)::int + 543) as pm_from_th, to_char(pt, 'DD/MM/') || (extract(year from pt)::int + 543) as pm_to_th, to_char(nf, 'DD/MM/') || (extract(year from nf)::int + 543) as nm_from_th, to_char(nt, 'DD/MM/') || (extract(year from nt)::int + 543) as nm_to_th, to_char(y, 'YYYY-MM-DD') as yday from x",
+   "rows": 1,
+   "save": {
+    "today": "today",
+    "today_th": "today_th",
+    "yday_th": "yday_th",
+    "pm_from_th": "pm_from_th",
+    "pm_to_th": "pm_to_th",
+    "nm_from_th": "nm_from_th",
+    "nm_to_th": "nm_to_th",
+    "yday": "yday"
+   }
+  },
+  {
+   "title": "เลือกผู้จำหน่าย/สินค้า/คลัง/ราคาทุน/อัตราภาษีจากใบซื้อเชื่อจริงล่าสุด (ราคา 2 ตำแหน่ง ภาษีแยกนอก)",
+   "do": "db.query",
+   "sql": "select t.cust_code as supp, coalesce(nullif(t.doc_format_code, ''), 'PU') as fmt, d.item_code as item, d.unit_code as unit, d.wh_code as wh, d.shelf_code as shelf, d.stand_value::text as stand, d.divide_value::text as divide, d.price::text as price, t.vat_rate::text as vat_rate from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag join ap_supplier s on s.code = t.cust_code join ic_inventory i on i.code = d.item_code where t.trans_flag = 12 and t.inquiry_type = 0 and t.vat_type = 0 and t.vat_rate > 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 and d.price > 0 and d.price = round(d.price, 2) and d.tax_type = 0 and d.stand_value > 0 and d.divide_value > 0 order by t.doc_date desc, t.roworder desc limit 1",
+   "rows": 1,
+   "save": {
+    "supp": "supp",
+    "fmt": "fmt",
+    "item": "item",
+    "unit": "unit",
+    "wh": "wh",
+    "shelf": "shelf",
+    "stand": "stand",
+    "divide": "divide",
+    "price": "price",
+    "vat_rate": "vat_rate"
+   }
+  },
+  {
+   "title": "คำนวณยอดที่คาดจาก จำนวน × ราคา และอัตราภาษี (PUA 2 หน่วย, PUB 3 หน่วย)",
+   "do": "db.query",
+   "sql": "with c as (select round(2 * :'price'::numeric, 2) as ab, round(3 * :'price'::numeric, 2) as bb, :'vat_rate'::numeric as rt), v as (select ab, bb, round(ab * rt / 100, 2) as av, round(bb * rt / 100, 2) as bv from c), m as (select *, ab + av as at, bb + bv as bt from v) select ab::text as a_base, av::text as a_vat, at::text as a_total, bb::text as b_base, bv::text as b_vat, bt::text as b_total, (ab + bb)::text as sum_base, (av + bv)::text as sum_vat, (at + bt)::text as sum_total, to_char(at, 'FM999,999,999,990.00') as a_total_f, to_char(bt, 'FM999,999,999,990.00') as b_total_f, to_char(ab + bb, 'FM999,999,999,990.00') as sum_base_f, to_char(av + bv, 'FM999,999,999,990.00') as sum_vat_f, to_char(at + bt, 'FM999,999,999,990.00') as sum_total_f from m",
+   "rows": 1,
+   "save": {
+    "a_base": "a_base",
+    "a_vat": "a_vat",
+    "a_total": "a_total",
+    "b_base": "b_base",
+    "b_vat": "b_vat",
+    "b_total": "b_total",
+    "sum_base": "sum_base",
+    "sum_vat": "sum_vat",
+    "sum_total": "sum_total",
+    "a_total_f": "a_total_f",
+    "b_total_f": "b_total_f",
+    "sum_base_f": "sum_base_f",
+    "sum_vat_f": "sum_vat_f",
+    "sum_total_f": "sum_total_f"
+   }
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "บันทึกใบซื้อเชื่อ PUA วันนี้ 2 หน่วย",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/save",
+   "body": {
+    "isNew": true,
+    "confirmed": true,
+    "docNo": "{{pa}}",
+    "docDate": "{{today}}",
+    "transType": 1,
+    "transFlag": 12,
+    "inquiryType": 0,
+    "custCode": "{{supp}}",
+    "docFormatCode": "{{fmt}}",
+    "taxDocNo": "{{pa}}",
+    "taxDocDate": "{{today}}",
+    "vatType": 0,
+    "vatRate": "{{vat_rate}}",
+    "remark": "{{run.tag}}",
+    "lines": [
+     {
+      "itemCode": "{{item}}",
+      "unitCode": "{{unit}}",
+      "whCode": "{{wh}}",
+      "shelfCode": "{{shelf}}",
+      "standValue": "{{stand}}",
+      "divideValue": "{{divide}}",
+      "qty": "2",
+      "price": "{{price}}",
+      "sumAmount": "{{a_base}}",
+      "taxType": 0
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "data.docNo",
+     "op": "eq",
+     "value": "{{pa}}"
+    }
+   ]
+  },
+  {
+   "title": "บันทึกใบซื้อเชื่อ PUB เมื่อวาน 3 หน่วย",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/save",
+   "body": {
+    "isNew": true,
+    "confirmed": true,
+    "docNo": "{{pb}}",
+    "docDate": "{{yday}}",
+    "transType": 1,
+    "transFlag": 12,
+    "inquiryType": 0,
+    "custCode": "{{supp}}",
+    "docFormatCode": "{{fmt}}",
+    "taxDocNo": "{{pb}}",
+    "taxDocDate": "{{yday}}",
+    "vatType": 0,
+    "vatRate": "{{vat_rate}}",
+    "remark": "{{run.tag}}",
+    "lines": [
+     {
+      "itemCode": "{{item}}",
+      "unitCode": "{{unit}}",
+      "whCode": "{{wh}}",
+      "shelfCode": "{{shelf}}",
+      "standValue": "{{stand}}",
+      "divideValue": "{{divide}}",
+      "qty": "3",
+      "price": "{{price}}",
+      "sumAmount": "{{b_base}}",
+      "taxType": 0
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "data.docNo",
+     "op": "eq",
+     "value": "{{pb}}"
+    }
+   ]
+  },
+  {
+   "title": "หัวใบซื้อทั้งสองใบในฐานข้อมูลตรงยอดที่คำนวณ",
+   "do": "db.query",
+   "sql": "select (select total_amount::text from ic_trans where doc_no = :'pa' and trans_flag = 12) as at, (select total_amount::text from ic_trans where doc_no = :'pb' and trans_flag = 12) as bt, (select total_vat_value::text from ic_trans where doc_no = :'pb' and trans_flag = 12) as bv",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "at",
+     "op": "eq",
+     "value": "{{a_total}}"
+    },
+    {
+     "col": "bt",
+     "op": "eq",
+     "value": "{{b_total}}"
+    },
+    {
+     "col": "bv",
+     "op": "eq",
+     "value": "{{b_vat}}"
+    }
+   ]
+  },
+  {
+   "title": "เปิดเมนู รายงานซื้อสินค้าและบริการ",
+   "do": "ui.openMenu",
+   "key": "menu_po_report_purchase"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสผู้จำหน่ายทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{supp}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสผู้จำหน่ายทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{supp}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขเอกสารรอบนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{kw}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมทั้งสิ้น 2 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(2 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ purchase-report-2-rows",
+   "do": "ui.screenshot",
+   "name": "purchase-report-2-rows",
+   "continueOnFail": true
+  },
+  {
+   "title": "PUA: เลขที่เอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=2",
+   "op": "eq",
+   "text": "{{pa}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "PUA: รหัสเจ้าหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=5",
+   "op": "eq",
+   "text": "{{supp}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "PUA: มูลค่าสินค้า = 2 × ราคา",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{a_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "PUA: มูลค่าส่วนลด ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=8",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "PUA: มูลค่าหลังหักส่วนลด",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=9",
+   "op": "eq",
+   "text": "{{a_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "PUA: ภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=11",
+   "op": "eq",
+   "text": "{{a_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "PUA: มูลค่าสุทธิ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=12",
+   "op": "eq",
+   "text": "{{a_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "PUB: มูลค่าสินค้า = 3 × ราคา",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pb}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{b_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "PUB: ภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pb}}\") >> td >> nth=11",
+   "op": "eq",
+   "text": "{{b_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "PUB: มูลค่าสุทธิ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pb}}\") >> td >> nth=12",
+   "op": "eq",
+   "text": "{{b_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมมูลค่าสินค้า",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{sum_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tfoot tr >> td >> nth=5",
+   "op": "eq",
+   "text": "{{sum_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมมูลค่าสุทธิ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tfoot tr >> td >> nth=6",
+   "op": "eq",
+   "text": "{{sum_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "มีข้อมูล ปุ่ม ส่งออก CSV กดได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] button:has-text(\"ส่งออก CSV\"):not([disabled])",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงค่าเริ่มต้นตามวันที่: แถวแรกคือ PUB (เมื่อวาน)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{pb}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงตาม มูลค่าสุทธิ (ประมวลผลทันที)",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] select:has(option:has-text(\"ค่าเริ่มต้นตามระบบ\"))",
+   "value": "มูลค่าสุทธิ",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงตามมูลค่าสุทธิน้อยไปมาก: แถวแรกคือ PUA",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{pa}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับไปเรียงค่าเริ่มต้น",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] select:has(option:has-text(\"ค่าเริ่มต้นตามระบบ\"))",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงค่าเริ่มต้นอีกครั้ง: แถวแรกคือ PUB",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{pb}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงวันที่วันนี้: ไม่มี PUB (เมื่อวาน)",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pb}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงวันที่วันนี้: มี PUA",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงวันที่วันนี้: รวม 1 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(1 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงวันที่วันนี้: รวมมูลค่าสุทธิเท่ากับ PUA",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tfoot tr >> td >> nth=6",
+   "op": "eq",
+   "text": "{{a_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับเป็นเมื่อวาน-วันนี้: PUB กลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pb}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = (ว่าง)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = (ว่าง)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสเจ้าหนี้เพิ่มเติม = รหัสอื่น",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "value": "{{supp}}9Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องช่วงรหัสเจ้าหนี้",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสไม่ครอบผู้จำหน่าย: ไม่มี PUA",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีข้อมูล ปุ่ม ส่งออก CSV ต้องกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] button:has-text(\"ส่งออก CSV\")[disabled]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสเจ้าหนี้เพิ่มเติม = ผู้จำหน่ายของเรา (รูปแบบ จาก..ถึง)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "value": "{{supp}}..{{supp}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องช่วงรหัสเจ้าหนี้",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสครอบผู้จำหน่าย: PUA กลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสครอบผู้จำหน่าย: PUB กลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pb}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างช่วงรหัสเจ้าหนี้เพิ่มเติม",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = 0",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "0",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัสเจ้าหนี้ต่ำกว่ารหัสผู้จำหน่าย: ไม่มี PUA",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสผู้จำหน่ายทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{supp}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสผู้จำหน่ายทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{supp}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รหัสเจ้าหนี้ตรง: PUA กลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ติ๊ก แสดงเอกสารที่ยกเลิก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] label:has-text(\"แสดงเอกสารที่ยกเลิก\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "แสดงเอกสารยกเลิก: เอกสารเราไม่ถูกยกเลิก ยังรวม 2 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(2 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เอาติ๊ก แสดงเอกสารที่ยกเลิก ออก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] label:has-text(\"แสดงเอกสารที่ยกเลิก\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด แสดงรายละเอียดสินค้า",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] button:has-text(\"แสดงรายละเอียดสินค้า\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด PUA: รหัสสินค้า",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=5",
+   "op": "eq",
+   "text": "{{item}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด PUA: จำนวน 2",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=10",
+   "op": "eq",
+   "text": "2",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด PUA: ราคา",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=11",
+   "op": "eq",
+   "text": "{{price}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด PUA: รวมมูลค่า",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=13",
+   "op": "eq",
+   "text": "{{a_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด PUB: จำนวน 3",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pb}}\") >> td >> nth=10",
+   "op": "eq",
+   "text": "3",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ purchase-report-detail",
+   "do": "ui.screenshot",
+   "name": "purchase-report-detail",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับไป สรุปตามเอกสาร",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] button:has-text(\"สรุปตามเอกสาร\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "สรุปตามเอกสาร: PUA มูลค่าสุทธิ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=12",
+   "op": "eq",
+   "text": "{{a_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จัดกลุ่มชั้นที่ 1 ตาม รหัสเจ้าหนี้",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "รหัสเจ้าหนี้",
+   "continueOnFail": true
+  },
+  {
+   "title": "รวมกลุ่มผู้จำหน่าย: มูลค่าสุทธิ = PUA + PUB",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{supp}} (2\") >> td >> nth=6",
+   "op": "eq",
+   "text": "{{sum_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รวมกลุ่มผู้จำหน่าย: ภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] table tbody tr:has-text(\"{{supp}} (2\") >> td >> nth=5",
+   "op": "eq",
+   "text": "{{sum_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ purchase-report-group",
+   "do": "ui.screenshot",
+   "name": "purchase-report-group",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับเป็นอัตโนมัติ",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดแท็บ รูปแบบรายงาน (Studio)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] button:has-text(\"รูปแบบรายงาน (\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งชื่อหัวรายงานกำหนดเอง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"เช่น รายงานตรวจนับสินค้าคงคลังประจำเดือน...\"]",
+   "value": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งคำโปรยหัวกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"เช่น สำหรับฝ่ายบริหารและผู้สอบบัญชี...\"]",
+   "value": "UAT-{{run.short}}-SUB",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งหมายเหตุท้ายกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] input[placeholder=\"เช่น เอกสารภายในองค์กร ห้ามเผยแพร่...\"]",
+   "value": "UAT-{{run.short}}-FOOT",
+   "continueOnFail": true
+  },
+  {
+   "title": "หัวรายงานบนจอเปลี่ยนเป็นชื่อที่ตั้ง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] h1",
+   "op": "contains",
+   "text": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม พิมพ์รายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_po_report_purchase\"] button:has-text(\"พิมพ์รายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าต่างตั้งค่าหน้ากระดาษเปิด",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"][aria-label=\"หน้าต่างตั้งค่าหน้ากระดาษและพิมพ์รายงาน PDF ส่วนกลาง\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวนอน",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวนอน ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวนอน: มีเลขเอกสาร ยอดเงิน หัว/ท้ายรายงานที่ตั้ง",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{pa}}",
+    "{{pb}}",
+    "{{a_total_f}}",
+    "{{b_total_f}}",
+    "{{sum_base_f}}",
+    "{{sum_vat_f}}",
+    "{{sum_total_f}}",
+    "UAT-{{run.short}}-TITLE",
+    "UAT-{{run.short}}-SUB",
+    "UAT-{{run.short}}-FOOT"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวตั้ง",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวตั้ง ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวตั้ง: ยังมีเลขเอกสารและยอดเงินครบ",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{pa}}",
+    "{{pb}}",
+    "{{a_total_f}}",
+    "{{b_total_f}}",
+    "{{sum_base_f}}",
+    "{{sum_vat_f}}",
+    "{{sum_total_f}}",
+    "UAT-{{run.short}}-TITLE"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "ปิดหน้าต่างพิมพ์",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"ปิดหน้าต่าง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอพิมพ์ไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดเมนู รายงานภาษีซื้อ",
+   "do": "ui.openMenu",
+   "key": "menu_report_vat_buy"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = ค่าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{pa}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = ค่าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{pb}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขเอกสารรอบนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{kw}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีซื้อ: รวม 2 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(2 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีซื้อ PUA: เลขที่ใบกำกับ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=3",
+   "op": "eq",
+   "text": "{{pa}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีซื้อ PUA: มูลค่าสินค้า/บริการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=8",
+   "op": "eq",
+   "text": "{{a_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีซื้อ PUA: ภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=9",
+   "op": "eq",
+   "text": "{{a_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีซื้อ PUA: รวม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] table tbody tr:has-text(\"{{pa}}\") >> td >> nth=10",
+   "op": "eq",
+   "text": "{{a_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีซื้อ PUB: ภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] table tbody tr:has-text(\"{{pb}}\") >> td >> nth=9",
+   "op": "eq",
+   "text": "{{b_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีซื้อ: รวมมูลค่าสินค้า/บริการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{sum_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีซื้อ: รวมภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] table tfoot tr >> td >> nth=2",
+   "op": "eq",
+   "text": "{{sum_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีซื้อ: รวมทั้งสิ้น",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] table tfoot tr >> td >> nth=3",
+   "op": "eq",
+   "text": "{{sum_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ vat-buy-report",
+   "do": "ui.screenshot",
+   "name": "vat-buy-report",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันแรกของเดือนหน้า",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{nm_from_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันสุดท้ายของเดือนหน้า",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{nm_to_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "งวดภาษีเดือนหน้า: ไม่มี PUA",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] table tbody tr:has-text(\"{{pa}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_buy\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบใบซื้อทดสอบวันนี้",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/delete",
+   "body": {
+    "docNo": "{{pa}}",
+    "transFlag": 12
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ลบใบซื้อทดสอบเมื่อวาน",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/delete",
+   "body": {
+    "docNo": "{{pb}}",
+    "transFlag": 12
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือแถวของเอกสารทดสอบในทุกตารางที่แตะ",
+   "do": "db.query",
+   "sql": "select (select count(*) from ic_trans where doc_no in (:'pa', :'pb')) + (select count(*) from ic_trans_detail where doc_no in (:'pa', :'pb')) + (select count(*) from ap_ar_trans where doc_no in (:'pa', :'pb')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'pa', :'pb')) + (select count(*) from cb_trans where doc_no in (:'pa', :'pb')) + (select count(*) from cb_trans_detail where doc_no in (:'pa', :'pb')) + (select count(*) from gl_journal where doc_no in (:'pa', :'pb')) + (select count(*) from gl_journal_detail where doc_no in (:'pa', :'pb')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'pa', :'pb')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'pa', :'pb')) as left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,1412 @@
+{
+ "module": "reports",
+ "lens": "screen",
+ "severityOnFail": "S1",
+ "timeoutMs": 900000,
+ "id": "ui-rpt-sale-invoice",
+ "title": "รายงานขายสินค้าและบริการ + รายงานภาษีขาย บนหน้าจอ: เงื่อนไขทุกช่อง ยอดตรงเอกสาร เรียง/จัดกลุ่ม และพิมพ์ PDF",
+ "description": "สร้างบิลขายเชื่อ (SCR ×2) และขายสด (SCA ×3) ของลูกค้า/สินค้า/ราคา/อัตราภาษีจากบิลขายเชื่อจริงล่าสุด แล้วเปิดเมนู menu_so_report_invoice ผ่านหน้าจอ: กรอกวันที่ จาก-ถึงรหัสลูกหนี้ คำค้นหา ประเภทการขาย แสดงเฉพาะ POS แคชเชียร์ ช่วงรหัสเพิ่มเติม การแสดงมูลค่าตามประเภทภาษี แสดงเอกสารยกเลิก → ตรวจยอดแต่ละแถว/รวมท้ายตารางตรงกับที่คำนวณจาก จำนวน×ราคา, เงื่อนไขที่ไม่ตรงต้องตัดเอกสารออก, เรียงตามมูลค่าสุทธิ, แสดงรายละเอียดสินค้า, จัดกลุ่มตามรหัสลูกหนี้พร้อมยอดรวมกลุ่ม, ตั้งหัว/ท้ายรายงาน + แนวพิมพ์แล้วดาวน์โหลด PDF ต้องมีเลขเอกสารและยอดเงิน · รายงานภาษีขาย (menu_report_vat_sale) ยอดตรงและตัดออกเมื่อเลือกงวดเดือนก่อน · ลบเอกสารผ่าน API แล้วตรวจว่าไม่เหลือแถว",
+ "steps": [
+  {
+   "title": "กำหนดเลขบิลขายเชื่อทดสอบ",
+   "do": "set",
+   "name": "sc",
+   "value": "UAT-{{run.short}}-SCR"
+  },
+  {
+   "title": "กำหนดเลขบิลขายสดทดสอบ",
+   "do": "set",
+   "name": "sa",
+   "value": "UAT-{{run.short}}-SCA"
+  },
+  {
+   "title": "กำหนดคำค้นหาเฉพาะเอกสารรอบนี้",
+   "do": "set",
+   "name": "kw",
+   "value": "UAT-{{run.short}}-SC"
+  },
+  {
+   "title": "วันที่วันนี้/เมื่อวาน/เดือนก่อน (ปฏิทินไทย พ.ศ. สำหรับช่องวันที่)",
+   "do": "db.query",
+   "sql": "with b as (select (now() at time zone 'Asia/Bangkok')::date d), x as (select d, d - 1 as y, (date_trunc('month', d) - interval '1 month')::date as pf, (date_trunc('month', d)::date - 1) as pt, (date_trunc('month', d) + interval '1 month')::date as nf, (date_trunc('month', d) + interval '2 month')::date - 1 as nt from b) select to_char(d, 'YYYY-MM-DD') as today, to_char(d, 'DD/MM/') || (extract(year from d)::int + 543) as today_th, to_char(y, 'DD/MM/') || (extract(year from y)::int + 543) as yday_th, to_char(pf, 'DD/MM/') || (extract(year from pf)::int + 543) as pm_from_th, to_char(pt, 'DD/MM/') || (extract(year from pt)::int + 543) as pm_to_th, to_char(nf, 'DD/MM/') || (extract(year from nf)::int + 543) as nm_from_th, to_char(nt, 'DD/MM/') || (extract(year from nt)::int + 543) as nm_to_th, to_char(y, 'YYYY-MM-DD') as yday from x",
+   "rows": 1,
+   "save": {
+    "today": "today",
+    "today_th": "today_th",
+    "yday_th": "yday_th",
+    "pm_from_th": "pm_from_th",
+    "pm_to_th": "pm_to_th",
+    "nm_from_th": "nm_from_th",
+    "nm_to_th": "nm_to_th",
+    "yday": "yday"
+   }
+  },
+  {
+   "title": "เลือกลูกค้า/สินค้า/คลัง/ราคา/อัตราภาษีจากบิลขายเชื่อจริงล่าสุด (ราคา 2 ตำแหน่ง ภาษีแยกนอก)",
+   "do": "db.query",
+   "sql": "select t.cust_code as cust, coalesce(nullif(t.doc_format_code, ''), 'SI') as cr_fmt, d.item_code as item, d.unit_code as unit, d.wh_code as wh, d.shelf_code as shelf, d.stand_value::text as stand, d.divide_value::text as divide, d.price::text as price, t.vat_rate::text as vat_rate, (select x.doc_format_code from ic_trans x where x.trans_flag = 44 and x.inquiry_type = 1 and x.doc_no not like 'UAT%' and coalesce(x.doc_format_code, '') <> '' order by x.doc_date desc, x.roworder desc limit 1) as ca_fmt from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag join ar_customer c on c.code = t.cust_code join ic_inventory i on i.code = d.item_code where t.trans_flag = 44 and t.inquiry_type = 0 and t.vat_type = 0 and t.vat_rate > 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 and d.price > 0 and d.price = round(d.price, 2) and d.tax_type = 0 and d.stand_value > 0 and d.divide_value > 0 order by t.doc_date desc, t.roworder desc limit 1",
+   "rows": 1,
+   "save": {
+    "cust": "cust",
+    "cr_fmt": "cr_fmt",
+    "ca_fmt": "ca_fmt",
+    "item": "item",
+    "unit": "unit",
+    "wh": "wh",
+    "shelf": "shelf",
+    "stand": "stand",
+    "divide": "divide",
+    "price": "price",
+    "vat_rate": "vat_rate"
+   }
+  },
+  {
+   "title": "คำนวณยอดที่คาดจาก จำนวน × ราคา และอัตราภาษี (SCR 2 หน่วย, SCA 3 หน่วย)",
+   "do": "db.query",
+   "sql": "with c as (select round(2 * :'price'::numeric, 2) as cb, round(3 * :'price'::numeric, 2) as ab, :'vat_rate'::numeric as rt), v as (select cb, ab, round(cb * rt / 100, 2) as cv, round(ab * rt / 100, 2) as av, rt from c), m as (select *, cb + cv as ct, ab + av as at, cb + ab as sb, cv + av as sv from v) select cb::text as cr_base, cv::text as cr_vat, ct::text as cr_total, ab::text as ca_base, av::text as ca_vat, at::text as ca_total, sb::text as sum_base, sv::text as sum_vat, (ct + at)::text as sum_total, round(cb + cb * rt / 100, 2)::text as cr_incl, to_char(ct, 'FM999,999,999,990.00') as cr_total_f, to_char(at, 'FM999,999,999,990.00') as ca_total_f, to_char(sb, 'FM999,999,999,990.00') as sum_base_f, to_char(sv, 'FM999,999,999,990.00') as sum_vat_f, to_char(ct + at, 'FM999,999,999,990.00') as sum_total_f from m",
+   "rows": 1,
+   "save": {
+    "cr_base": "cr_base",
+    "cr_vat": "cr_vat",
+    "cr_total": "cr_total",
+    "ca_base": "ca_base",
+    "ca_vat": "ca_vat",
+    "ca_total": "ca_total",
+    "sum_base": "sum_base",
+    "sum_vat": "sum_vat",
+    "sum_total": "sum_total",
+    "cr_incl": "cr_incl",
+    "cr_total_f": "cr_total_f",
+    "ca_total_f": "ca_total_f",
+    "sum_base_f": "sum_base_f",
+    "sum_vat_f": "sum_vat_f",
+    "sum_total_f": "sum_total_f"
+   }
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "บันทึกบิลขายเชื่อ SCR 2 หน่วย ภาษีแยกนอก",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/save",
+   "body": {
+    "isNew": true,
+    "confirmed": true,
+    "docNo": "{{sc}}",
+    "docDate": "{{today}}",
+    "transType": 2,
+    "transFlag": 44,
+    "inquiryType": 0,
+    "custCode": "{{cust}}",
+    "docFormatCode": "{{cr_fmt}}",
+    "taxDocNo": "{{sc}}",
+    "taxDocDate": "{{today}}",
+    "vatType": 0,
+    "vatRate": "{{vat_rate}}",
+    "remark": "{{run.tag}}",
+    "lines": [
+     {
+      "itemCode": "{{item}}",
+      "unitCode": "{{unit}}",
+      "whCode": "{{wh}}",
+      "shelfCode": "{{shelf}}",
+      "standValue": "{{stand}}",
+      "divideValue": "{{divide}}",
+      "qty": "2",
+      "price": "{{price}}",
+      "sumAmount": "{{cr_base}}",
+      "taxType": 0
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "data.docNo",
+     "op": "eq",
+     "value": "{{sc}}"
+    }
+   ]
+  },
+  {
+   "title": "บันทึกบิลขายสด SCA 3 หน่วย รับเงินสดเต็มจำนวน",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/save",
+   "body": {
+    "isNew": true,
+    "confirmed": true,
+    "docNo": "{{sa}}",
+    "docDate": "{{today}}",
+    "transType": 2,
+    "transFlag": 44,
+    "inquiryType": 1,
+    "custCode": "{{cust}}",
+    "docFormatCode": "{{ca_fmt}}",
+    "taxDocNo": "{{sa}}",
+    "taxDocDate": "{{today}}",
+    "vatType": 0,
+    "vatRate": "{{vat_rate}}",
+    "remark": "{{run.tag}}",
+    "lines": [
+     {
+      "itemCode": "{{item}}",
+      "unitCode": "{{unit}}",
+      "whCode": "{{wh}}",
+      "shelfCode": "{{shelf}}",
+      "standValue": "{{stand}}",
+      "divideValue": "{{divide}}",
+      "qty": "3",
+      "price": "{{price}}",
+      "sumAmount": "{{ca_base}}",
+      "taxType": 0
+     }
+    ],
+    "pay": {
+     "cash": "{{ca_total}}",
+     "payCashAmount": "{{ca_total}}"
+    }
+   },
+   "expect": [
+    {
+     "path": "data.docNo",
+     "op": "eq",
+     "value": "{{sa}}"
+    }
+   ]
+  },
+  {
+   "title": "หัวบิลทั้งสองใบในฐานข้อมูลตรงยอดที่คำนวณ (ไม่ใช่ POS)",
+   "do": "db.query",
+   "sql": "select (select total_before_vat::text from ic_trans where doc_no = :'sc' and trans_flag = 44) as cb, (select total_amount::text from ic_trans where doc_no = :'sc' and trans_flag = 44) as ct, (select total_amount::text from ic_trans where doc_no = :'sa' and trans_flag = 44) as at, (select count(*) from ic_trans where doc_no in (:'sc', :'sa') and trans_flag = 44 and coalesce(is_pos, 0) = 0 and coalesce(last_status, 0) = 0) as live_non_pos",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "cb",
+     "op": "eq",
+     "value": "{{cr_base}}"
+    },
+    {
+     "col": "ct",
+     "op": "eq",
+     "value": "{{cr_total}}"
+    },
+    {
+     "col": "at",
+     "op": "eq",
+     "value": "{{ca_total}}"
+    },
+    {
+     "col": "live_non_pos",
+     "op": "eq",
+     "value": "2"
+    }
+   ]
+  },
+  {
+   "title": "เปิดเมนู รายงานขายสินค้าและบริการ",
+   "do": "ui.openMenu",
+   "key": "menu_so_report_invoice"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสลูกค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{cust}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสลูกค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{cust}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขเอกสารรอบนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{kw}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมทั้งสิ้น 2 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(2 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ sale-report-2-rows",
+   "do": "ui.screenshot",
+   "name": "sale-report-2-rows",
+   "continueOnFail": true
+  },
+  {
+   "title": "SCR: เลขที่เอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=2",
+   "op": "eq",
+   "text": "{{sc}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "SCR: รหัสลูกหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=6",
+   "op": "eq",
+   "text": "{{cust}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "SCR: มูลค่าสินค้า = 2 × ราคา",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=8",
+   "op": "eq",
+   "text": "{{cr_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "SCR: มูลค่าส่วนลด ว่าง (ไม่มีส่วนลด)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=9",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "SCR: มูลค่าหลังหักส่วนลด",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=10",
+   "op": "eq",
+   "text": "{{cr_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "SCR: ภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=13",
+   "op": "eq",
+   "text": "{{cr_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "SCR: มูลค่าสุทธิ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=15",
+   "op": "eq",
+   "text": "{{cr_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "SCA: มูลค่าสินค้า = 3 × ราคา",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sa}}\") >> td >> nth=8",
+   "op": "eq",
+   "text": "{{ca_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "SCA: ภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sa}}\") >> td >> nth=13",
+   "op": "eq",
+   "text": "{{ca_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "SCA: มูลค่าสุทธิ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sa}}\") >> td >> nth=15",
+   "op": "eq",
+   "text": "{{ca_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมมูลค่าสินค้า",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{sum_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมมูลค่าหลังหักส่วนลด",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tfoot tr >> td >> nth=3",
+   "op": "eq",
+   "text": "{{sum_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tfoot tr >> td >> nth=6",
+   "op": "eq",
+   "text": "{{sum_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมมูลค่าสุทธิ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tfoot tr >> td >> nth=8",
+   "op": "eq",
+   "text": "{{sum_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "มีข้อมูล ปุ่ม ส่งออก CSV กดได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ส่งออก CSV\"):not([disabled])",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงค่าเริ่มต้น (วันที่/เลขที่): แถวแรกคือ SCA",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{sa}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงตาม มูลค่าสุทธิ (ประมวลผลทันที)",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] select:has(option:has-text(\"ค่าเริ่มต้นตามระบบ\"))",
+   "value": "มูลค่าสุทธิ",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงตามมูลค่าสุทธิน้อยไปมาก: แถวแรกคือ SCR (ยอดน้อยกว่า)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{sc}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับไปเรียงค่าเริ่มต้น",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] select:has(option:has-text(\"ค่าเริ่มต้นตามระบบ\"))",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงค่าเริ่มต้นอีกครั้ง: แถวแรกคือ SCA",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{sa}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "ประเภทการขาย = ขายเชื่อ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[name=\"rpt-cond-category_sale\"]",
+   "nth": 1,
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ขายเชื่อ: ไม่มีบิลขายสด SCA",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sa}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ขายเชื่อ: ยังมี SCR",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ประเภทการขาย = ขายสด",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[name=\"rpt-cond-category_sale\"]",
+   "nth": 2,
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ขายสด: ไม่มีบิลขายเชื่อ SCR",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ขายสด: มี SCA",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sa}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ขายสด: ท้ายตารางรวมมูลค่าสุทธิเท่ากับ SCA",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tfoot tr >> td >> nth=8",
+   "op": "eq",
+   "text": "{{ca_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ประเภทการขาย = ทั้งหมด",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[name=\"rpt-cond-category_sale\"]",
+   "nth": 0,
+   "continueOnFail": true
+  },
+  {
+   "title": "แสดงเฉพาะ = เฉพาะ POS",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[name=\"rpt-cond-show_pos_only\"]",
+   "nth": 1,
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เฉพาะ POS: ไม่มี SCR (ไม่ใช่ POS)",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เฉพาะ POS: ไม่มี SCA",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sa}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีข้อมูล ปุ่ม ส่งออก CSV ต้องกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ส่งออก CSV\")[disabled]",
+   "continueOnFail": true
+  },
+  {
+   "title": "แสดงเฉพาะ = เฉพาะที่ไม่ใช่ POS",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[name=\"rpt-cond-show_pos_only\"]",
+   "nth": 2,
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่ใช่ POS: มี SCR",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่ใช่ POS: มี SCA",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sa}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แสดงเฉพาะ = ทั้งหมด",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[name=\"rpt-cond-show_pos_only\"]",
+   "nth": 0,
+   "continueOnFail": true
+  },
+  {
+   "title": "แคชเชียร์ = รหัสที่ไม่มีจริง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"รหัสผู้ใช้ คั่นด้วย , (ว่าง = ทุกคน)\"]",
+   "value": "UAT{{run.short}}NOBODY",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องแคชเชียร์ (ประมวลผล)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"รหัสผู้ใช้ คั่นด้วย , (ว่าง = ทุกคน)\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "แคชเชียร์ไม่ตรง: ไม่มี SCR",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างช่องแคชเชียร์",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"รหัสผู้ใช้ คั่นด้วย , (ว่าง = ทุกคน)\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องแคชเชียร์",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"รหัสผู้ใช้ คั่นด้วย , (ว่าง = ทุกคน)\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างแคชเชียร์แล้ว: SCR กลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = (ว่าง)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = (ว่าง)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสลูกหนี้เพิ่มเติม = รหัสอื่น",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "value": "{{cust}}9Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องช่วงรหัสลูกหนี้",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสไม่ครอบลูกค้า: ไม่มี SCR",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสลูกหนี้เพิ่มเติม = ลูกค้าของเรา",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "value": "{{cust}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องช่วงรหัสลูกหนี้",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสครอบลูกค้า: SCR กลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสครอบลูกค้า: SCA กลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sa}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างช่วงรหัสลูกหนี้เพิ่มเติม",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = ZZZZZZZZZZ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "ZZZZZZZZZZ",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัสลูกหนี้เกินรหัสลูกค้า: ไม่มี SCR",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสลูกค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{cust}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสลูกค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{cust}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รหัสลูกหนี้ตรง: SCR กลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "การแสดงมูลค่า = แสดงตัวเลขแบบรวมในทั้งหมด",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[name=\"rpt-cond-vat_display_type\"]",
+   "nth": 2,
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รวมใน: มูลค่าสินค้า SCR = ฐาน + ภาษีตามอัตราของบิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=8",
+   "op": "eq",
+   "text": "{{cr_incl}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "การแสดงมูลค่า = แสดงตัวเลขแบบแยกนอกทั้งหมด",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[name=\"rpt-cond-vat_display_type\"]",
+   "nth": 1,
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "แยกนอก: บิลภาษีแยกนอกอยู่แล้ว มูลค่าสินค้า SCR = ฐานเดิม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=8",
+   "op": "eq",
+   "text": "{{cr_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "การแสดงมูลค่า = ปรกติ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[name=\"rpt-cond-vat_display_type\"]",
+   "nth": 0,
+   "continueOnFail": true
+  },
+  {
+   "title": "ติ๊ก แสดงเอกสารที่ยกเลิก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] label:has-text(\"แสดงเอกสารที่ยกเลิก\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "แสดงเอกสารยกเลิก: เอกสารเราไม่ถูกยกเลิก ยังรวม 2 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(2 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เอาติ๊ก แสดงเอกสารที่ยกเลิก ออก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] label:has-text(\"แสดงเอกสารที่ยกเลิก\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "วันที่เมื่อวาน: ไม่มี SCR",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีข้อมูล ปุ่ม ส่งออก CSV ต้องกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ส่งออก CSV\")[disabled]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "วันที่วันนี้: กลับมา 2 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(2 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด แสดงรายละเอียดสินค้า",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"แสดงรายละเอียดสินค้า\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด SCR: รหัสสินค้า",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=5",
+   "op": "eq",
+   "text": "{{item}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด SCR: จำนวน 2",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=10",
+   "op": "eq",
+   "text": "2",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด SCR: ราคา",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=11",
+   "op": "eq",
+   "text": "{{price}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด SCR: รวมมูลค่า",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=14",
+   "op": "eq",
+   "text": "{{cr_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด SCA: จำนวน 3",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sa}}\") >> td >> nth=10",
+   "op": "eq",
+   "text": "3",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ sale-report-detail",
+   "do": "ui.screenshot",
+   "name": "sale-report-detail",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับไป สรุปตามเอกสาร",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"สรุปตามเอกสาร\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "สรุปตามเอกสาร: SCR มูลค่าสุทธิ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=15",
+   "op": "eq",
+   "text": "{{cr_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จัดกลุ่มชั้นที่ 1 ตาม รหัสลูกหนี้",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "รหัสลูกหนี้",
+   "continueOnFail": true
+  },
+  {
+   "title": "มีแถวรวมกลุ่มของลูกค้า (2 รายการ)",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{cust}} (2\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รวมกลุ่มลูกค้า: มูลค่าสุทธิ = SCR + SCA",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{cust}} (2\") >> td >> nth=8",
+   "op": "eq",
+   "text": "{{sum_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รวมกลุ่มลูกค้า: ภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] table tbody tr:has-text(\"{{cust}} (2\") >> td >> nth=6",
+   "op": "eq",
+   "text": "{{sum_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ sale-report-group",
+   "do": "ui.screenshot",
+   "name": "sale-report-group",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับเป็นอัตโนมัติ",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดแท็บ รูปแบบรายงาน (Studio)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"รูปแบบรายงาน (\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งชื่อหัวรายงานกำหนดเอง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"เช่น รายงานตรวจนับสินค้าคงคลังประจำเดือน...\"]",
+   "value": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งคำโปรยหัวกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"เช่น สำหรับฝ่ายบริหารและผู้สอบบัญชี...\"]",
+   "value": "UAT-{{run.short}}-SUB",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งหมายเหตุท้ายกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] input[placeholder=\"เช่น เอกสารภายในองค์กร ห้ามเผยแพร่...\"]",
+   "value": "UAT-{{run.short}}-FOOT",
+   "continueOnFail": true
+  },
+  {
+   "title": "หัวรายงานบนจอเปลี่ยนเป็นชื่อที่ตั้ง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] h1",
+   "op": "contains",
+   "text": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม พิมพ์รายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_so_report_invoice\"] button:has-text(\"พิมพ์รายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าต่างตั้งค่าหน้ากระดาษเปิด",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"][aria-label=\"หน้าต่างตั้งค่าหน้ากระดาษและพิมพ์รายงาน PDF ส่วนกลาง\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวนอน",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวนอน ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวนอน: มีเลขเอกสาร ยอดเงิน หัว/ท้ายรายงานที่ตั้ง",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{sc}}",
+    "{{sa}}",
+    "{{cr_total_f}}",
+    "{{ca_total_f}}",
+    "{{sum_base_f}}",
+    "{{sum_vat_f}}",
+    "{{sum_total_f}}",
+    "UAT-{{run.short}}-TITLE",
+    "UAT-{{run.short}}-SUB",
+    "UAT-{{run.short}}-FOOT"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวตั้ง",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวตั้ง ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวตั้ง: ยังมีเลขเอกสารและยอดเงินครบ",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{sc}}",
+    "{{sa}}",
+    "{{cr_total_f}}",
+    "{{ca_total_f}}",
+    "{{sum_base_f}}",
+    "{{sum_vat_f}}",
+    "{{sum_total_f}}",
+    "UAT-{{run.short}}-TITLE"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "ปิดหน้าต่างพิมพ์",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"ปิดหน้าต่าง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอพิมพ์ไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดเมนู รายงานภาษีขาย",
+   "do": "ui.openMenu",
+   "key": "menu_report_vat_sale"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = ค่าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{sa}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = ค่าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{sc}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขเอกสารรอบนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{kw}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีขาย: รวม 2 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(2 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีขาย SCR: เลขที่ใบกำกับ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=3",
+   "op": "eq",
+   "text": "{{sc}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีขาย SCR: มูลค่าสินค้า/บริการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=8",
+   "op": "eq",
+   "text": "{{cr_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีขาย SCR: ภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=9",
+   "op": "eq",
+   "text": "{{cr_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีขาย SCR: รวม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] table tbody tr:has-text(\"{{sc}}\") >> td >> nth=10",
+   "op": "eq",
+   "text": "{{cr_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีขาย SCA: ภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] table tbody tr:has-text(\"{{sa}}\") >> td >> nth=9",
+   "op": "eq",
+   "text": "{{ca_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีขาย: รวมมูลค่าสินค้า/บริการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{sum_base}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีขาย: รวมภาษีมูลค่าเพิ่ม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] table tfoot tr >> td >> nth=2",
+   "op": "eq",
+   "text": "{{sum_vat}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาษีขาย: รวมทั้งสิ้น",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] table tfoot tr >> td >> nth=3",
+   "op": "eq",
+   "text": "{{sum_total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ vat-sale-report",
+   "do": "ui.screenshot",
+   "name": "vat-sale-report",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันแรกของเดือนก่อน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{pm_from_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันสุดท้ายของเดือนก่อน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{pm_to_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "งวดภาษีเดือนก่อน: ไม่มี SCR",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] table tbody tr:has-text(\"{{sc}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบบิลขายสดทดสอบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/delete",
+   "body": {
+    "docNo": "{{sa}}",
+    "transFlag": 44
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ลบบิลขายเชื่อทดสอบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/delete",
+   "body": {
+    "docNo": "{{sc}}",
+    "transFlag": 44
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือแถวของเอกสารทดสอบในทุกตารางที่แตะ",
+   "do": "db.query",
+   "sql": "select (select count(*) from ic_trans where doc_no in (:'sc', :'sa')) + (select count(*) from ic_trans_detail where doc_no in (:'sc', :'sa')) + (select count(*) from ap_ar_trans where doc_no in (:'sc', :'sa')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'sc', :'sa')) + (select count(*) from cb_trans where doc_no in (:'sc', :'sa')) + (select count(*) from cb_trans_detail where doc_no in (:'sc', :'sa')) + (select count(*) from gl_journal where doc_no in (:'sc', :'sa')) + (select count(*) from gl_journal_detail where doc_no in (:'sc', :'sa')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'sc', :'sa')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'sc', :'sa')) as left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}

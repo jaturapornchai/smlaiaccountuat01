@@ -1,0 +1,1542 @@
+{
+  "id": "wf-buy-ui-payment-wht",
+  "module": "purchase",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 900000,
+  "title": "หน้าจอจ่ายชำระหนี้: ดึงบิลค้างชำระ หักภาษี ณ ที่จ่าย คำนวณเงินสด บันทึกตรงฐานข้อมูล เปิดซ้ำ พิมพ์ Document Flow รายงาน PDF และลบผ่านหน้าจอ",
+  "description": "ทำผ่านหน้าจอจริงแบบผู้ใช้ Demo: เตรียมบิลซื้อเชื่อ 10 ชิ้นผ่าน API (หน้าจอบิลซื้อทดสอบแล้วใน wf-buy-ui-invoice-from-po) เจ้าหนี้จริงที่มีเลขประจำตัวผู้เสียภาษีและไม่มีหนี้ค้าง สินค้า ราคา อัตราภาษี อัตราภาษีหัก ณ ที่จ่ายและประเภทเงินได้อ่านจากข้อมูลจริงตอนรัน ยอดที่คาดหวังคำนวณด้วย SQL · จอจ่ายชำระ: เลือกเจ้าหนี้ ดึงเอกสารค้างชำระ (ตรวจแถวบิล ยอดหนี้ คงเหลือ ยอดชำระ) แท็บภาษีหัก ณ ที่จ่าย เพิ่มใบ (เจ้าหนี้/ชื่อ/เลขผู้เสียภาษี/ประเภทดึงอัตโนมัติ) กรอกประเภทเงินได้ ฐาน อัตรา → ภาษีคำนวณเอง แท็บรับ/จ่ายชำระ ตรวจยอดสุทธิ ภาษีหัก ส่วนที่เหลือ กดคำนวณยอดเงินสด → ครบยอด บันทึก → ตรวจหัว รายการจ่าย เงินสด หัก ณ ที่จ่าย GL หนี้ค้างหมด · เปิดซ้ำจากรายการตรวจทุกแท็บ · พิมพ์ฟอร์ม Document Flow รายงานจ่ายชำระ PDF · ลบผ่านหน้าจอแล้วบิลกลับมาค้างเต็มยอด · cleanup ผ่าน API พิสูจน์ว่าไม่เหลือแถว",
+  "steps": [
+    {
+      "title": "กำหนดเลขที่บิลซื้อทดสอบ (สร้างผ่าน API)",
+      "do": "set",
+      "name": "pu",
+      "value": "UAT-{{run.short}}-UPU"
+    },
+    {
+      "title": "กำหนดเลขที่ใบจ่ายชำระทดสอบ",
+      "do": "set",
+      "name": "de",
+      "value": "UAT-{{run.short}}-UDE"
+    },
+    {
+      "title": "กำหนดเลขที่เอกสารหัก ณ ที่จ่ายทดสอบ",
+      "do": "set",
+      "name": "wt",
+      "value": "UAT-{{run.short}}-UWT"
+    },
+    {
+      "title": "จำนวนซื้อ",
+      "do": "set",
+      "name": "q_pu",
+      "value": "10"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "วันที่วันนี้ (ค.ศ./พ.ศ.) และวันที่ +15/+7 วัน สำหรับเทียบช่องวันที่บนหน้าจอ",
+      "do": "db.query",
+      "sql": "with d as (select (now() at time zone 'Asia/Bangkok')::date as t)\n   select to_char(t, 'YYYY-MM-DD') as today, to_char(t, 'DD/MM/') || (extract(year from t)::int + 543)::text as today_be,\n     to_char(t + 15, 'DD/MM/') || (extract(year from t + 15)::int + 543)::text as exp_be, to_char(t + 7, 'DD/MM/') || (extract(year from t + 7)::int + 543)::text as send_be from d",
+      "rows": 1,
+      "save": {
+        "today": "today",
+        "today_be": "today_be",
+        "exp_be": "exp_be",
+        "send_be": "send_be"
+      }
+    },
+    {
+      "title": "เลือกสินค้าจริงลำดับที่ 6 (เรียงตามรหัส) ที่มีหน่วยนับ 1:1 คลังและที่เก็บจริง พร้อมราคาซื้อและอัตราภาษีจากบิลซื้อจริงล่าสุดของสินค้านั้น",
+      "do": "db.query",
+      "sql": "select x.item, x.unit, x.wh, x.shelf, x.stand, x.divide, x.price, x.rate, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today from (select distinct on (d.item_code) d.item_code as item, d.unit_code as unit, d.wh_code as wh, d.shelf_code as shelf, d.stand_value::text as stand, d.divide_value::text as divide, d.price::text as price, t.vat_rate::text as rate from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag join ic_inventory i on i.code = d.item_code join ic_unit_use u on u.ic_code = d.item_code and u.code = d.unit_code and u.stand_value = 1 and u.divide_value = 1 join ic_warehouse w on w.code = d.wh_code join ic_shelf sh on sh.code = d.shelf_code and coalesce(nullif(sh.whcode, ''), sh.wh_code) = d.wh_code where t.trans_flag = 12 and t.inquiry_type = 0 and t.vat_type = 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 and d.price > 0 and coalesce(d.discount, '') = '' and d.stand_value = 1 and d.divide_value = 1 and coalesce(d.tax_type, 0) = 0 and coalesce(d.is_permium, 0) = 0 and coalesce(i.item_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0 order by d.item_code, t.doc_date desc, t.roworder desc) x order by x.item offset 5 limit 1",
+      "rows": 1,
+      "save": {
+        "item": "item",
+        "unit": "unit",
+        "wh": "wh",
+        "shelf": "shelf",
+        "stand": "stand",
+        "divide": "divide",
+        "price": "price",
+        "rate": "rate",
+        "today": "today"
+      }
+    },
+    {
+      "title": "เลือกเจ้าหนี้จริงที่ไม่มีเอกสารเจ้าหนี้ค้าง ไม่มีส่วนลดตั้งต้น ชื่อบางส่วนค้นแล้วเจอรายเดียว (เลือกรายที่มีเลขประจำตัวผู้เสียภาษีก่อน เลือกวนตามจำนวนผู้เข้าเกณฑ์จึงไม่ว่าง)",
+      "do": "db.query",
+      "sql": "with cand as (select s.code, s.name_1, substr(s.name_1, 2) as frag, coalesce(trim(sd.tax_id), '') as tax_id, coalesce(s.ap_status, 0) as ap_status from ap_supplier s left join ap_supplier_detail sd on sd.ap_code = s.code\n         where coalesce(s.status, 0) = 0 and length(coalesce(s.name_1, '')) >= 6 and s.code ~ '^[A-Z0-9-]+$' and coalesce(trim(sd.discount_item), '') in ('', '0')\n           and coalesce(s.ap_status, 0) in (0, 1) and (select count(*) from ap_supplier_detail y where y.ap_code = s.code) <= 1\n           and not exists (select 1 from ic_trans t where t.cust_code = s.code and coalesce(t.last_status, 0) = 0 and t.trans_flag in (10, 11, 12, 14, 16, 20, 25, 81, 83, 85, 87, 89, 91, 260, 262, 264, 310, 315, 316, 317))\n           and not exists (select 1 from ap_ar_trans a where a.cust_code = s.code and coalesce(a.last_status, 0) = 0)),\n         ok as (select *, row_number() over (order by (tax_id <> '') desc, code desc) as rn, count(*) over () as n from cand\n           where (select count(*) from ap_supplier x where x.name_1 ilike '%' || replace(replace(cand.frag, '%', '\\%'), '_', '\\_') || '%') = 1)\n         select code as supp, name_1 as sname, frag as sfrag, tax_id as supp_tax, ap_status::text as supp_status, case when ap_status = 1 then 'นิติบุคคล' else 'บุคคลธรรมดา' end as supp_type\n         from ok where rn = (4 % n) + 1",
+      "rows": 1,
+      "save": {
+        "supp": "supp",
+        "sname": "sname",
+        "sfrag": "sfrag",
+        "supp_tax": "supp_tax",
+        "supp_status": "supp_status",
+        "supp_type": "supp_type"
+      }
+    },
+    {
+      "title": "อ่านอัตราภาษีหัก ณ ที่จ่ายจริงใน smldemo และประเภทเงินได้ของสินค้า (ต้องมีจริง)",
+      "do": "db.query",
+      "sql": "select coalesce(nullif((select wht_rate from erp_option limit 1), 0), (select tax_rate from gl_wht_list_detail where tax_rate > 0 group by tax_rate order by count(*) desc, tax_rate limit 1), (select wht_tax_rate from tms_fleet_vehicle where wht_tax_rate > 0 group by wht_tax_rate order by count(*) desc, wht_tax_rate limit 1))::text as wrate, (select l.code from ic_inventory i join erp_income_list l on l.code = i.income_type where i.code = :'item') as income",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "wrate",
+          "op": "gt",
+          "value": "0"
+        },
+        {
+          "col": "income",
+          "op": "exists",
+          "value": ""
+        }
+      ],
+      "save": {
+        "wrate": "wrate",
+        "income": "income"
+      }
+    },
+    {
+      "title": "คำนวณยอดที่คาดหวัง: บิลซื้อ 10 (ราคาจริง × จำนวน ภาษีแยกนอก) ภาษีหัก ณ ที่จ่าย = ฐาน × อัตรา / 100 เงินสด = ยอดบิล − ภาษีหัก",
+      "do": "db.query",
+      "sql": "with m as (select round(:'q_pu'::numeric * :'price'::numeric, 2)::text as pu_sum, round(round(:'q_pu'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as pu_vat, (round(:'q_pu'::numeric * :'price'::numeric, 2) + round(round(:'q_pu'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as pu_total), w as (select *, round(pu_sum::numeric * :'wrate'::numeric / 100, 2) as w0 from m)\n         select pu_sum, pu_vat, pu_total, w0::text as wht, (pu_total::numeric - w0)::text as cash, to_char(pu_total::numeric, 'FM999,999,999,990.00') as pu_total_fmt, to_char(pu_total::numeric - w0, 'FM999,999,999,990.00') as cash_fmt from w",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "wht",
+          "op": "gt",
+          "value": "0"
+        }
+      ],
+      "save": {
+        "pu_sum": "pu_sum",
+        "pu_vat": "pu_vat",
+        "pu_total": "pu_total",
+        "wht": "wht",
+        "cash": "cash",
+        "pu_total_fmt": "pu_total_fmt",
+        "cash_fmt": "cash_fmt"
+      }
+    },
+    {
+      "title": "หาบัญชีภาษีหัก ณ ที่จ่ายค้างจ่ายจากผังบัญชีจริง",
+      "do": "db.query",
+      "sql": "select code as wht_acct from gl_chart_of_account where name_1 like 'ภาษีหัก ณ ที่จ่าย%ค้างจ่าย%' order by code limit 1",
+      "rows": 1,
+      "save": {
+        "wht_acct": "wht_acct"
+      }
+    },
+    {
+      "title": "บันทึกซื้อเชื่อ (บิลซื้อ ภาษีแยกนอก)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{pu}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 12,
+        "inquiryType": 0,
+        "custCode": "{{supp}}",
+        "docFormatCode": "PU",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "{{stand}}",
+            "divideValue": "{{divide}}",
+            "qty": "{{q_pu}}",
+            "price": "{{price}}",
+            "sumAmount": "{{pu_sum}}",
+            "taxType": 0
+          }
+        ],
+        "taxDocNo": "{{pu}}",
+        "taxDocDate": "{{today}}"
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{pu}}"
+        }
+      ]
+    },
+    {
+      "title": "อ่านบัญชีเจ้าหนี้และบัญชีภาษีซื้อที่บิลซื้อทดสอบนี้ลงไว้จริง (ใช้เทียบกับเอกสารถัดไป)",
+      "do": "db.query",
+      "sql": "select (select account_code from gl_journal_detail where doc_no = :'pu' and credit = :'pu_total'::numeric order by account_code limit 1) as ap_acct, (select account_code from gl_journal_detail where doc_no = :'pu' and debit = :'pu_vat'::numeric order by account_code limit 1) as vat_acct",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "ap_acct",
+          "op": "exists",
+          "value": ""
+        },
+        {
+          "col": "vat_acct",
+          "op": "exists",
+          "value": ""
+        }
+      ],
+      "save": {
+        "ap_acct": "ap_acct",
+        "vat_acct": "vat_acct"
+      }
+    },
+    {
+      "title": "หนี้ค้างก่อนจ่าย (API): บิลซื้อของเราเต็มยอด รายการเดียว",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/bills",
+      "body": {
+        "transFlag": 19,
+        "custCode": "{{supp}}",
+        "docDate": "{{today}}",
+        "docNo": ""
+      },
+      "expect": [
+        {
+          "path": "data.length",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "path": "data.0.billingNo",
+          "op": "eq",
+          "value": "{{pu}}"
+        },
+        {
+          "path": "data.0.balanceRef",
+          "op": "eq",
+          "value": "{{pu_total}}"
+        }
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอจ่ายชำระหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_ap_debt_billing"
+    },
+    {
+      "title": "กดปุ่มเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:text-is(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "อยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "กรอกเลขที่ใบจ่ายชำระทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{de}}"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาเจ้าหนี้ (ด้วยชื่อบางส่วน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button[title=\"ค้นหา\"]"
+    },
+    {
+      "title": "หน้าต่างค้นหาเจ้าหนี้ (ด้วยชื่อบางส่วน)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาเจ้าหนี้ (ด้วยชื่อบางส่วน): {{sfrag}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{sfrag}}"
+    },
+    {
+      "title": "ผลค้นหามีแถวรหัส {{supp}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{supp}}\"))"
+    },
+    {
+      "title": "คลิกเลือกแถวรหัส {{supp}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{supp}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาเจ้าหนี้ (ด้วยชื่อบางส่วน)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสเจ้าหนี้ = รหัสที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{supp}}",
+      "op": "eq"
+    },
+    {
+      "title": "ชื่อเจ้าหนี้ = ชื่อในทะเบียน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] textarea[placeholder=\"ชื่อเจ้าหนี้ / ลูกหนี้...\"]",
+      "value": "{{sname}}",
+      "op": "eq"
+    },
+    {
+      "title": "กรอกหมายเหตุ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}}"
+    },
+    {
+      "title": "กด ดึงเอกสารค้างชำระ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:has-text(\"ดึงเอกสารค้างชำระ\")"
+    },
+    {
+      "title": "หลังดึงเอกสารค้างชำระ: แถวที่ 1 เลขที่เอกสาร = บิลซื้อของเรา",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"เลขที่เอกสาร\"]/preceding-sibling::th)+1]",
+      "text": "{{pu}}",
+      "op": "contains"
+    },
+    {
+      "title": "หลังดึงเอกสารค้างชำระ: วันที่บิล = วันนี้",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"วันที่\"]/preceding-sibling::th)+1]",
+      "text": "{{today_be}}",
+      "op": "contains"
+    },
+    {
+      "title": "หลังดึงเอกสารค้างชำระ: ประเภท = ซื้อสินค้า/ตั้งหนี้ซื้อ",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ประเภท\"]/preceding-sibling::th)+1]",
+      "text": "ซื้อสินค้า/ตั้งหนี้ซื้อ",
+      "op": "contains"
+    },
+    {
+      "title": "หลังดึงเอกสารค้างชำระ: ยอดหนี้ = ยอดบิลซื้อ",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ยอดหนี้\"]/preceding-sibling::th)+1]",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "หลังดึงเอกสารค้างชำระ: ยอดคงเหลือ = ยอดบิลซื้อ",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ยอดคงเหลือ\"]/preceding-sibling::th)+1]",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "หลังดึงเอกสารค้างชำระ: ยอดชำระ = ยอดคงเหลือ (จ่ายเต็ม)",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ยอดชำระ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "หลังดึงเอกสารค้างชำระ: มีบิลแถวเดียว",
+      "do": "ui.expectVisible",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[2]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"เลขที่เอกสาร\"]/preceding-sibling::th)+1]",
+      "visible": false
+    },
+    {
+      "title": "หลังดึงเอกสารค้างชำระ: ท้ายตาราง รวม 1 รายการ = ยอดบิลซื้อ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] tfoot td:text-is(\"รวม 1 รายการ:\") + td",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "หลังดึงเอกสารค้างชำระ: รวมมูลค่าทั้งสิ้น = ยอดชำระรวม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] label:text-is(\"รวมมูลค่าทั้งสิ้น:\") + div",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดแท็บการรับ/จ่ายชำระเงิน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:text-is(\"การรับ/จ่ายชำระเงิน\"):visible"
+    },
+    {
+      "title": "ก่อนหักภาษี: 1. ยอดตามเอกสาร = ยอดบิลซื้อ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> span:text-is(\"1. ยอดตามเอกสาร\")) > span.font-mono",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนหักภาษี: ยอดสุทธิที่ต้องจ่าย = ยอดบิลซื้อ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> span:text-is(\"ยอดสุทธิที่ต้องรับ/จ่ายชำระ (1 + 2)\")) > span.font-mono",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนหักภาษี: ไม่มีแถว 8. ภาษีหัก ณ ที่จ่าย",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> span:text-is(\"8. ภาษีหัก ณ ที่จ่าย (นับเป็นยอดชำระ)\")) > span.font-mono",
+      "visible": false
+    },
+    {
+      "title": "ก่อนหักภาษี: ส่วนที่เหลือเป็นเงินสด = ยอดบิลซื้อ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> span:text-is(\"ส่วนที่เหลือเป็นเงินสด (ยอดสุทธิ หักรายการที่ 3 ถึง 8)\")) > span.font-mono",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนหักภาษี: สถานะ ค้างชำระเต็มยอดบิล",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] span:has-text(\"ค้างชำระอีก\")",
+      "text": "{{pu_total_fmt}}",
+      "op": "contains"
+    },
+    {
+      "title": "เปิดแท็บภาษีหัก ณ ที่จ่าย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:text-is(\"ภาษีหัก ณ. ที่จ่าย\"):visible"
+    },
+    {
+      "title": "กด เพิ่ม ใบหัก ณ ที่จ่าย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:text-is(\"เพิ่ม\"):visible"
+    },
+    {
+      "title": "กรอกเอกสารเลขที่หัก ณ ที่จ่าย",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"เอกสารเลขที่\")) input",
+      "value": "{{wt}}"
+    },
+    {
+      "title": "บรรทัด 1: กรอกประเภทเงินได้ของสินค้า",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[1]/td[2]//input",
+      "value": "{{income}}"
+    },
+    {
+      "title": "บรรทัด 1: กรอกฐานภาษี = ยอดก่อนภาษีมูลค่าเพิ่ม",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[1]/td[3]//input",
+      "value": "{{pu_sum}}"
+    },
+    {
+      "title": "ออกจากช่องฐานภาษี",
+      "do": "ui.press",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[1]/td[3]//input",
+      "key": "Tab"
+    },
+    {
+      "title": "บรรทัด 1: กรอกอัตราภาษีหัก ณ ที่จ่าย",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[1]/td[4]//input",
+      "value": "{{wrate}}"
+    },
+    {
+      "title": "ออกจากช่องอัตราภาษี",
+      "do": "ui.press",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[1]/td[4]//input",
+      "key": "Tab"
+    },
+    {
+      "title": "ก่อนบันทึก: รายการหัก ณ ที่จ่าย เอกสารเลขที่",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"เอกสารเลขที่\"] and thead//th[starts-with(normalize-space(), \"มูลค่าภาษีหัก ณ ที่จ่าย\")]]/tbody/tr[1]/td[1]",
+      "text": "{{wt}}",
+      "op": "contains"
+    },
+    {
+      "title": "ก่อนบันทึก: รายการหัก ณ ที่จ่าย รหัสเจ้าหนี้",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"เอกสารเลขที่\"] and thead//th[starts-with(normalize-space(), \"มูลค่าภาษีหัก ณ ที่จ่าย\")]]/tbody/tr[1]/td[2]",
+      "text": "{{supp}}",
+      "op": "contains"
+    },
+    {
+      "title": "ก่อนบันทึก: รายการหัก ณ ที่จ่าย ชื่อเจ้าหนี้",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"เอกสารเลขที่\"] and thead//th[starts-with(normalize-space(), \"มูลค่าภาษีหัก ณ ที่จ่าย\")]]/tbody/tr[1]/td[3]",
+      "text": "{{sname}}",
+      "op": "contains"
+    },
+    {
+      "title": "ก่อนบันทึก: รายการหัก ณ ที่จ่าย วันที่ = วันที่เอกสาร",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"เอกสารเลขที่\"] and thead//th[starts-with(normalize-space(), \"มูลค่าภาษีหัก ณ ที่จ่าย\")]]/tbody/tr[1]/td[4]",
+      "text": "{{today_be}}",
+      "op": "contains"
+    },
+    {
+      "title": "ก่อนบันทึก: รายการหัก ณ ที่จ่าย จำนวนเงิน = ฐาน",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"เอกสารเลขที่\"] and thead//th[starts-with(normalize-space(), \"มูลค่าภาษีหัก ณ ที่จ่าย\")]]/tbody/tr[1]/td[5]",
+      "text": "{{pu_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก: รายการหัก ณ ที่จ่าย มูลค่าภาษี",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"เอกสารเลขที่\"] and thead//th[starts-with(normalize-space(), \"มูลค่าภาษีหัก ณ ที่จ่าย\")]]/tbody/tr[1]/td[6]",
+      "text": "{{wht}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก: วันที่หัก ณ ที่จ่าย = วันที่เอกสาร",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"วันที่หัก ณ ที่จ่าย\")) input",
+      "value": "{{today_be}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก: เอกสารเลขที่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"เอกสารเลขที่\")) input",
+      "value": "{{wt}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก: รหัสเจ้าหนี้ = เจ้าหนี้ของเอกสาร",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) input",
+      "value": "{{supp}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก: ชื่อเจ้าหนี้จากทะเบียน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) span.truncate",
+      "text": "{{sname}}",
+      "op": "contains"
+    },
+    {
+      "title": "ก่อนบันทึก: ประเภทผู้เสียภาษีตามทะเบียนเจ้าหนี้: {{supp_type}}",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"ประเภท\")) span:has-text(\"{{supp_type}}\") input:checked"
+    },
+    {
+      "title": "ก่อนบันทึก: เลขประจำตัวผู้เสียภาษีจากทะเบียน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"เลขประจำตัวผู้เสียภาษี\")) input",
+      "value": "{{supp_tax}}",
+      "op": "same"
+    },
+    {
+      "title": "ก่อนบันทึก: บรรทัด 1 ประเภทเงินได้",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[1]/td[2]//input",
+      "value": "{{income}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก: บรรทัด 1 ฐานภาษี = ยอดก่อนภาษีมูลค่าเพิ่ม",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[1]/td[3]//input",
+      "value": "{{pu_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก: บรรทัด 1 อัตราภาษี = อัตราจริง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[1]/td[4]//input",
+      "value": "{{wrate}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก: บรรทัด 1 ภาษีหัก ณ ที่จ่าย = ฐาน × อัตรา / 100",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[1]/td[5]//input",
+      "value": "{{wht}}",
+      "op": "eq"
+    },
+    {
+      "title": "ก่อนบันทึก: มีบรรทัดเดียว",
+      "do": "ui.expectVisible",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[2]/td[2]//input",
+      "visible": false
+    },
+    {
+      "title": "ภาพแท็บภาษีหัก ณ ที่จ่ายก่อนบันทึก",
+      "do": "ui.screenshot",
+      "name": "de-wht-tab"
+    },
+    {
+      "title": "กลับแท็บการรับ/จ่ายชำระเงิน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:text-is(\"การรับ/จ่ายชำระเงิน\"):visible"
+    },
+    {
+      "title": "หลังหักภาษี: 1. ยอดตามเอกสาร = ยอดบิลซื้อ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> span:text-is(\"1. ยอดตามเอกสาร\")) > span.font-mono",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "หลังหักภาษี: ยอดสุทธิที่ต้องจ่าย = ยอดบิลซื้อ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> span:text-is(\"ยอดสุทธิที่ต้องรับ/จ่ายชำระ (1 + 2)\")) > span.font-mono",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "หลังหักภาษี: 8. ภาษีหัก ณ ที่จ่าย = ภาษีหักที่คำนวณ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> span:text-is(\"8. ภาษีหัก ณ ที่จ่าย (นับเป็นยอดชำระ)\")) > span.font-mono",
+      "text": "{{wht}}",
+      "op": "eq"
+    },
+    {
+      "title": "หลังหักภาษี: ส่วนที่เหลือเป็นเงินสด = ยอดบิล − ภาษีหัก",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> span:text-is(\"ส่วนที่เหลือเป็นเงินสด (ยอดสุทธิ หักรายการที่ 3 ถึง 8)\")) > span.font-mono",
+      "text": "{{cash}}",
+      "op": "eq"
+    },
+    {
+      "title": "หลังหักภาษี: สถานะ ค้างชำระอีก = เงินสดที่ต้องจ่าย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] span:has-text(\"ค้างชำระอีก\")",
+      "text": "{{cash_fmt}}",
+      "op": "contains"
+    },
+    {
+      "title": "ปุ่มคำนวณยอดเงินสดแสดงส่วนที่เหลือ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:has-text(\"คำนวณยอดเงินสด\")",
+      "text": "{{cash_fmt}}",
+      "op": "contains"
+    },
+    {
+      "title": "กด คำนวณยอดเงินสด",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:has-text(\"คำนวณยอดเงินสด\")"
+    },
+    {
+      "title": "ชำระด้วยเงินสด = ส่วนที่เหลือ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"ชำระด้วยเงินสด:\")) input",
+      "value": "{{cash}}",
+      "op": "eq"
+    },
+    {
+      "title": "สถานะ: ยอดจ่ายชำระครบถ้วนตรงตามยอดสุทธิ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] span:text-is(\"✓ ยอดรับ/จ่ายชำระครบถ้วนตรงตามยอดสุทธิ\")"
+    },
+    {
+      "title": "รวมจ่ายชำระทั้งสิ้น = ยอดบิลซื้อ (เงินสด + ภาษีหัก)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> div > span:text-is(\"รวมรับ/จ่ายชำระทั้งสิ้น:\")) > span.font-mono",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "ภาพแท็บจ่ายชำระก่อนบันทึก",
+      "do": "ui.screenshot",
+      "name": "de-pay-tab"
+    },
+    {
+      "title": "กลับแท็บรายการเอกสาร",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:text-is(\"รายการสินค้า / เอกสาร\"):visible"
+    },
+    {
+      "title": "กดปุ่มบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:text-is(\"บันทึก\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งบันทึกเอกสาร {{de}} เรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] span.whitespace-pre-line",
+      "text": "บันทึกเอกสาร {{de}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "หน้าต่างถามพิมพ์ฟอร์ม: กด ยังไม่พิมพ์",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")"
+    },
+    {
+      "title": "ปิดหน้าต่างถามพิมพ์แล้ว",
+      "do": "ui.expectVisible",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+      "visible": false
+    },
+    {
+      "title": "หลังบันทึกเป็นโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "ฐานข้อมูล: หัวใบจ่ายชำระ เจ้าหนี้ วันที่ รูปแบบเลขที่ หมายเหตุ ยอดสุทธิ = ยอดชำระรวม",
+      "do": "db.query",
+      "sql": "select trans_flag::text, cust_code, to_char(doc_date, 'YYYY-MM-DD') as doc_date, doc_format_code, remark, total_net_value::text from ap_ar_trans where doc_no = :'de'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "trans_flag",
+          "op": "eq",
+          "value": "19"
+        },
+        {
+          "col": "cust_code",
+          "op": "eq",
+          "value": "{{supp}}"
+        },
+        {
+          "col": "doc_date",
+          "op": "eq",
+          "value": "{{today}}"
+        },
+        {
+          "col": "doc_format_code",
+          "op": "eq",
+          "value": "DE"
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "{{run.tag}}"
+        },
+        {
+          "col": "total_net_value",
+          "op": "eq",
+          "value": "{{pu_total}}"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: รายการจ่าย ตัดหนี้บิลซื้อเต็มยอด",
+      "do": "db.query",
+      "sql": "select billing_no, bill_type::text, sum_debt_amount, balance_ref, sum_pay_money from ap_ar_trans_detail where doc_no = :'de' and trans_flag = 19",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "billing_no",
+          "op": "eq",
+          "value": "{{pu}}"
+        },
+        {
+          "col": "bill_type",
+          "op": "eq",
+          "value": "12"
+        },
+        {
+          "col": "sum_debt_amount",
+          "op": "eq",
+          "value": "{{pu_total}}"
+        },
+        {
+          "col": "balance_ref",
+          "op": "eq",
+          "value": "{{pu_total}}"
+        },
+        {
+          "col": "sum_pay_money",
+          "op": "eq",
+          "value": "{{pu_total}}"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: เงินสดจ่าย = ยอดบิล − ภาษีหัก และยอดภาษีหัก ณ ที่จ่ายในการจ่าย",
+      "do": "db.query",
+      "sql": "select coalesce(cash_amount, 0) as cash_amount, coalesce(total_tax_at_pay, 0) as total_tax_at_pay from cb_trans where doc_no = :'de' and trans_flag = 19",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cash_amount",
+          "op": "eq",
+          "value": "{{cash}}"
+        },
+        {
+          "col": "total_tax_at_pay",
+          "op": "eq",
+          "value": "{{wht}}"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: หัวรายการหัก ณ ที่จ่าย ฐาน ภาษี เลขที่ ผู้ถูกหัก วันที่",
+      "do": "db.query",
+      "sql": "select amount, tax_value, cust_code, trans_flag::text, tax_doc_no, to_char(due_date, 'YYYY-MM-DD') as due_date from gl_wht_list where doc_no = :'de'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{pu_sum}}"
+        },
+        {
+          "col": "tax_value",
+          "op": "eq",
+          "value": "{{wht}}"
+        },
+        {
+          "col": "cust_code",
+          "op": "eq",
+          "value": "{{supp}}"
+        },
+        {
+          "col": "trans_flag",
+          "op": "eq",
+          "value": "19"
+        },
+        {
+          "col": "tax_doc_no",
+          "op": "same",
+          "value": "{{wt}}"
+        },
+        {
+          "col": "due_date",
+          "op": "eq",
+          "value": "{{today}}"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: ข้อมูลหนังสือรับรองตรงทะเบียนเจ้าหนี้ ชื่อ เลขผู้เสียภาษี ประเภทผู้เสียภาษี",
+      "do": "db.query",
+      "sql": "select (w.cust_name = s.name_1)::int as name_ok, w.tax_number, w.cust_tax_type from gl_wht_list w join ap_supplier s on s.code = w.cust_code where w.doc_no = :'de'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_ok",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "tax_number",
+          "op": "same",
+          "value": "{{supp_tax}}"
+        },
+        {
+          "col": "cust_tax_type",
+          "op": "eq",
+          "value": "{{supp_status}}"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: รายการย่อยหัก ณ ที่จ่าย ประเภทเงินได้ ฐาน อัตรา ภาษี = ฐาน × อัตรา / 100",
+      "do": "db.query",
+      "sql": "select income_type, amount, tax_rate, tax_value, tax_value - round(amount * tax_rate / 100, 2) as calc_diff from gl_wht_list_detail where doc_no = :'de'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "income_type",
+          "op": "same",
+          "value": "{{income}}"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{pu_sum}}"
+        },
+        {
+          "col": "tax_rate",
+          "op": "eq",
+          "value": "{{wrate}}"
+        },
+        {
+          "col": "tax_value",
+          "op": "eq",
+          "value": "{{wht}}"
+        },
+        {
+          "col": "calc_diff",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: GL ใบจ่าย สมดุล เดบิตเจ้าหนี้ = ยอดบิล เครดิตภาษีหัก ณ ที่จ่ายค้างจ่าย = ภาษีหัก",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit) filter (where account_code = :'ap_acct'), 0) as ap_debit, coalesce(sum(credit) filter (where account_code = :'wht_acct'), 0) as wht_credit from gl_journal_detail where doc_no = :'de'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "ap_debit",
+          "op": "eq",
+          "value": "{{pu_total}}"
+        },
+        {
+          "col": "wht_credit",
+          "op": "eq",
+          "value": "{{wht}}"
+        }
+      ]
+    },
+    {
+      "title": "ยอด GL ของใบจ่าย (ไว้เทียบแท็บ GL บนหน้าจอ)",
+      "do": "db.query",
+      "sql": "select sum(debit)::text as gl_dr, sum(credit)::text as gl_cr from gl_journal_detail where doc_no = :'de'",
+      "rows": 1,
+      "save": {
+        "gl_dr": "gl_dr",
+        "gl_cr": "gl_cr"
+      }
+    },
+    {
+      "title": "หนี้ค้างหลังจ่ายครบ (API): ไม่มีบิลค้าง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/bills",
+      "body": {
+        "transFlag": 19,
+        "custCode": "{{supp}}",
+        "docDate": "{{today}}",
+        "docNo": ""
+      },
+      "expect": [
+        {
+          "path": "data.length",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "หน้าจอไม่มีข้อผิดพลาดแฝงหลังบันทึก",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "เปิดหน้าจอใหม่ (ล้างแท็บเดิม)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_debt_billing"
+    },
+    {
+      "title": "ค้นหาในรายการใบจ่ายชำระด้วยเลขที่ {{de}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{de}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบใบจ่ายชำระของเรา 1 ใบ: ตัวนับ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถว ใบจ่ายชำระ {{de}} ในรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] tr:has(button[title=\"แก้ไขรายการ {{de}}\"]) td:has-text(\"{{de}}\")"
+    },
+    {
+      "title": "เปิดในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เปิดซ้ำ: เลขที่เอกสาร",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{de}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: รหัสเจ้าหนี้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{supp}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ชื่อเจ้าหนี้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] textarea[placeholder=\"ชื่อเจ้าหนี้ / ลูกหนี้...\"]",
+      "value": "{{sname}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: หมายเหตุ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: แถวที่ 1 เลขที่เอกสาร = บิลซื้อของเรา",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"เลขที่เอกสาร\"]/preceding-sibling::th)+1]",
+      "text": "{{pu}}",
+      "op": "contains"
+    },
+    {
+      "title": "เปิดซ้ำ: วันที่บิล = วันนี้",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"วันที่\"]/preceding-sibling::th)+1]",
+      "text": "{{today_be}}",
+      "op": "contains"
+    },
+    {
+      "title": "เปิดซ้ำ: ประเภท = ซื้อสินค้า/ตั้งหนี้ซื้อ",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ประเภท\"]/preceding-sibling::th)+1]",
+      "text": "ซื้อสินค้า/ตั้งหนี้ซื้อ",
+      "op": "contains"
+    },
+    {
+      "title": "เปิดซ้ำ: ยอดหนี้ = ยอดบิลซื้อ",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ยอดหนี้\"]/preceding-sibling::th)+1]",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ยอดคงเหลือ = ยอดบิลซื้อ",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ยอดคงเหลือ\"]/preceding-sibling::th)+1]",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ยอดชำระ = ยอดคงเหลือ (จ่ายเต็ม)",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ยอดชำระ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: มีบิลแถวเดียว",
+      "do": "ui.expectVisible",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"ยอดคงเหลือ\"] and thead//th[normalize-space()=\"เลขที่ใบวางบิล\"]]/tbody/tr[2]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"เลขที่เอกสาร\"]/preceding-sibling::th)+1]",
+      "visible": false
+    },
+    {
+      "title": "เปิดซ้ำ: ท้ายตาราง รวม 1 รายการ = ยอดบิลซื้อ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] tfoot td:text-is(\"รวม 1 รายการ:\") + td",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: รวมมูลค่าทั้งสิ้น = ยอดชำระรวม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] label:text-is(\"รวมมูลค่าทั้งสิ้น:\") + div",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดแท็บภาษีหัก ณ ที่จ่าย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:text-is(\"ภาษีหัก ณ. ที่จ่าย\"):visible"
+    },
+    {
+      "title": "เปิดซ้ำ: รายการหัก ณ ที่จ่าย เอกสารเลขที่",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"เอกสารเลขที่\"] and thead//th[starts-with(normalize-space(), \"มูลค่าภาษีหัก ณ ที่จ่าย\")]]/tbody/tr[1]/td[1]",
+      "text": "{{wt}}",
+      "op": "contains"
+    },
+    {
+      "title": "เปิดซ้ำ: รายการหัก ณ ที่จ่าย รหัสเจ้าหนี้",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"เอกสารเลขที่\"] and thead//th[starts-with(normalize-space(), \"มูลค่าภาษีหัก ณ ที่จ่าย\")]]/tbody/tr[1]/td[2]",
+      "text": "{{supp}}",
+      "op": "contains"
+    },
+    {
+      "title": "เปิดซ้ำ: รายการหัก ณ ที่จ่าย ชื่อเจ้าหนี้",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"เอกสารเลขที่\"] and thead//th[starts-with(normalize-space(), \"มูลค่าภาษีหัก ณ ที่จ่าย\")]]/tbody/tr[1]/td[3]",
+      "text": "{{sname}}",
+      "op": "contains"
+    },
+    {
+      "title": "เปิดซ้ำ: รายการหัก ณ ที่จ่าย วันที่ = วันที่เอกสาร",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"เอกสารเลขที่\"] and thead//th[starts-with(normalize-space(), \"มูลค่าภาษีหัก ณ ที่จ่าย\")]]/tbody/tr[1]/td[4]",
+      "text": "{{today_be}}",
+      "op": "contains"
+    },
+    {
+      "title": "เปิดซ้ำ: รายการหัก ณ ที่จ่าย จำนวนเงิน = ฐาน",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"เอกสารเลขที่\"] and thead//th[starts-with(normalize-space(), \"มูลค่าภาษีหัก ณ ที่จ่าย\")]]/tbody/tr[1]/td[5]",
+      "text": "{{pu_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: รายการหัก ณ ที่จ่าย มูลค่าภาษี",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[normalize-space()=\"เอกสารเลขที่\"] and thead//th[starts-with(normalize-space(), \"มูลค่าภาษีหัก ณ ที่จ่าย\")]]/tbody/tr[1]/td[6]",
+      "text": "{{wht}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: วันที่หัก ณ ที่จ่าย = วันที่เอกสาร",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"วันที่หัก ณ ที่จ่าย\")) input",
+      "value": "{{today_be}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: เอกสารเลขที่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"เอกสารเลขที่\")) input",
+      "value": "{{wt}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: รหัสเจ้าหนี้ = เจ้าหนี้ของเอกสาร",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) input",
+      "value": "{{supp}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ชื่อเจ้าหนี้จากทะเบียน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"รหัสลูกหนี้/เจ้าหนี้\")) span.truncate",
+      "text": "{{sname}}",
+      "op": "contains"
+    },
+    {
+      "title": "เปิดซ้ำ: ประเภทผู้เสียภาษีตามทะเบียนเจ้าหนี้: {{supp_type}}",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"ประเภท\")) span:has-text(\"{{supp_type}}\") input:checked"
+    },
+    {
+      "title": "เปิดซ้ำ: เลขประจำตัวผู้เสียภาษีจากทะเบียน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"เลขประจำตัวผู้เสียภาษี\")) input",
+      "value": "{{supp_tax}}",
+      "op": "same"
+    },
+    {
+      "title": "เปิดซ้ำ: บรรทัด 1 ประเภทเงินได้",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[1]/td[2]//input",
+      "value": "{{income}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: บรรทัด 1 ฐานภาษี = ยอดก่อนภาษีมูลค่าเพิ่ม",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[1]/td[3]//input",
+      "value": "{{pu_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: บรรทัด 1 อัตราภาษี = อัตราจริง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[1]/td[4]//input",
+      "value": "{{wrate}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: บรรทัด 1 ภาษีหัก ณ ที่จ่าย = ฐาน × อัตรา / 100",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[1]/td[5]//input",
+      "value": "{{wht}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: มีบรรทัดเดียว",
+      "do": "ui.expectVisible",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ap_debt_billing\"]//table[thead//th[starts-with(normalize-space(), \"ภาษีหัก ณ ที่จ่าย\")] and thead//th[normalize-space()=\"อัตราภาษี\"]]/tbody/tr[2]/td[2]//input",
+      "visible": false
+    },
+    {
+      "title": "เปิดแท็บการรับ/จ่ายชำระเงิน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:text-is(\"การรับ/จ่ายชำระเงิน\"):visible"
+    },
+    {
+      "title": "เปิดซ้ำ: 1. ยอดตามเอกสาร = ยอดบิลซื้อ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> span:text-is(\"1. ยอดตามเอกสาร\")) > span.font-mono",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ยอดสุทธิที่ต้องจ่าย = ยอดบิลซื้อ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> span:text-is(\"ยอดสุทธิที่ต้องรับ/จ่ายชำระ (1 + 2)\")) > span.font-mono",
+      "text": "{{pu_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: 8. ภาษีหัก ณ ที่จ่าย = ภาษีหักที่คำนวณ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> span:text-is(\"8. ภาษีหัก ณ ที่จ่าย (นับเป็นยอดชำระ)\")) > span.font-mono",
+      "text": "{{wht}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ส่วนที่เหลือเป็นเงินสด = ยอดบิล − ภาษีหัก",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> span:text-is(\"ส่วนที่เหลือเป็นเงินสด (ยอดสุทธิ หักรายการที่ 3 ถึง 8)\")) > span.font-mono",
+      "text": "{{cash}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ชำระด้วยเงินสด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:text-is(\"ชำระด้วยเงินสด:\")) input",
+      "value": "{{cash}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: สถานะจ่ายครบถ้วน",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] span:text-is(\"✓ ยอดรับ/จ่ายชำระครบถ้วนตรงตามยอดสุทธิ\")"
+    },
+    {
+      "title": "เปิดแท็บการลงบัญชี (GL)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:text-is(\"การลงบัญชี (GL)\"):visible"
+    },
+    {
+      "title": "แท็บ GL: รวมเดบิต = ยอดที่บันทึกในฐานข้อมูล",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] tfoot:has(td:has-text(\"รวมยอด เดบิต / เครดิต:\")) td:nth-child(2)",
+      "text": "{{gl_dr}}",
+      "op": "eq",
+      "timeout": 30000
+    },
+    {
+      "title": "แท็บ GL: รวมเครดิต = ยอดที่บันทึกในฐานข้อมูล",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] tfoot:has(td:has-text(\"รวมยอด เดบิต / เครดิต:\")) td:nth-child(3)",
+      "text": "{{gl_cr}}",
+      "op": "eq"
+    },
+    {
+      "title": "แท็บ GL: แจ้งดุลบัญชีถูกต้อง",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] tfoot:has(td:has-text(\"รวมยอด เดบิต / เครดิต:\"))",
+      "text": "ดุลบัญชีถูกต้อง (Dr = Cr)",
+      "op": "contains"
+    },
+    {
+      "title": "ภาพแท็บ GL ของใบจ่ายหลังเปิดซ้ำ",
+      "do": "ui.screenshot",
+      "name": "de-gl-tab"
+    },
+    {
+      "title": "กลับแท็บรายการเอกสาร",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:text-is(\"รายการสินค้า / เอกสาร\"):visible"
+    },
+    {
+      "title": "เปิดหน้าต่างพิมพ์ฟอร์ม (ไม่สั่งพิมพ์จริง เพราะสั่งพิมพ์จะบันทึกประวัติการพิมพ์ลงฐาน)",
+      "do": "ui.click",
+      "selector": "[data-testid=\"trans-open-doc-form-print-btn\"]"
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มเปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มอยู่ในโหมดข้อมูลที่บันทึกแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"doc-form-mode-badge-saved\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "ตัวอย่างฟอร์มแสดงเลขที่เอกสาร {{de}}",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "text": "{{de}}",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ภาพตัวอย่างฟอร์มพิมพ์",
+      "do": "ui.screenshot",
+      "name": "form-de"
+    },
+    {
+      "title": "ปิดหน้าต่างพิมพ์ฟอร์ม",
+      "do": "ui.click",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] button:has(span:text-is(\"ปิด\"))"
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "visible": false
+    },
+    {
+      "title": "เปิด Document Flow",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:has-text(\"Document Flow\")"
+    },
+    {
+      "title": "หน้าต่างผังเส้นทางเอกสารเปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 h2:has-text(\"ผังเส้นทางเอกสาร\")",
+      "timeout": 30000
+    },
+    {
+      "title": "ผังเส้นทางมีเอกสาร {{de}}",
+      "do": "ui.expectText",
+      "selector": "div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))",
+      "text": "{{de}}",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ผังเส้นทางมีเอกสาร {{pu}}",
+      "do": "ui.expectText",
+      "selector": "div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))",
+      "text": "{{pu}}",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ภาพผังเส้นทางเอกสาร",
+      "do": "ui.screenshot",
+      "name": "flow-de"
+    },
+    {
+      "title": "ปิดหน้าต่างผังเส้นทาง",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 button:has-text(\"ปิดหน้าต่าง\")"
+    },
+    {
+      "title": "หน้าต่างผังเส้นทางปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 h2:has-text(\"ผังเส้นทางเอกสาร\")",
+      "visible": false
+    },
+    {
+      "title": "เปิดรายงาน",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_payment"
+    },
+    {
+      "title": "กรองรายงานด้วยเลขที่ {{de}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_report_payment\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+      "value": "{{de}}"
+    },
+    {
+      "title": "กดประมวลผลรายงาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_report_payment\"] button:has-text(\"ประมวลผลรายงาน\")"
+    },
+    {
+      "title": "ตารางรายงานแสดงเอกสาร {{de}}",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_report_payment\"]",
+      "text": "{{de}}",
+      "op": "contains",
+      "timeout": 60000
+    },
+    {
+      "title": "กดพิมพ์รายงาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_report_payment\"] button:has-text(\"พิมพ์รายงาน\")"
+    },
+    {
+      "title": "ดาวน์โหลด PDF รายงาน มีเลขที่และยอดเงินของเอกสาร",
+      "do": "ui.pdf",
+      "selector": "button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+      "contains": [
+        "{{de}}",
+        "{{pu_total_fmt}}"
+      ],
+      "timeout": 120000
+    },
+    {
+      "title": "เปิดหน้าจอใหม่ (ล้างแท็บเดิม)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_debt_billing"
+    },
+    {
+      "title": "ค้นหาในรายการเอกสารด้วยเลขที่ {{de}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{de}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบเอกสารของเรา 1 ใบ: ตัวนับ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถว เอกสาร {{de}} ในรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] tr:has(button[title=\"แก้ไขรายการ {{de}}\"]) td:has-text(\"{{de}}\")"
+    },
+    {
+      "title": "เปิดในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารที่เปิดตรงกับของเรา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{de}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดลบเอกสาร (ยืนยันกล่องถามอัตโนมัติ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] button:text-is(\"ลบ\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งลบเอกสารเรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] span.whitespace-pre-line",
+      "text": "ลบเอกสาร {{de}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ฐานข้อมูล: ลบใบจ่ายแล้วไม่เหลือหัว รายการจ่าย เงินสด GL หัก ณ ที่จ่าย",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ap_ar_trans where doc_no = :'de') + (select count(*) from ap_ar_trans_detail where doc_no = :'de') + (select count(*) from cb_trans where doc_no = :'de')\n       + (select count(*) from cb_trans_detail where doc_no = :'de') + (select count(*) from gl_journal_detail where doc_no = :'de')\n       + (select count(*) from gl_wht_list where doc_no = :'de' or tax_doc_no = :'wt') + (select count(*) from gl_wht_list_detail where doc_no = :'de' or tax_doc_no = :'wt'))::text as n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "หลังลบใบจ่าย (API): บิลซื้อกลับมาค้างเต็มยอด",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/bills",
+      "body": {
+        "transFlag": 19,
+        "custCode": "{{supp}}",
+        "docDate": "{{today}}",
+        "docNo": ""
+      },
+      "expect": [
+        {
+          "path": "data.length",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "path": "data.0.billingNo",
+          "op": "eq",
+          "value": "{{pu}}"
+        },
+        {
+          "path": "data.0.balanceRef",
+          "op": "eq",
+          "value": "{{pu_total}}"
+        }
+      ]
+    },
+    {
+      "title": "ค้นหาเลขที่ที่ลบแล้วในรายการ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{de}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ไม่พบเอกสาร: ตัวนับ 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ap_debt_billing\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอไม่มีข้อผิดพลาดแฝงหลังลบ",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบใบจ่ายชำระทดสอบ (สำรอง)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/delete",
+      "body": {
+        "kind": "ap_ar_trans",
+        "docNo": "{{de}}",
+        "transFlag": 19
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบบิลซื้อทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{pu}}",
+        "transFlag": 12
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo (หัว รายการ เจ้าหนี้ จ่ายชำระ มัดจำ GL ภาษีซื้อ หัก ณ ที่จ่าย)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'pu', :'de')) + (select count(*) from ic_trans_detail where doc_no in (:'pu', :'de')) + (select count(*) from ap_ar_trans where doc_no in (:'pu', :'de')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'pu', :'de')) + (select count(*) from cb_trans where doc_no in (:'pu', :'de')) + (select count(*) from cb_trans_detail where doc_no in (:'pu', :'de')) + (select count(*) from gl_journal where doc_no in (:'pu', :'de')) + (select count(*) from gl_journal_detail where doc_no in (:'pu', :'de')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'pu', :'de')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'pu', :'de')) + (select count(*) from gl_wht_list where doc_no in (:'pu', :'de')) + (select count(*) from gl_wht_list_detail where doc_no in (:'pu', :'de')) + (select count(*) from gl_wht_list where tax_doc_no = :'wt') + (select count(*) from gl_wht_list_detail where tax_doc_no = :'wt') as left_rows",
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

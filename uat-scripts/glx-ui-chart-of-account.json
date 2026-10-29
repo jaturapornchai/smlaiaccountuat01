@@ -1,0 +1,1797 @@
+{
+  "id": "glx-ui-chart-of-account",
+  "title": "หน้าจอรายละเอียดผังบัญชี: สร้างบัญชีทดสอบกรอกครบทุกช่อง+ติ๊กหน่วยงาน/แผนก/จัดสรร/งาน/โครงการ, ตรวจห้ามบันทึก, ค้นหา/เปิดซ้ำ/แก้ไข, กันลบบัญชีหลัก, ลบผ่านหน้าจอ",
+  "module": "gl",
+  "lens": "screen",
+  "severityOnFail": "S1",
+  "description": "menu_chart_of_account (MasterDetailScreen) ทั้งหมดผ่านหน้าจอ · บัญชีหลัก/บัญชีปิด/กลุ่ม/กระแสเงินสด/หน่วยงาน ฯลฯ เลือกจากตารางจริงตอนรัน · สร้าง UAT<run>C1 (ทุกช่อง) และ UAT<run>C2 (บัญชีลูกของ C1) · ตรวจ DB ทุกคอลัมน์+ตารางเชื่อม 5 ตาราง · ห้ามบันทึกเมื่อไม่มีชื่อ/ชื่อยาวเกิน/บัญชีหลักเป็นตัวเอง · ลบ C1 ขณะเป็นบัญชีหลักของ C2 ต้องถูกปฏิเสธ · ลบ C2 แล้ว C1 ผ่านหน้าจอ ไม่เหลือแถว",
+  "timeoutMs": 900000,
+  "steps": [
+    {
+      "title": "กำหนดรหัสบัญชีแม่ทดสอบ",
+      "do": "set",
+      "name": "c1",
+      "value": "UAT{{run.short}}C1"
+    },
+    {
+      "title": "กำหนดรหัสบัญชีลูกทดสอบ",
+      "do": "set",
+      "name": "c2",
+      "value": "UAT{{run.short}}C2"
+    },
+    {
+      "title": "กำหนดรหัสบัญชีทดสอบโครงการ",
+      "do": "set",
+      "name": "c3",
+      "value": "UAT{{run.short}}C3"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เลือกบัญชีหลัก/บัญชีปิด/กลุ่มบัญชี/กระแสเงินสด/หน่วยงาน/แผนก/จัดสรร/งาน/โครงการจากตารางจริง",
+      "do": "db.query",
+      "sql": "select mn.code mn, mn.shown mnd, mn2.code mn2, mn2.shown mn2d, cl.code cl, cl.shown cld, ag.code ag, ag.shown agd, cf.code cf, cf.shown cfd, sd.code sd, sd.shown sdd, sd2.code sd2, sd2.shown sd2d, dp.code dp, dp.shown dpd, al.code al, al.shown ald, jb.code jb, jb.shown jbd, pj.code pj, pj.shown pjd\nfrom (select 1) o cross join lateral (select code, x.code || case when coalesce(x.name_1, '') <> '' then '~' || x.name_1 else '' end shown from gl_chart_of_account x where code !~ '^UAT' order by (account_level <> 0), (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) mn cross join lateral (select code, x.code || case when coalesce(x.name_1, '') <> '' then '~' || x.name_1 else '' end shown from gl_chart_of_account x where code !~ '^UAT' order by (account_level <> 0), (code !~ '^[A-Z0-9-]+$'), code offset 1 limit 1) mn2 cross join lateral (select code, x.code || case when coalesce(x.name_1, '') <> '' then '~' || x.name_1 else '' end shown from gl_chart_of_account x where code !~ '^UAT' order by (account_level = 0), (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) cl cross join lateral (select code, x.code || case when coalesce(x.name_1, '') <> '' then '~' || x.name_1 else '' end shown from gl_account_group x order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) ag cross join lateral (select code, x.code || case when coalesce(x.name_1, '') <> '' then '~' || x.name_1 else '' end shown from gl_cash_flow_group x order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) cf cross join lateral (select code, x.code || case when coalesce(x.name_1, '') <> '' then '~' || x.name_1 else '' end shown from erp_side_list x order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) sd cross join lateral (select code, x.code || case when coalesce(x.name_1, '') <> '' then '~' || x.name_1 else '' end shown from erp_side_list x order by (code !~ '^[A-Z0-9-]+$'), code offset 1 limit 1) sd2 cross join lateral (select code, x.code || case when coalesce(x.name_1, '') <> '' then '~' || x.name_1 else '' end shown from erp_department_list x order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) dp cross join lateral (select code, x.code || case when coalesce(x.name_1, '') <> '' then '~' || x.name_1 else '' end shown from erp_allocate_list x order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) al cross join lateral (select code, x.code || case when coalesce(x.name_1, '') <> '' then '~' || x.name_1 else '' end shown from erp_job_list x order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) jb cross join lateral (select code, x.code || case when coalesce(x.name_1, '') <> '' then '~' || x.name_1 else '' end shown from erp_project_list x order by (code !~ '^[A-Z0-9-]+$'), code offset 0 limit 1) pj",
+      "rows": 1,
+      "save": {
+        "mn": "mn",
+        "mnd": "mnd",
+        "mn2": "mn2",
+        "mn2d": "mn2d",
+        "cl": "cl",
+        "cld": "cld",
+        "ag": "ag",
+        "agd": "agd",
+        "cf": "cf",
+        "cfd": "cfd",
+        "sd": "sd",
+        "sdd": "sdd",
+        "sd2": "sd2",
+        "sd2d": "sd2d",
+        "dp": "dp",
+        "dpd": "dpd",
+        "al": "al",
+        "ald": "ald",
+        "jb": "jb",
+        "jbd": "jbd",
+        "pj": "pj",
+        "pjd": "pjd"
+      }
+    },
+    {
+      "title": "ยังไม่มีบัญชีทดสอบรหัสนี้",
+      "do": "db.query",
+      "sql": "select ((select count(*) from gl_chart_of_account where code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_side_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_depart_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_allocate_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_job_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_project_list where account_code in (:'c1', :'c2', :'c3')))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "เปิดเมนูรายละเอียดผังบัญชี",
+      "do": "ui.openMenu",
+      "key": "menu_chart_of_account"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดก่อนเริ่ม",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "หัวจอแสดงชื่อเมนู",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] h1",
+      "text": "รายละเอียดผังบัญชี"
+    },
+    {
+      "title": "กดเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"เพิ่มใหม่\"))"
+    },
+    {
+      "title": "อยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"เพิ่มรายการใหม่\")",
+      "text": "เพิ่มรายการใหม่"
+    },
+    {
+      "title": "ค่าเริ่มต้น: ระดับบัญชี บัญชีหลัก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ระดับบัญชี:\")) label:has(> span:text-is(\"บัญชีหลัก\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ค่าเริ่มต้น: ประเภทบัญชี สินทรัพย์",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ประเภทบัญชี:\")) label:has(> span:text-is(\"สินทรัพย์\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ค่าเริ่มต้น: เกี่ยวข้องกับภาษี ไม่เกี่ยวข้อง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"เกี่ยวข้องกับภาษี:\")) label:has(> span:text-is(\"ไม่เกี่ยวข้อง\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ค่าเริ่มต้น: ผลกระทบต่องบการเงิน ทั่วไป",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผลกระทบต่องบการเงิน:\")) label:has(> span:text-is(\"ทั่วไป\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ค่าเริ่มต้น: สถานะบัญชี บัญชีทั่วไป",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"สถานะบัญชี:\")) label:has(> span:text-is(\"บัญชีทั่วไป\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ค่าเริ่มต้น: ด้านบัญชี เดบิต",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ด้านบัญชี:\")) label:has(> span:text-is(\"เดบิต\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ค่าเริ่มต้น: แยกหน่วยงาน ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกหน่วยงาน:\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "ค่าเริ่มต้น: แยกแผนก ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกแผนก:\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "ค่าเริ่มต้น: แยกการจัดสรร ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกการจัดสรร:\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "ค่าเริ่มต้น: แยกโครงการ ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกโครงการ:\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "ค่าเริ่มต้น: แยกงาน ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกงาน:\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "ค่าเริ่มต้น: งานระหว่างทำ (JOB) ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"งานระหว่างทำ (JOB):\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "ค่าเริ่มต้น: ใช้งาน ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ใช้งาน:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "ค่าเริ่มต้น: หน่วยงาน {{sd}} ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-side\"] tr:has(> td:text-is(\"{{sd}}\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "กรอกรหัสบัญชี",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "{{c1}}"
+    },
+    {
+      "title": "กดบันทึก (ยังไม่กรอกชื่อ → ต้องไม่บันทึก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "หน้าจอแจ้ง \"กรุณาระบุชื่อบัญชี\"",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.bg-rose-50[role=\"alert\"]",
+      "text": "กรุณาระบุชื่อบัญชี"
+    },
+    {
+      "title": "ไม่มีแถวบัญชีถูกบันทึก",
+      "do": "db.query",
+      "sql": "select ((select count(*) from gl_chart_of_account where code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_side_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_depart_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_allocate_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_job_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_project_list where account_code in (:'c1', :'c2', :'c3')))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "กรอกชื่อบัญชียาว 101 ตัวอักษร",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ชื่อบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "กกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกกก"
+    },
+    {
+      "title": "กดบันทึก (ชื่อบัญชียาวเกิน → ต้องไม่บันทึก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "หน้าจอแจ้ง \"ยาวเกิน 100\"",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.bg-rose-50[role=\"alert\"]",
+      "text": "ยาวเกิน 100"
+    },
+    {
+      "title": "ไม่มีแถวบัญชีถูกบันทึก",
+      "do": "db.query",
+      "sql": "select ((select count(*) from gl_chart_of_account where code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_side_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_depart_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_allocate_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_job_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_project_list where account_code in (:'c1', :'c2', :'c3')))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ระดับบัญชี: เลือก ระดับที่ 2",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ระดับบัญชี:\")) label:has(> span:text-is(\"ระดับที่ 2\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "กรอกชื่อบัญชี",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ชื่อบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} บัญชีแม่ทดสอบ"
+    },
+    {
+      "title": "กรอกชื่อบัญชี (ภาษาอังกฤษ)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ชื่อบัญชี (ภาษาอังกฤษ):\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} Parent test account"
+    },
+    {
+      "title": "ผังบัญชีหลัก: กดปุ่มค้นหา → หน้าต่าง \"ค้นหาผังบัญชีหลัก\"",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) button[title=\"ค้นหาผังบัญชีหลัก\"]"
+    },
+    {
+      "title": "หน้าต่าง \"ค้นหาผังบัญชีหลัก\" แสดง",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหาผังบัญชีหลัก\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]"
+    },
+    {
+      "title": "ค้นหา {{mn}}",
+      "do": "ui.fill",
+      "selector": "div.fixed:has-text(\"ค้นหาผังบัญชีหลัก\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+      "value": "{{mn}}"
+    },
+    {
+      "title": "ผลค้นหามีแถว {{mn}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหาผังบัญชีหลัก\") tr[data-row-index]:has(td:text-is(\"{{mn}}\"))"
+    },
+    {
+      "title": "เลือกแถว {{mn}}",
+      "do": "ui.click",
+      "selector": "div.fixed:has-text(\"ค้นหาผังบัญชีหลัก\") tr[data-row-index]:has(td:text-is(\"{{mn}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหาผังบัญชีหลัก\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+      "visible": false
+    },
+    {
+      "title": "ผังบัญชีหลัก: แสดงรหัส~ชื่อที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "value": "{{mnd}}",
+      "op": "same"
+    },
+    {
+      "title": "ปิดเข้าบัญชี: พิมพ์รหัส {{cl}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ปิดเข้าบัญชี:\")) textarea",
+      "value": "{{cl}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ปิดเข้าบัญชี:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "ปิดเข้าบัญชี: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ปิดเข้าบัญชี:\")) textarea",
+      "value": "{{cld}}",
+      "op": "same"
+    },
+    {
+      "title": "กลุ่มบัญชี: พิมพ์รหัส {{ag}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"กลุ่มบัญชี:\")) textarea",
+      "value": "{{ag}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"กลุ่มบัญชี:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "กลุ่มบัญชี: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"กลุ่มบัญชี:\")) textarea",
+      "value": "{{agd}}",
+      "op": "same"
+    },
+    {
+      "title": "รหัสบัญชีกระแสเงินสด: กดปุ่มค้นหา → หน้าต่าง \"ค้นหากลุ่มกระแสเงินสด\"",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชีกระแสเงินสด:\")) button[title=\"ค้นหากลุ่มกระแสเงินสด\"]"
+    },
+    {
+      "title": "หน้าต่าง \"ค้นหากลุ่มกระแสเงินสด\" แสดง",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหากลุ่มกระแสเงินสด\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]"
+    },
+    {
+      "title": "ค้นหา {{cf}}",
+      "do": "ui.fill",
+      "selector": "div.fixed:has-text(\"ค้นหากลุ่มกระแสเงินสด\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+      "value": "{{cf}}"
+    },
+    {
+      "title": "ผลค้นหามีแถว {{cf}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหากลุ่มกระแสเงินสด\") tr[data-row-index]:has(td:text-is(\"{{cf}}\"))"
+    },
+    {
+      "title": "เลือกแถว {{cf}}",
+      "do": "ui.click",
+      "selector": "div.fixed:has-text(\"ค้นหากลุ่มกระแสเงินสด\") tr[data-row-index]:has(td:text-is(\"{{cf}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed:has-text(\"ค้นหากลุ่มกระแสเงินสด\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสบัญชีกระแสเงินสด: แสดงรหัส~ชื่อที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชีกระแสเงินสด:\")) textarea",
+      "value": "{{cfd}}",
+      "op": "same"
+    },
+    {
+      "title": "ประเภทบัญชี: ค่าใช้จ่าย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ประเภทบัญชี:\")) label:has(> span:text-is(\"ค่าใช้จ่าย\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "เกี่ยวข้องกับภาษี: ภาษีซื้อ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"เกี่ยวข้องกับภาษี:\")) label:has(> span:text-is(\"ภาษีซื้อ\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "ผลกระทบต่องบการเงิน: ค่าใช้จ่าย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผลกระทบต่องบการเงิน:\")) label:has(> span:text-is(\"ค่าใช้จ่าย\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "สถานะบัญชี: บัญชีหลัก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"สถานะบัญชี:\")) label:has(> span:text-is(\"บัญชีหลัก\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "ด้านบัญชี: เครดิต",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ด้านบัญชี:\")) label:has(> span:text-is(\"เครดิต\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "ติ๊ก แยกหน่วยงาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกหน่วยงาน:\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "ติ๊ก แยกแผนก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกแผนก:\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "ติ๊ก แยกการจัดสรร",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกการจัดสรร:\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "ติ๊ก แยกโครงการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกโครงการ:\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "ติ๊ก แยกงาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกงาน:\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "ติ๊ก งานระหว่างทำ (JOB)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"งานระหว่างทำ (JOB):\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "ติ๊กหน่วยงาน {{sd}}",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-side\"] tr:has(> td:text-is(\"{{sd}}\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "ติ๊กแผนก {{dp}}",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-department\"] tr:has(> td:text-is(\"{{dp}}\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "ติ๊กการจัดสรร {{al}}",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-allocate\"] tr:has(> td:text-is(\"{{al}}\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "ติ๊กงาน {{jb}}",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-job\"] tr:has(> td:text-is(\"{{jb}}\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "รหัสบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "{{c1}}",
+      "op": "same"
+    },
+    {
+      "title": "ระดับบัญชี = ระดับที่ 2",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ระดับบัญชี:\")) label:has(> span:text-is(\"ระดับที่ 2\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ชื่อบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ชื่อบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} บัญชีแม่ทดสอบ",
+      "op": "same"
+    },
+    {
+      "title": "ชื่อบัญชี (ภาษาอังกฤษ)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ชื่อบัญชี (ภาษาอังกฤษ):\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} Parent test account",
+      "op": "same"
+    },
+    {
+      "title": "ผังบัญชีหลัก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "value": "{{mnd}}",
+      "op": "same"
+    },
+    {
+      "title": "ปิดเข้าบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ปิดเข้าบัญชี:\")) textarea",
+      "value": "{{cld}}",
+      "op": "same"
+    },
+    {
+      "title": "กลุ่มบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"กลุ่มบัญชี:\")) textarea",
+      "value": "{{agd}}",
+      "op": "same"
+    },
+    {
+      "title": "รหัสบัญชีกระแสเงินสด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชีกระแสเงินสด:\")) textarea",
+      "value": "{{cfd}}",
+      "op": "same"
+    },
+    {
+      "title": "ประเภทบัญชี = ค่าใช้จ่าย",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ประเภทบัญชี:\")) label:has(> span:text-is(\"ค่าใช้จ่าย\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "เกี่ยวข้องกับภาษี = ภาษีซื้อ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"เกี่ยวข้องกับภาษี:\")) label:has(> span:text-is(\"ภาษีซื้อ\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ผลกระทบต่องบการเงิน = ค่าใช้จ่าย",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผลกระทบต่องบการเงิน:\")) label:has(> span:text-is(\"ค่าใช้จ่าย\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "สถานะบัญชี = บัญชีหลัก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"สถานะบัญชี:\")) label:has(> span:text-is(\"บัญชีหลัก\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ด้านบัญชี = เครดิต",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ด้านบัญชี:\")) label:has(> span:text-is(\"เครดิต\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "แยกหน่วยงาน ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกหน่วยงาน:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "แยกแผนก ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกแผนก:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "แยกการจัดสรร ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกการจัดสรร:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "แยกโครงการ ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกโครงการ:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "แยกงาน ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกงาน:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "งานระหว่างทำ (JOB) ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"งานระหว่างทำ (JOB):\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "ใช้งาน ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ใช้งาน:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "หน่วยงาน {{sd}} ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-side\"] tr:has(> td:text-is(\"{{sd}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "หน่วยงาน {{sd2}} ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-side\"] tr:has(> td:text-is(\"{{sd2}}\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "แผนก {{dp}} ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-department\"] tr:has(> td:text-is(\"{{dp}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "การจัดสรร {{al}} ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-allocate\"] tr:has(> td:text-is(\"{{al}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "งาน {{jb}} ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-job\"] tr:has(> td:text-is(\"{{jb}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "โครงการ {{pj}} ไม่ติ๊ก (ทดสอบแยกท้ายสคริปต์)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-project\"] tr:has(> td:text-is(\"{{pj}}\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงก่อนบันทึก (ยกเว้น 400 ของการบันทึกที่ตั้งใจให้ถูกปฏิเสธ 2 ครั้ง)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 4\\d\\d POST /api/process/master-detail/(save|delete)",
+        "status of 4\\d\\d"
+      ]
+    },
+    {
+      "title": "ภาพหน้าจอก่อนบันทึก (กรอกครบ)",
+      "do": "ui.screenshot",
+      "name": "chart-filled"
+    },
+    {
+      "title": "กดบันทึกบัญชีแม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "ได้ผลการบันทึกกลับมา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"บันทึกล่าสุด\"), [data-workspace-tab-panel=\"menu_chart_of_account\"] div.bg-rose-50[role=\"alert\"]"
+    },
+    {
+      "title": "การบันทึกไม่มีข้อผิดพลาดแฝง (HTTP/console)",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "บันทึกสำเร็จ (บันทึกล่าสุด)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"บันทึกล่าสุด\")",
+      "text": "บันทึกล่าสุด"
+    },
+    {
+      "title": "ภาพหน้าจอหลังบันทึก",
+      "do": "ui.screenshot",
+      "name": "chart-c1-saved"
+    },
+    {
+      "title": "ไม่มีข้อความผิดพลาด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.bg-rose-50[role=\"alert\"]",
+      "visible": false
+    },
+    {
+      "title": "หลังบันทึก: gl_chart_of_account ตรงทุกช่อง",
+      "do": "db.query",
+      "sql": "select concat_ws('|', coalesce((code)::text, '~'), coalesce((account_level)::text, '~'), coalesce((name_1)::text, '~'), coalesce((name_2)::text, '~'), coalesce((main_code)::text, '~'), coalesce((account_close)::text, '~'), coalesce((account_group)::text, '~'), coalesce((cash_flow_group)::text, '~'), coalesce((account_type)::text, '~'), coalesce((tax_type)::text, '~'), coalesce((balance_sheet_status)::text, '~'), coalesce((status)::text, '~'), coalesce((balance_mode)::text, '~'), coalesce((side_status)::text, '~'), coalesce((department_status)::text, '~'), coalesce((allocate_status)::text, '~'), coalesce((project_status)::text, '~'), coalesce((job_status)::text, '~'), coalesce((work_in_process_status)::text, '~'), coalesce((active_status)::text, '~')) h from gl_chart_of_account where code = :'c1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "h",
+          "op": "same",
+          "value": "{{c1}}|2|UAT{{run.short}} บัญชีแม่ทดสอบ|UAT{{run.short}} Parent test account|{{mn}}|{{cl}}|{{ag}}|{{cf}}|4|2|3|1|1|1|1|1|1|1|1|1"
+        }
+      ]
+    },
+    {
+      "title": "หลังบันทึก: ตารางเชื่อมหน่วยงาน/แผนก/จัดสรร/งาน/โครงการ ตรงกับที่ติ๊ก",
+      "do": "db.query",
+      "sql": "select concat_ws('|', (select coalesce(string_agg(side_code, ',' order by side_code), '~') from gl_chart_of_account_side_list where account_code = :'c1'), (select coalesce(string_agg(department_code, ',' order by department_code), '~') from gl_chart_of_account_depart_list where account_code = :'c1'), (select coalesce(string_agg(allocate_code, ',' order by allocate_code), '~') from gl_chart_of_account_allocate_list where account_code = :'c1'), (select coalesce(string_agg(job_code, ',' order by job_code), '~') from gl_chart_of_account_job_list where account_code = :'c1'), (select coalesce(string_agg(project_code, ',' order by project_code), '~') from gl_chart_of_account_project_list where account_code = :'c1')) l",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "l",
+          "op": "same",
+          "value": "{{sd}}|{{dp}}|{{al}}|{{jb}}|~"
+        }
+      ]
+    },
+    {
+      "title": "กดเพิ่มใหม่ (บัญชีลูก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"เพิ่มใหม่\"))"
+    },
+    {
+      "title": "อยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"เพิ่มรายการใหม่\")",
+      "text": "เพิ่มรายการใหม่"
+    },
+    {
+      "title": "กรอกรหัสบัญชีลูก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "{{c2}}"
+    },
+    {
+      "title": "กรอกชื่อบัญชีลูก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ชื่อบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} บัญชีลูกทดสอบ"
+    },
+    {
+      "title": "ระดับบัญชี: เลือก ระดับที่ 3",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ระดับบัญชี:\")) label:has(> span:text-is(\"ระดับที่ 3\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "ผังบัญชีหลัก = บัญชีแม่ที่เพิ่งสร้าง: พิมพ์รหัส {{c1}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "value": "{{c1}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "ผังบัญชีหลัก = บัญชีแม่ที่เพิ่งสร้าง: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "value": "{{c1}}~UAT{{run.short}} บัญชีแม่ทดสอบ",
+      "op": "same"
+    },
+    {
+      "title": "กดบันทึกบัญชีลูก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "ได้ผลการบันทึกกลับมา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"บันทึกล่าสุด\"), [data-workspace-tab-panel=\"menu_chart_of_account\"] div.bg-rose-50[role=\"alert\"]"
+    },
+    {
+      "title": "การบันทึกไม่มีข้อผิดพลาดแฝง (HTTP/console)",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "บันทึกสำเร็จ (บันทึกล่าสุด)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"บันทึกล่าสุด\")",
+      "text": "บันทึกล่าสุด"
+    },
+    {
+      "title": "ภาพหน้าจอหลังบันทึก",
+      "do": "ui.screenshot",
+      "name": "chart-c2-saved"
+    },
+    {
+      "title": "ไม่มีข้อความผิดพลาด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.bg-rose-50[role=\"alert\"]",
+      "visible": false
+    },
+    {
+      "title": "บัญชีลูกบันทึกตรง (ชื่อ/บัญชีหลัก/ระดับ/ค่าเริ่มต้นอื่น) และไม่มีตารางเชื่อม",
+      "do": "db.query",
+      "sql": "select concat_ws('|', coalesce((name_1)::text, '~'), coalesce((main_code)::text, '~'), coalesce((account_level)::text, '~'), coalesce((account_type)::text, '~'), coalesce((tax_type)::text, '~'), coalesce((balance_sheet_status)::text, '~'), coalesce((status)::text, '~'), coalesce((balance_mode)::text, '~'), coalesce((side_status)::text, '~'), coalesce((department_status)::text, '~'), coalesce((allocate_status)::text, '~'), coalesce((project_status)::text, '~'), coalesce((job_status)::text, '~'), coalesce((work_in_process_status)::text, '~'), coalesce((active_status)::text, '~')) h,\n ((select count(*) from gl_chart_of_account_side_list where account_code = :'c2') + (select count(*) from gl_chart_of_account_depart_list where account_code = :'c2') + (select count(*) from gl_chart_of_account_allocate_list where account_code = :'c2') + (select count(*) from gl_chart_of_account_job_list where account_code = :'c2') + (select count(*) from gl_chart_of_account_project_list where account_code = :'c2'))::text links from gl_chart_of_account where code = :'c2'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "h",
+          "op": "same",
+          "value": "UAT{{run.short}} บัญชีลูกทดสอบ|{{c1}}|3|0|0|0|0|0|0|0|0|0|0|0|1"
+        },
+        {
+          "col": "links",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "รายการซ้าย: ค้นหาด้วยชื่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "บัญชีแม่ทดสอบ"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ผลค้นหาด้วยชื่อ = 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "รายการซ้าย: ค้นหาด้วยรหัสรอบทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ผลค้นหาด้วยรหัสรอบทดสอบ = 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "op": "eq"
+    },
+    {
+      "title": "รายการซ้าย: ค้นหาคำที่ไม่มีจริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "ZQXJNOPEQZ"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ผลค้นหาคำที่ไม่มีจริง = 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดเมนูใหม่ (แท็บสด)",
+      "do": "ui.openMenu",
+      "key": "menu_chart_of_account"
+    },
+    {
+      "title": "รายการซ้าย: ค้นหาด้วยรหัสรอบทดสอบ (เปิดบัญชีแม่)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ผลค้นหาด้วยรหัสรอบทดสอบ (เปิดบัญชีแม่) = 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "op": "eq"
+    },
+    {
+      "title": "กดแก้ไขรายการ {{c1}}",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button[title=\"แก้ไขรายการ {{c1}}\"]"
+    },
+    {
+      "title": "เปิดในโหมดแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"โหมดแก้ไข\")",
+      "text": "โหมดแก้ไข"
+    },
+    {
+      "title": "รหัสบัญชี (คีย์) แก้ไม่ได้ในโหมดแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชี:\")) > div > input[type=\"text\"][disabled]"
+    },
+    {
+      "title": "รหัสบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "{{c1}}",
+      "op": "same"
+    },
+    {
+      "title": "ระดับบัญชี = ระดับที่ 2",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ระดับบัญชี:\")) label:has(> span:text-is(\"ระดับที่ 2\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ชื่อบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ชื่อบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} บัญชีแม่ทดสอบ",
+      "op": "same"
+    },
+    {
+      "title": "ชื่อบัญชี (ภาษาอังกฤษ)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ชื่อบัญชี (ภาษาอังกฤษ):\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} Parent test account",
+      "op": "same"
+    },
+    {
+      "title": "ผังบัญชีหลัก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "value": "{{mnd}}",
+      "op": "same"
+    },
+    {
+      "title": "ปิดเข้าบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ปิดเข้าบัญชี:\")) textarea",
+      "value": "{{cld}}",
+      "op": "same"
+    },
+    {
+      "title": "กลุ่มบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"กลุ่มบัญชี:\")) textarea",
+      "value": "{{agd}}",
+      "op": "same"
+    },
+    {
+      "title": "รหัสบัญชีกระแสเงินสด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชีกระแสเงินสด:\")) textarea",
+      "value": "{{cfd}}",
+      "op": "same"
+    },
+    {
+      "title": "ประเภทบัญชี = ค่าใช้จ่าย",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ประเภทบัญชี:\")) label:has(> span:text-is(\"ค่าใช้จ่าย\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "เกี่ยวข้องกับภาษี = ภาษีซื้อ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"เกี่ยวข้องกับภาษี:\")) label:has(> span:text-is(\"ภาษีซื้อ\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ผลกระทบต่องบการเงิน = ค่าใช้จ่าย",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผลกระทบต่องบการเงิน:\")) label:has(> span:text-is(\"ค่าใช้จ่าย\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "สถานะบัญชี = บัญชีหลัก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"สถานะบัญชี:\")) label:has(> span:text-is(\"บัญชีหลัก\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ด้านบัญชี = เครดิต",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ด้านบัญชี:\")) label:has(> span:text-is(\"เครดิต\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "แยกหน่วยงาน ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกหน่วยงาน:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "แยกแผนก ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกแผนก:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "แยกการจัดสรร ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกการจัดสรร:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "แยกโครงการ ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกโครงการ:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "แยกงาน ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกงาน:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "งานระหว่างทำ (JOB) ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"งานระหว่างทำ (JOB):\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "ใช้งาน ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ใช้งาน:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "หน่วยงาน {{sd}} ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-side\"] tr:has(> td:text-is(\"{{sd}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "หน่วยงาน {{sd2}} ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-side\"] tr:has(> td:text-is(\"{{sd2}}\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "แผนก {{dp}} ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-department\"] tr:has(> td:text-is(\"{{dp}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "การจัดสรร {{al}} ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-allocate\"] tr:has(> td:text-is(\"{{al}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "งาน {{jb}} ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-job\"] tr:has(> td:text-is(\"{{jb}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "โครงการ {{pj}} ไม่ติ๊ก (ทดสอบแยกท้ายสคริปต์)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-project\"] tr:has(> td:text-is(\"{{pj}}\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "ผังบัญชีหลัก = ตัวเอง: พิมพ์รหัส {{c1}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "value": "{{c1}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "ผังบัญชีหลัก = ตัวเอง: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "value": "{{c1}}~UAT{{run.short}} บัญชีแม่ทดสอบ",
+      "op": "same"
+    },
+    {
+      "title": "กดบันทึก (บัญชีหลักเป็นตัวเอง → ต้องไม่บันทึก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "หน้าจอแจ้ง \"บัญชีหลักต้องไม่ใช่บัญชีเดียวกับตัวเอง\"",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.bg-rose-50[role=\"alert\"]",
+      "text": "บัญชีหลักต้องไม่ใช่บัญชีเดียวกับตัวเอง"
+    },
+    {
+      "title": "บัญชีหลักใน DB ยังเป็นค่าเดิม",
+      "do": "db.query",
+      "sql": "select main_code from gl_chart_of_account where code = :'c1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "main_code",
+          "op": "same",
+          "value": "{{mn}}"
+        }
+      ]
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝง (ยกเว้น 400 ของบัญชีหลักเป็นตัวเอง)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 4\\d\\d POST /api/process/master-detail/(save|delete)",
+        "status of 4\\d\\d"
+      ]
+    },
+    {
+      "title": "แก้ชื่อบัญชี",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ชื่อบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} บัญชีแม่ทดสอบ แก้ไข"
+    },
+    {
+      "title": "ระดับบัญชี: ระดับที่ 3",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ระดับบัญชี:\")) label:has(> span:text-is(\"ระดับที่ 3\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "ผังบัญชีหลัก: เปลี่ยนเป็นบัญชีจริงอีกบัญชี: พิมพ์รหัส {{mn2}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "value": "{{mn2}}"
+    },
+    {
+      "title": "ออกจากช่อง (Tab)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "key": "Tab"
+    },
+    {
+      "title": "ผังบัญชีหลัก: เปลี่ยนเป็นบัญชีจริงอีกบัญชี: แสดงรหัส~ชื่อจากฐานข้อมูล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "value": "{{mn2d}}",
+      "op": "same"
+    },
+    {
+      "title": "ประเภทบัญชี: รายได้",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ประเภทบัญชี:\")) label:has(> span:text-is(\"รายได้\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "เกี่ยวข้องกับภาษี: ภาษีขาย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"เกี่ยวข้องกับภาษี:\")) label:has(> span:text-is(\"ภาษีขาย\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "ผลกระทบต่องบการเงิน: กำไรสะสม",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผลกระทบต่องบการเงิน:\")) label:has(> span:text-is(\"กำไรสะสม\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "สถานะบัญชี: บัญชีทั่วไป",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"สถานะบัญชี:\")) label:has(> span:text-is(\"บัญชีทั่วไป\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "ด้านบัญชี: เดบิต",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ด้านบัญชี:\")) label:has(> span:text-is(\"เดบิต\")) > input[type=\"radio\"]"
+    },
+    {
+      "title": "เลิกติ๊ก แยกหน่วยงาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกหน่วยงาน:\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "เลิกติ๊ก ใช้งาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ใช้งาน:\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "เลิกติ๊กหน่วยงาน {{sd}}",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-side\"] tr:has(> td:text-is(\"{{sd}}\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "ติ๊กหน่วยงาน {{sd2}}",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-side\"] tr:has(> td:text-is(\"{{sd2}}\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "กดบันทึกการแก้ไข",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "ได้ผลการบันทึกกลับมา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"บันทึกล่าสุด\"), [data-workspace-tab-panel=\"menu_chart_of_account\"] div.bg-rose-50[role=\"alert\"]"
+    },
+    {
+      "title": "การบันทึกไม่มีข้อผิดพลาดแฝง (HTTP/console)",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "บันทึกสำเร็จ (บันทึกล่าสุด)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"บันทึกล่าสุด\")",
+      "text": "บันทึกล่าสุด"
+    },
+    {
+      "title": "ภาพหน้าจอหลังบันทึก",
+      "do": "ui.screenshot",
+      "name": "chart-c1-edited"
+    },
+    {
+      "title": "ไม่มีข้อความผิดพลาด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.bg-rose-50[role=\"alert\"]",
+      "visible": false
+    },
+    {
+      "title": "หลังแก้ไข: gl_chart_of_account ตรงทุกช่อง",
+      "do": "db.query",
+      "sql": "select concat_ws('|', coalesce((code)::text, '~'), coalesce((account_level)::text, '~'), coalesce((name_1)::text, '~'), coalesce((name_2)::text, '~'), coalesce((main_code)::text, '~'), coalesce((account_close)::text, '~'), coalesce((account_group)::text, '~'), coalesce((cash_flow_group)::text, '~'), coalesce((account_type)::text, '~'), coalesce((tax_type)::text, '~'), coalesce((balance_sheet_status)::text, '~'), coalesce((status)::text, '~'), coalesce((balance_mode)::text, '~'), coalesce((side_status)::text, '~'), coalesce((department_status)::text, '~'), coalesce((allocate_status)::text, '~'), coalesce((project_status)::text, '~'), coalesce((job_status)::text, '~'), coalesce((work_in_process_status)::text, '~'), coalesce((active_status)::text, '~')) h from gl_chart_of_account where code = :'c1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "h",
+          "op": "same",
+          "value": "{{c1}}|3|UAT{{run.short}} บัญชีแม่ทดสอบ แก้ไข|UAT{{run.short}} Parent test account|{{mn2}}|{{cl}}|{{ag}}|{{cf}}|3|1|4|0|0|0|1|1|1|1|1|0"
+        }
+      ]
+    },
+    {
+      "title": "หลังแก้ไข: ตารางเชื่อมหน่วยงาน/แผนก/จัดสรร/งาน/โครงการ ตรงกับที่ติ๊ก",
+      "do": "db.query",
+      "sql": "select concat_ws('|', (select coalesce(string_agg(side_code, ',' order by side_code), '~') from gl_chart_of_account_side_list where account_code = :'c1'), (select coalesce(string_agg(department_code, ',' order by department_code), '~') from gl_chart_of_account_depart_list where account_code = :'c1'), (select coalesce(string_agg(allocate_code, ',' order by allocate_code), '~') from gl_chart_of_account_allocate_list where account_code = :'c1'), (select coalesce(string_agg(job_code, ',' order by job_code), '~') from gl_chart_of_account_job_list where account_code = :'c1'), (select coalesce(string_agg(project_code, ',' order by project_code), '~') from gl_chart_of_account_project_list where account_code = :'c1')) l",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "l",
+          "op": "same",
+          "value": "{{sd2}}|{{dp}}|{{al}}|{{jb}}|~"
+        }
+      ]
+    },
+    {
+      "title": "เปิดเมนูใหม่ (แท็บสด)",
+      "do": "ui.openMenu",
+      "key": "menu_chart_of_account"
+    },
+    {
+      "title": "รายการซ้าย: ค้นหาด้วยรหัสรอบทดสอบ (เปิดบัญชีแม่หลังแก้ไข)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ผลค้นหาด้วยรหัสรอบทดสอบ (เปิดบัญชีแม่หลังแก้ไข) = 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "op": "eq"
+    },
+    {
+      "title": "กดแก้ไขรายการ {{c1}}",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button[title=\"แก้ไขรายการ {{c1}}\"]"
+    },
+    {
+      "title": "เปิดในโหมดแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"โหมดแก้ไข\")",
+      "text": "โหมดแก้ไข"
+    },
+    {
+      "title": "รหัสบัญชี (คีย์) แก้ไม่ได้ในโหมดแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชี:\")) > div > input[type=\"text\"][disabled]"
+    },
+    {
+      "title": "รหัสบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "{{c1}}",
+      "op": "same"
+    },
+    {
+      "title": "ระดับบัญชี = ระดับที่ 3",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ระดับบัญชี:\")) label:has(> span:text-is(\"ระดับที่ 3\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ชื่อบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ชื่อบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} บัญชีแม่ทดสอบ แก้ไข",
+      "op": "same"
+    },
+    {
+      "title": "ชื่อบัญชี (ภาษาอังกฤษ)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ชื่อบัญชี (ภาษาอังกฤษ):\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} Parent test account",
+      "op": "same"
+    },
+    {
+      "title": "ผังบัญชีหลัก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "value": "{{mn2d}}",
+      "op": "same"
+    },
+    {
+      "title": "ปิดเข้าบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ปิดเข้าบัญชี:\")) textarea",
+      "value": "{{cld}}",
+      "op": "same"
+    },
+    {
+      "title": "กลุ่มบัญชี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"กลุ่มบัญชี:\")) textarea",
+      "value": "{{agd}}",
+      "op": "same"
+    },
+    {
+      "title": "รหัสบัญชีกระแสเงินสด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชีกระแสเงินสด:\")) textarea",
+      "value": "{{cfd}}",
+      "op": "same"
+    },
+    {
+      "title": "ประเภทบัญชี = รายได้",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ประเภทบัญชี:\")) label:has(> span:text-is(\"รายได้\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "เกี่ยวข้องกับภาษี = ภาษีขาย",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"เกี่ยวข้องกับภาษี:\")) label:has(> span:text-is(\"ภาษีขาย\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ผลกระทบต่องบการเงิน = กำไรสะสม",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผลกระทบต่องบการเงิน:\")) label:has(> span:text-is(\"กำไรสะสม\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "สถานะบัญชี = บัญชีทั่วไป",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"สถานะบัญชี:\")) label:has(> span:text-is(\"บัญชีทั่วไป\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "ด้านบัญชี = เดบิต",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ด้านบัญชี:\")) label:has(> span:text-is(\"เดบิต\")) > input[type=\"radio\"]:checked"
+    },
+    {
+      "title": "แยกหน่วยงาน ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกหน่วยงาน:\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "แยกแผนก ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกแผนก:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "แยกการจัดสรร ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกการจัดสรร:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "แยกโครงการ ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกโครงการ:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "แยกงาน ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกงาน:\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "งานระหว่างทำ (JOB) ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"งานระหว่างทำ (JOB):\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "ใช้งาน ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ใช้งาน:\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "หน่วยงาน {{sd2}} ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-side\"] tr:has(> td:text-is(\"{{sd2}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "หน่วยงาน {{sd}} ไม่ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-side\"] tr:has(> td:text-is(\"{{sd}}\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "แผนก {{dp}} ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-department\"] tr:has(> td:text-is(\"{{dp}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "การจัดสรร {{al}} ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-allocate\"] tr:has(> td:text-is(\"{{al}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "งาน {{jb}} ติ๊ก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-job\"] tr:has(> td:text-is(\"{{jb}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "โครงการ {{pj}} ไม่ติ๊ก (ทดสอบแยกท้ายสคริปต์)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-project\"] tr:has(> td:text-is(\"{{pj}}\")) input[type=\"checkbox\"]:not(:checked)"
+    },
+    {
+      "title": "ยกเลิกโหมดแก้ไข (ไม่มีการแก้)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button[title=\"ยกเลิกการแก้ไข\"]"
+    },
+    {
+      "title": "กดลบ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"ลบ\"))"
+    },
+    {
+      "title": "หน้าต่างยืนยันการลบแสดงรหัสบัญชี",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\")",
+      "text": "{{c1}}"
+    },
+    {
+      "title": "กดยืนยัน",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\") button:has-text(\"ยืนยัน\")"
+    },
+    {
+      "title": "หน้าต่างยืนยันปิด",
+      "do": "ui.expectVisible",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\")",
+      "visible": false
+    },
+    {
+      "title": "แจ้งลบไม่สำเร็จ: เป็นบัญชีหลักของบัญชีอื่น",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]:has-text(\"ลบไม่สำเร็จ\")",
+      "text": "เป็นบัญชีหลักของบัญชีอื่น"
+    },
+    {
+      "title": "ข้อความระบุรหัสบัญชีที่ลบไม่ได้",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]:has-text(\"ลบไม่สำเร็จ\")",
+      "text": "{{c1}}"
+    },
+    {
+      "title": "ภาพหน้าจอแจ้งลบไม่สำเร็จ",
+      "do": "ui.screenshot",
+      "name": "chart-delete-blocked"
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"]:has-text(\"ลบไม่สำเร็จ\") button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "บัญชีแม่ยังอยู่ (1 แถว)",
+      "do": "db.query",
+      "sql": "select count(*)::text n from gl_chart_of_account where code = :'c1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝง (ยกเว้น 400 ของการลบที่ตั้งใจให้ถูกปฏิเสธ)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 4\\d\\d POST /api/process/master-detail/(save|delete)",
+        "status of 4\\d\\d"
+      ]
+    },
+    {
+      "title": "เปิดเมนูใหม่ (แท็บสด)",
+      "do": "ui.openMenu",
+      "key": "menu_chart_of_account"
+    },
+    {
+      "title": "รายการซ้าย: ค้นหาด้วยรหัสรอบทดสอบ (เปิดบัญชีลูก)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ผลค้นหาด้วยรหัสรอบทดสอบ (เปิดบัญชีลูก) = 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "op": "eq"
+    },
+    {
+      "title": "กดแก้ไขรายการ {{c2}}",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button[title=\"แก้ไขรายการ {{c2}}\"]"
+    },
+    {
+      "title": "เปิดในโหมดแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"โหมดแก้ไข\")",
+      "text": "โหมดแก้ไข"
+    },
+    {
+      "title": "รหัสบัญชี (คีย์) แก้ไม่ได้ในโหมดแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชี:\")) > div > input[type=\"text\"][disabled]"
+    },
+    {
+      "title": "บัญชีลูกแสดงบัญชีหลักเป็นบัญชีแม่ (ชื่อหลังแก้ไข)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ผังบัญชีหลัก:\")) textarea",
+      "value": "{{c1}}~UAT{{run.short}} บัญชีแม่ทดสอบ แก้ไข",
+      "op": "same"
+    },
+    {
+      "title": "ยกเลิกโหมดแก้ไข (ไม่มีการแก้)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button[title=\"ยกเลิกการแก้ไข\"]"
+    },
+    {
+      "title": "กดลบ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"ลบ\"))"
+    },
+    {
+      "title": "หน้าต่างยืนยันการลบแสดงรหัสบัญชี",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\")",
+      "text": "{{c2}}"
+    },
+    {
+      "title": "กดยืนยัน",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\") button:has-text(\"ยืนยัน\")"
+    },
+    {
+      "title": "หน้าต่างยืนยันปิด",
+      "do": "ui.expectVisible",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\")",
+      "visible": false
+    },
+    {
+      "title": "ลบบัญชีลูกแล้วไม่เหลือแถว",
+      "do": "db.query",
+      "sql": "select count(*)::text n from gl_chart_of_account where code = :'c2'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "เปิดเมนูใหม่ (แท็บสด)",
+      "do": "ui.openMenu",
+      "key": "menu_chart_of_account"
+    },
+    {
+      "title": "รายการซ้าย: ค้นหาด้วยรหัสรอบทดสอบ (เหลือบัญชีแม่)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ผลค้นหาด้วยรหัสรอบทดสอบ (เหลือบัญชีแม่) = 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "กดแก้ไขรายการ {{c1}}",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button[title=\"แก้ไขรายการ {{c1}}\"]"
+    },
+    {
+      "title": "เปิดในโหมดแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"โหมดแก้ไข\")",
+      "text": "โหมดแก้ไข"
+    },
+    {
+      "title": "ยกเลิกโหมดแก้ไข (ไม่มีการแก้)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button[title=\"ยกเลิกการแก้ไข\"]"
+    },
+    {
+      "title": "กดลบ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"ลบ\"))"
+    },
+    {
+      "title": "หน้าต่างยืนยันการลบแสดงรหัสบัญชี",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\")",
+      "text": "{{c1}}"
+    },
+    {
+      "title": "กดยืนยัน",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\") button:has-text(\"ยืนยัน\")"
+    },
+    {
+      "title": "หน้าต่างยืนยันปิด",
+      "do": "ui.expectVisible",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\")",
+      "visible": false
+    },
+    {
+      "title": "ลบแล้วไม่เหลือแถวบัญชี/ตารางเชื่อมทั้ง 5",
+      "do": "db.query",
+      "sql": "select ((select count(*) from gl_chart_of_account where code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_side_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_depart_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_allocate_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_job_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_project_list where account_code in (:'c1', :'c2', :'c3')))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "รายการซ้าย: ค้นหารหัสรอบทดสอบหลังลบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ไม่มีแถวบัญชีแม่ในรายการซ้าย",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button[title=\"แก้ไขรายการ {{c1}}\"]",
+      "visible": false
+    },
+    {
+      "title": "ไม่มีแถวบัญชีลูกในรายการซ้าย",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button[title=\"แก้ไขรายการ {{c2}}\"]",
+      "visible": false
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงหลังลบ",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "กดเพิ่มใหม่ (บัญชีทดสอบโครงการ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"เพิ่มใหม่\"))"
+    },
+    {
+      "title": "อยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"เพิ่มรายการใหม่\")",
+      "text": "เพิ่มรายการใหม่"
+    },
+    {
+      "title": "กรอกรหัสบัญชีทดสอบโครงการ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"รหัสบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "{{c3}}"
+    },
+    {
+      "title": "กรอกชื่อบัญชีทดสอบโครงการ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"ชื่อบัญชี:\")) > div > input[type=\"text\"]",
+      "value": "UAT{{run.short}} บัญชีโครงการทดสอบ"
+    },
+    {
+      "title": "ติ๊ก แยกโครงการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.card.p-4 div.flex.items-start:has(> label:text-is(\"แยกโครงการ:\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "ติ๊กโครงการ {{pj}} (รหัสตามที่จอให้เลือก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] [data-testid=\"md-pick-project\"] tr:has(> td:text-is(\"{{pj}}\")) input[type=\"checkbox\"]"
+    },
+    {
+      "title": "กดบันทึกบัญชีทดสอบโครงการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "ได้ผลการบันทึกกลับมา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"บันทึกล่าสุด\"), [data-workspace-tab-panel=\"menu_chart_of_account\"] div.bg-rose-50[role=\"alert\"]"
+    },
+    {
+      "title": "การบันทึกไม่มีข้อผิดพลาดแฝง (HTTP/console)",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "บันทึกสำเร็จ (บันทึกล่าสุด)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] header span:has-text(\"บันทึกล่าสุด\")",
+      "text": "บันทึกล่าสุด"
+    },
+    {
+      "title": "ภาพหน้าจอหลังบันทึก",
+      "do": "ui.screenshot",
+      "name": "chart-c3-saved"
+    },
+    {
+      "title": "ไม่มีข้อความผิดพลาด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] div.bg-rose-50[role=\"alert\"]",
+      "visible": false
+    },
+    {
+      "title": "บัญชีทดสอบโครงการผูกโครงการ {{pj}} ใน DB",
+      "do": "db.query",
+      "sql": "select coalesce(string_agg(project_code, ',' order by project_code), '~') p from gl_chart_of_account_project_list where account_code = :'c3'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "p",
+          "op": "same",
+          "value": "{{pj}}"
+        }
+      ]
+    },
+    {
+      "title": "กดลบ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_chart_of_account\"] button:has(> span:text-is(\"ลบ\"))"
+    },
+    {
+      "title": "หน้าต่างยืนยันการลบแสดงรหัสบัญชี",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\")",
+      "text": "{{c3}}"
+    },
+    {
+      "title": "กดยืนยัน",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\") button:has-text(\"ยืนยัน\")"
+    },
+    {
+      "title": "หน้าต่างยืนยันปิด",
+      "do": "ui.expectVisible",
+      "selector": "[role=\"dialog\"]:has-text(\"ยืนยันการลบ\")",
+      "visible": false
+    },
+    {
+      "title": "ลบแล้วไม่เหลือแถวบัญชีทดสอบทั้ง 3/ตารางเชื่อม",
+      "do": "db.query",
+      "sql": "select ((select count(*) from gl_chart_of_account where code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_side_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_depart_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_allocate_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_job_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_project_list where account_code in (:'c1', :'c2', :'c3')))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบบัญชีลูกทดสอบ (กรณีขั้นตอนลบผ่านหน้าจอไม่ผ่าน)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/master-detail/delete",
+      "body": {
+        "menuKey": "menu_chart_of_account",
+        "key": "{{c2}}"
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบบัญชีทดสอบโครงการ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/master-detail/delete",
+      "body": {
+        "menuKey": "menu_chart_of_account",
+        "key": "{{c3}}"
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบบัญชีแม่ทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/master-detail/delete",
+      "body": {
+        "menuKey": "menu_chart_of_account",
+        "key": "{{c1}}"
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษบัญชีทดสอบ",
+      "do": "db.query",
+      "sql": "select ((select count(*) from gl_chart_of_account where code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_side_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_depart_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_allocate_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_job_list where account_code in (:'c1', :'c2', :'c3')) + (select count(*) from gl_chart_of_account_project_list where account_code in (:'c1', :'c2', :'c3')))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

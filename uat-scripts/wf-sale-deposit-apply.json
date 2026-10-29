@@ -1,0 +1,552 @@
+{
+  "id": "wf-sale-deposit-apply",
+  "title": "รับเงินมัดจำ → ตัดมัดจำในบิลขายเชื่อ: ยอดก่อนภาษี/ภาษี/สุทธิ GL ลูกหนี้ ยอดมัดจำคงเหลือ ตัดเกินถูกปฏิเสธ แล้วลบคืนไม่เหลือเศษ",
+  "module": "sales",
+  "lens": "api",
+  "severityOnFail": "S1",
+  "timeoutMs": 600000,
+  "description": "ทำแบบผู้ใช้ Demo ผ่าน API ตัวเดียวกับหน้าจอ · สินค้าตัวแรกตามรหัสที่สต๊อกพอ ราคาจากบิลขายจริงล่าสุด ลูกค้า/อัตราภาษี/รหัสบัญชีจากบิลขายเชื่อและใบรับมัดจำจริงล่าสุด ยอดคำนวณใน SQL ตามสูตรของ ERP · (1) ใบรับเงินมัดจำ (ภาษีแยกนอก) มูลค่าสินค้า 2 หน่วย รับเงินสดเต็ม → ภาษีขาย GL Dr เงินสด/Cr มัดจำรับ/Cr ภาษีขาย · (2) บิลขายเชื่อ 3 หน่วยตัดมัดจำเกิน 0.01 ถูกปฏิเสธ · (3) บิลตัดมัดจำเต็มจำนวน → advance_amount = ยอดตัด×100/(100+อัตรา) ภาษีคิดบนฐานหลังหักมัดจำ ยอดมัดจำคงเหลือ 0 GL Dr ลูกหนี้/Dr มัดจำรับ/Cr ขายเต็ม/Cr ภาษี ลูกหนี้ค้าง = ยอดสุทธิ · (4) ลบใบมัดจำที่ถูกใช้แล้วถูกปฏิเสธ · ล้างข้อมูลผ่าน API แล้วพิสูจน์ว่าไม่เหลือแถว",
+  "steps": [
+    {
+      "title": "กำหนดเลขใบรับเงินมัดจำทดสอบ",
+      "do": "set",
+      "name": "dep",
+      "value": "UAT-{{run.short}}-DEP"
+    },
+    {
+      "title": "กำหนดเลขบิลขายที่ตัดมัดจำ",
+      "do": "set",
+      "name": "si",
+      "value": "UAT-{{run.short}}-INV"
+    },
+    {
+      "title": "กำหนดรูปแบบเลขเอกสารของรอบนี้ (ใช้แยกจากเอกสาร UAT ของรอบอื่นที่รันพร้อมกัน)",
+      "do": "set",
+      "name": "mine",
+      "value": "UAT-{{run.short}}-%"
+    },
+    {
+      "title": "จำนวนสินค้าที่คิดเป็นเงินมัดจำ",
+      "do": "set",
+      "name": "q_dep",
+      "value": "2"
+    },
+    {
+      "title": "จำนวนที่ขายในบิล",
+      "do": "set",
+      "name": "q_si",
+      "value": "3"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เลือกสินค้าตัวแรกตามรหัส (ORDER BY รหัสสินค้า) ที่หน่วยนับ 1:1 มีจริง คลัง/ที่เก็บมีจริง ราคาขายจากบิลขายจริงล่าสุด และสต๊อกพอ ≥ 3",
+      "do": "db.query",
+      "sql": "select i.code as item, i.unit_standard as unit, p.wh_code as wh, p.shelf_code as shelf, p.price::text as price from ic_inventory i join ic_unit_use u on u.ic_code = i.code and u.code = i.unit_standard and u.stand_value = 1 and u.divide_value = 1 cross join lateral (select d.price, d.wh_code, d.shelf_code from ic_trans_detail d join ic_trans t on t.doc_no = d.doc_no and t.trans_flag = d.trans_flag where d.item_code = i.code and d.trans_flag = 44 and t.doc_no not like 'UAT%' and t.last_status = 0 and coalesce(t.is_cancel, 0) = 0 and d.unit_code = i.unit_standard and d.stand_value = 1 and d.divide_value = 1 and d.price > 0 and coalesce(d.discount, '') = '' and coalesce(d.tax_type, 0) = 0 and coalesce(d.wh_code, '') <> '' and coalesce(d.shelf_code, '') <> '' order by t.doc_date desc, t.roworder desc, d.line_number limit 1) p join ic_warehouse w on w.code = p.wh_code join ic_shelf s on s.whcode = p.wh_code and s.code = p.shelf_code cross join lateral (select coalesce(sum(d.qty * d.calc_flag * coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1)), 0) as bal from ic_trans_detail d where d.item_code = i.code and d.wh_code = p.wh_code and d.shelf_code = p.shelf_code and d.doc_no not like 'UAT-%' and coalesce(d.last_status, 0) = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12, 310, 14, 311, 16, 44, 46, 48, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 521, 522, 523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14, 16, 311) and coalesce(d.inquiry_type, 0) in (1, 3))) b where coalesce(i.item_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0 and coalesce(i.tax_type, 0) = 0 and b.bal >= 3 order by i.code asc limit 1",
+      "rows": 1,
+      "save": {
+        "item": "item",
+        "unit": "unit",
+        "wh": "wh",
+        "shelf": "shelf",
+        "price": "price"
+      }
+    },
+    {
+      "title": "เลือกลูกค้า อัตราภาษี และรหัสบัญชีลูกหนี้/ขาย/ภาษีขาย จากบิลขายเชื่อจริงล่าสุด (ภาษีแยกนอก) ที่ลง GL ครบ",
+      "do": "db.query",
+      "sql": "select * from (select t.cust_code as cust, t.vat_rate::text as rate, (select g.account_code from gl_journal_detail g join gl_chart_of_account x on x.code = g.account_code where g.doc_no = t.doc_no and g.debit = t.total_amount and g.credit = 0 limit 1) as acc_ar, (select g.account_code from gl_journal_detail g join gl_chart_of_account x on x.code = g.account_code where g.doc_no = t.doc_no and g.credit = t.total_before_vat and g.debit = 0 limit 1) as acc_sale, (select g.account_code from gl_journal_detail g join gl_chart_of_account x on x.code = g.account_code where g.doc_no = t.doc_no and g.credit = t.total_vat_value and g.debit = 0 limit 1) as acc_vat, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today from ic_trans t join ar_customer c on c.code = t.cust_code where t.trans_flag = 44 and t.inquiry_type = 0 and t.vat_type = 0 and t.doc_no not like 'UAT%' and t.last_status = 0 and coalesce(t.is_cancel, 0) = 0 and coalesce(t.advance_amount, 0) = 0 and t.total_vat_value > 0 and t.total_before_vat <> t.total_vat_value order by t.doc_date desc, t.roworder desc limit 20) x where acc_ar is not null and acc_sale is not null and acc_vat is not null limit 1",
+      "rows": 1,
+      "save": {
+        "cust": "cust",
+        "rate": "rate",
+        "acc_ar": "acc_ar",
+        "acc_sale": "acc_sale",
+        "acc_vat": "acc_vat",
+        "today": "today"
+      }
+    },
+    {
+      "title": "เลือกรหัสบัญชีเงินสด/เงินมัดจำรับ จากใบรับเงินมัดจำจริงล่าสุดที่ลง GL ครบ",
+      "do": "db.query",
+      "sql": "select * from (select (select g.account_code from gl_journal_detail g join gl_chart_of_account x on x.code = g.account_code where g.doc_no = t.doc_no and g.debit = t.total_amount and g.credit = 0 limit 1) as acc_cash, (select g.account_code from gl_journal_detail g join gl_chart_of_account x on x.code = g.account_code where g.doc_no = t.doc_no and g.credit = t.total_before_vat and g.debit = 0 limit 1) as acc_dep from ic_trans t where t.trans_flag = 110 and t.doc_no not like 'UAT%' and t.last_status = 0 and t.vat_type = 0 and t.total_vat_value > 0 order by t.doc_date desc, t.roworder desc limit 20) x where acc_cash is not null and acc_dep is not null limit 1",
+      "rows": 1,
+      "save": {
+        "acc_cash": "acc_cash",
+        "acc_dep": "acc_dep"
+      }
+    },
+    {
+      "title": "คำนวณยอดมัดจำ (ภาษีแยกนอก) ยอดตัด ยอดมัดจำก่อนภาษี และยอดบิลหลังหักมัดจำ (สูตร trans_deposit.go/transcalc.go)",
+      "do": "db.query",
+      "sql": "with x as (select round(:'q_dep'::numeric * :'price'::numeric, 2) as d_sum, round(:'q_si'::numeric * :'price'::numeric, 2) as goods), y as (select x.*, round(x.d_sum * :'rate'::numeric / 100, 2) as d_vat from x), z as (select y.*, y.d_sum + y.d_vat as d_total from y), w as (select z.*, round((z.d_sum + z.d_vat) * 100 / (100 + :'rate'::numeric), 2) as adv from z), v as (select w.*, w.goods - w.adv as before from w) select d_sum::text as d_sum, d_vat::text as d_vat, d_total::text as d_total, (d_total + 0.01)::text as cut_over, goods::text as goods, adv::text as adv, before::text as si_sum, round(before * :'rate'::numeric / 100, 2)::text as si_vat, (before + round(before * :'rate'::numeric / 100, 2))::text as si_total from v",
+      "rows": 1,
+      "save": {
+        "d_sum": "d_sum",
+        "d_vat": "d_vat",
+        "d_total": "d_total",
+        "cut_over": "cut_over",
+        "goods": "goods",
+        "adv": "adv",
+        "si_sum": "si_sum",
+        "si_vat": "si_vat",
+        "si_total": "si_total"
+      }
+    },
+    {
+      "title": "บันทึกใบรับเงินมัดจำ (ภาษีแยกนอก) รับเงินสดเต็มจำนวน",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{dep}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 110,
+        "inquiryType": 1,
+        "custCode": "{{cust}}",
+        "docFormatCode": "SRV",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "remark": "มัดจำสินค้า {{item}} {{run.tag}}",
+            "sumAmount": "{{d_sum}}"
+          }
+        ],
+        "pay": {
+          "cash": "{{d_total}}"
+        }
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{dep}}"
+        }
+      ]
+    },
+    {
+      "title": "หัวใบรับเงินมัดจำ: ฐาน/ภาษี/รวมตรง",
+      "do": "db.query",
+      "sql": "select total_before_vat, total_vat_value, total_amount from ic_trans where doc_no = :'dep' and trans_flag = 110",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{d_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{d_vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{d_total}}"
+        }
+      ]
+    },
+    {
+      "title": "ภาษีขายของเงินมัดจำ: 1 แถว ฐาน/ภาษีตรง",
+      "do": "db.query",
+      "sql": "select base_caltax_amount, amount, vat_calc from gl_journal_vat_sale where doc_no = :'dep'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "base_caltax_amount",
+          "op": "eq",
+          "value": "{{d_sum}}"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{d_vat}}"
+        },
+        {
+          "col": "vat_calc",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "GL ใบรับเงินมัดจำ: Dr เงินสด = รวม, Cr เงินมัดจำรับ = ก่อนภาษี, Cr ภาษีขาย = ภาษี และเดบิต = เครดิต",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit), 0) as debit, coalesce(sum(debit) filter (where account_code = :'acc_cash'), 0) as l0, coalesce(sum(credit) filter (where account_code = :'acc_dep'), 0) as l1, coalesce(sum(credit) filter (where account_code = :'acc_vat'), 0) as l2 from gl_journal_detail where doc_no = :'dep'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "debit",
+          "op": "eq",
+          "value": "{{d_total}}"
+        },
+        {
+          "col": "l0",
+          "op": "eq",
+          "value": "{{d_total}}"
+        },
+        {
+          "col": "l1",
+          "op": "eq",
+          "value": "{{d_sum}}"
+        },
+        {
+          "col": "l2",
+          "op": "eq",
+          "value": "{{d_vat}}"
+        }
+      ]
+    },
+    {
+      "title": "บิลขายตัดมัดจำเกินยอดคงเหลือ (ยอดมัดจำ + 0.01) ต้องถูกปฏิเสธ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{si}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 44,
+        "inquiryType": 0,
+        "custCode": "{{cust}}",
+        "docFormatCode": "SI",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "taxDocNo": "{{si}}",
+        "taxDocDate": "{{today}}",
+        "deposits": [
+          {
+            "docNo": "{{dep}}",
+            "amount": "{{cut_over}}",
+            "remark": "{{run.tag}}"
+          }
+        ],
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "1",
+            "divideValue": "1",
+            "qty": "{{q_si}}",
+            "price": "{{price}}",
+            "sumAmount": "{{goods}}",
+            "taxType": 0
+          }
+        ]
+      },
+      "expectStatus": [
+        400,
+        409,
+        422
+      ],
+      "expect": [
+        {
+          "path": "error",
+          "op": "contains",
+          "value": "ยอดตัดจ่ายมากกว่ายอดคงเหลือ"
+        }
+      ]
+    },
+    {
+      "title": "บิลที่ตัดมัดจำเกินไม่ถูกบันทึก",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no = :'si') + (select count(*) from ap_ar_trans where doc_no = :'si') + (select count(*) from gl_journal_detail where doc_no = :'si') as n",
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "บันทึกขายเชื่อ ตัดเงินมัดจำเต็มจำนวน",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{si}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 44,
+        "inquiryType": 0,
+        "custCode": "{{cust}}",
+        "docFormatCode": "SI",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "taxDocNo": "{{si}}",
+        "taxDocDate": "{{today}}",
+        "deposits": [
+          {
+            "docNo": "{{dep}}",
+            "amount": "{{d_total}}",
+            "remark": "{{run.tag}}"
+          }
+        ],
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "1",
+            "divideValue": "1",
+            "qty": "{{q_si}}",
+            "price": "{{price}}",
+            "sumAmount": "{{goods}}",
+            "taxType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{si}}"
+        }
+      ]
+    },
+    {
+      "title": "หัวบิลขาย: เงินมัดจำก่อนภาษี (advance_amount) ฐานหลังหักมัดจำ ภาษี และยอดสุทธิตรง",
+      "do": "db.query",
+      "sql": "select advance_amount, total_before_vat, total_vat_value, total_amount from ic_trans where doc_no = :'si' and trans_flag = 44",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "advance_amount",
+          "op": "eq",
+          "value": "{{adv}}"
+        },
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{si_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{si_vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{si_total}}"
+        }
+      ]
+    },
+    {
+      "title": "แถวตัดเงินมัดจำของบิล: อ้างใบมัดจำ ยอดตัดเท่ายอดมัดจำ (ประเภทมัดจำ doc_type 6)",
+      "do": "db.query",
+      "sql": "select trans_number, amount, doc_type from cb_trans_detail where doc_no = :'si' and trans_flag = 44 and doc_type = 6",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "trans_number",
+          "op": "eq",
+          "value": "{{dep}}"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{d_total}}"
+        }
+      ]
+    },
+    {
+      "title": "ยอดเงินมัดจำคงเหลือหลังตัดเต็มจำนวน = 0 (ยอดมัดจำ − คืน − ตัดใช้)",
+      "do": "db.query",
+      "sql": "select (d.total_amount - coalesce((select sum(r.total_amount) from ic_trans r where r.trans_flag = 112 and r.doc_ref = d.doc_no and r.last_status = 0), 0) - coalesce((select sum(c.amount) from cb_trans_detail c where c.trans_number = d.doc_no and c.doc_type = 6 and coalesce(c.last_status, 0) = 0), 0))::text as balance from ic_trans d where d.doc_no = :'dep' and d.trans_flag = 110",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "balance",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ภาษีขายของบิล: คิดบนฐานหลังหักมัดจำ",
+      "do": "db.query",
+      "sql": "select base_caltax_amount, amount, tax_rate, vat_calc from gl_journal_vat_sale where doc_no = :'si'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "base_caltax_amount",
+          "op": "eq",
+          "value": "{{si_sum}}"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{si_vat}}"
+        },
+        {
+          "col": "tax_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "vat_calc",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "คำนวณยอดเดบิตรวมของ GL บิล = มูลค่าสินค้า + ภาษีบิล",
+      "do": "db.query",
+      "sql": "select (:'goods'::numeric + :'si_vat'::numeric)::text as goods_plus_vat",
+      "rows": 1,
+      "save": {
+        "goods_plus_vat": "goods_plus_vat"
+      }
+    },
+    {
+      "title": "GL บิลขายตัดมัดจำ: Dr ลูกหนี้ = ยอดสุทธิ, Dr เงินมัดจำรับ = มัดจำก่อนภาษี, Cr ขาย = มูลค่าสินค้าเต็ม, Cr ภาษีขาย = ภาษีบิล และเดบิต = เครดิต",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit), 0) as debit, coalesce(sum(debit) filter (where account_code = :'acc_ar'), 0) as l0, coalesce(sum(debit) filter (where account_code = :'acc_dep'), 0) as l1, coalesce(sum(credit) filter (where account_code = :'acc_sale'), 0) as l2, coalesce(sum(credit) filter (where account_code = :'acc_vat'), 0) as l3 from gl_journal_detail where doc_no = :'si'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "debit",
+          "op": "eq",
+          "value": "{{goods_plus_vat}}"
+        },
+        {
+          "col": "l0",
+          "op": "eq",
+          "value": "{{si_total}}"
+        },
+        {
+          "col": "l1",
+          "op": "eq",
+          "value": "{{adv}}"
+        },
+        {
+          "col": "l2",
+          "op": "eq",
+          "value": "{{goods}}"
+        },
+        {
+          "col": "l3",
+          "op": "eq",
+          "value": "{{si_vat}}"
+        }
+      ]
+    },
+    {
+      "title": "ลูกหนี้คงค้างของบิล (สูตรหน้ารับชำระ) = ยอดสุทธิหลังหักมัดจำ",
+      "do": "db.query",
+      "sql": "select coalesce(sum((case when h.trans_flag = 48 and h.inquiry_type in (0, 2, 4) then -1 else 1 end) * coalesce(h.total_amount, 0) - coalesce((select sum(coalesce(p.sum_pay_money, 0) + case when h.trans_flag in (12, 44, 1802) then coalesce(p.lost_profit_exchange_amount, 0) else 0 end) from ap_ar_trans_detail p where p.last_status = 0 and p.trans_flag = 239 and p.billing_no = h.doc_no and p.bill_type = h.trans_flag), 0)), 0)::text as ar, count(*) as docs from ic_trans h where h.doc_no in (:'si') and h.last_status = 0 and ((h.trans_flag = 44 and h.inquiry_type in (0, 2)) or h.trans_flag = 46 or (h.trans_flag = 48 and h.inquiry_type in (0, 2, 4)))",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "ar",
+          "op": "eq",
+          "value": "{{si_total}}"
+        },
+        {
+          "col": "docs",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "ลบใบรับเงินมัดจำที่ถูกบิลตัดใช้แล้ว ต้องถูกปฏิเสธ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{dep}}",
+        "transFlag": 110
+      },
+      "expectStatus": [
+        400,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ใบรับเงินมัดจำยังอยู่หลังถูกปฏิเสธการลบ",
+      "do": "db.query",
+      "sql": "select doc_no from ic_trans where doc_no = :'dep' and trans_flag = 110",
+      "rows": 1
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบบิลขายทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{si}}",
+        "transFlag": 44
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบรับเงินมัดจำทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{dep}}",
+        "transFlag": 110
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo (หัว/บรรทัด/ลูกหนี้/การเงิน/GL/ภาษีขาย-ซื้อ/การตัดมัดจำ/เอกสารอนุมัติ-ยกเลิก)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'dep', :'si')) + (select count(*) from ic_trans_detail where doc_no in (:'dep', :'si')) + (select count(*) from ap_ar_trans where doc_no in (:'dep', :'si')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'dep', :'si')) + (select count(*) from cb_trans where doc_no in (:'dep', :'si')) + (select count(*) from cb_trans_detail where doc_no in (:'dep', :'si')) + (select count(*) from gl_journal where doc_no in (:'dep', :'si')) + (select count(*) from gl_journal_detail where doc_no in (:'dep', :'si')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'dep', :'si')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'dep', :'si')) + (select count(*) from cb_trans_detail where trans_number in (:'dep', :'si')) + (select count(*) from ic_trans where doc_ref in (:'dep', :'si') and trans_flag in (45, 111)) as left_rows",
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

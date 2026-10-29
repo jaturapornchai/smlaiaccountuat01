@@ -1,0 +1,274 @@
+{
+  "id": "cb-cheque-in-return-new-debt",
+  "title": "รับชำระลูกหนี้ด้วยเช็ค → นำฝาก → เช็คคืน → ตั้งหนี้ใหม่: สถานะเช็ค GL และหนี้ลูกหนี้ต้องกลับมาถูกต้อง แล้วลบคืนไม่เหลือเศษ",
+  "module": "sales",
+  "lens": "api",
+  "severityOnFail": "S1",
+  "description": "ทำงานผ่าน API ตัวเดียวกับหน้าจอ: ตั้งหนี้ลูกหนี้ยกมา (93) → รับชำระ (239) ด้วยเช็ค → นำฝากเช็ค (410) → บันทึกเช็คคืน (412) → บันทึกคืนเช็ค/ตั้งหนี้ใหม่ (418) · ทุกขั้นตรวจสถานะเช็คในทะเบียน (0 → 1 → 3 → 8), GL สมดุล, ตัวเลือกเช็คแต่ละหน้าจอ, รายงานเช็ครับ และรายงานใบส่งของค้างชำระ (หนี้เดิมหาย หนี้ใหม่ขึ้นเต็มยอด) · หลังเช็คคืน: ยอดบัญชีเงินฝากใน GL ต้องไม่เพิ่ม (เช็คไม่เคยขึ้นเงิน) และลูกหนี้ใน GL ต้องกลับมาเท่ายอดตั้งหนี้ใหม่ · ลูกหนี้/ยอดหนี้ดึงจากเอกสารตั้งหนี้ยกมาจริงล่าสุด ธนาคาร/สาขาเช็คจากทะเบียนเช็ครับจริง สมุดจาก erp_pass_book ที่ผังบัญชีมีจริง เลขเช็คเป็นของรอบนี้ · ไม่ซ้ำกับ e2e-cheque-receipt (ฝาก → ผ่าน) · cleanup ลบ 418 → 412 → 410 → 239 → 93 ผ่าน API แล้วตรวจว่าไม่เหลือแถว",
+  "steps": [
+    { "title": "กำหนดเลขเอกสารตั้งหนี้ลูกหนี้ยกมาทดสอบ", "do": "set", "name": "ea", "value": "UAT-{{run.short}}-EA" },
+    { "title": "กำหนดเลขใบรับชำระทดสอบ", "do": "set", "name": "ee", "value": "UAT-{{run.short}}-EE" },
+    { "title": "กำหนดเลขบันทึกนำฝากเช็คทดสอบ", "do": "set", "name": "dp", "value": "UAT-{{run.short}}-CHD" },
+    { "title": "กำหนดเลขบันทึกเช็คคืนทดสอบ", "do": "set", "name": "rt", "value": "UAT-{{run.short}}-CRT" },
+    { "title": "กำหนดเลขบันทึกคืนเช็ค/ตั้งหนี้ใหม่ทดสอบ", "do": "set", "name": "nd", "value": "UAT-{{run.short}}-CND" },
+    { "title": "กำหนดเลขเช็ครับของรอบนี้", "do": "set", "name": "chq", "value": "UAT{{run.short}}R" },
+    { "title": "เข้าสู่ระบบแบบ Demo", "do": "ui.demoLogin" },
+    {
+      "title": "ดึงลูกหนี้และยอดหนี้จากเอกสารตั้งหนี้ยกมาจริงล่าสุด ธนาคาร/สาขาจากเช็ครับจริง (ไม่มีจึงใช้ธนาคาร/สาขาแรกจากทะเบียนธนาคาร) สมุดธนาคารที่ผังบัญชีมีจริง และบัญชีลูกหนี้/เช็ครับจากผังบัญชี",
+      "do": "db.query",
+      "sql": "with d as (select t.cust_code, t.total_amount, coalesce(nullif(t.doc_format_code, ''), 'EA') as fmt from ic_trans t join ar_customer c on c.code = t.cust_code where t.trans_flag = 93 and t.doc_no not like 'UAT%' and t.last_status = 0 and t.total_amount > 0 order by t.doc_date desc, t.roworder desc limit 1), k as (select bank_code, bank_branch from (select c.bank_code, coalesce(c.bank_branch, '') as bank_branch, 1 as pri, c.roworder from cb_chq_list c join erp_bank b on b.code = c.bank_code where c.chq_type = 1 and c.chq_number not like 'UAT%' union all select b.code, coalesce((select br.code from erp_bank_branch br where br.bank_code = b.code order by br.code limit 1), ''), 2, b.roworder from erp_bank b) x order by (bank_branch <> '') desc, pri, roworder desc limit 1), b as (select p.code, p.account_code_1 as acc from erp_pass_book p join gl_chart_of_account c on c.code = p.account_code_1 order by p.code limit 1) select d.cust_code as cust, round(d.total_amount, 2)::text as amt, d.fmt as eafmt, coalesce((select doc_format_code from ap_ar_trans where trans_flag = 239 and doc_no not like 'UAT%' and coalesce(doc_format_code, '') <> '' order by roworder desc limit 1), 'EE') as eefmt, coalesce(k.bank_code, '') as chq_bank, coalesce(k.bank_branch, '') as chq_branch, b.code as book, b.acc, (select code from gl_chart_of_account where name_1 like 'ลูกหนี้การค้า%' order by code limit 1) as ar_acc, (select code from gl_chart_of_account where name_1 like 'เช็ครับ%' order by code limit 1) as chq_acc, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today from d cross join b left join k on true",
+      "rows": 1,
+      "expect": [
+        { "col": "cust", "op": "exists" },
+        { "col": "amt", "op": "gt", "value": "0" },
+        { "col": "eefmt", "op": "exists" },
+        { "col": "book", "op": "exists" },
+        { "col": "ar_acc", "op": "exists" },
+        { "col": "chq_acc", "op": "exists" }
+      ],
+      "save": { "cust": "cust", "amt": "amt", "eafmt": "eafmt", "eefmt": "eefmt", "chq_bank": "chq_bank", "chq_branch": "chq_branch", "book": "book", "acc": "acc", "ar_acc": "ar_acc", "chq_acc": "chq_acc", "today": "today" }
+    },
+    {
+      "title": "บันทึกตั้งหนี้ลูกหนี้ยกมา (93) กรอกยอดที่หัวเอกสาร ไม่มีรายการ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": { "isNew": true, "confirmed": true, "docNo": "{{ea}}", "docDate": "{{today}}", "transType": 2, "transFlag": 93, "inquiryType": 0, "custCode": "{{cust}}", "docFormatCode": "{{eafmt}}", "dueDate": "{{today}}", "remark": "{{run.tag}}", "totalAmount": "{{amt}}", "lines": [] },
+      "expect": [{ "path": "data.docNo", "op": "eq", "value": "{{ea}}" }]
+    },
+    {
+      "title": "รายงานใบส่งของค้างชำระ: หนี้ยกมานี้ค้างเต็มยอด",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": { "menuKey": "menu_ar_report_invoice_remain_pay", "mode": "summary", "dateFrom": "{{today}}", "dateTo": "{{today}}", "fromCode": "", "toCode": "", "orderBy": "", "keyword": "{{ea}}", "viewDetail": false },
+      "expect": [
+        { "path": "data.rows.0.doc_no", "op": "eq", "value": "{{ea}}" },
+        { "path": "data.rows.0.ยอดคงเหลือ", "op": "eq", "value": "{{amt}}" },
+        { "path": "data.rows.1", "op": "empty" }
+      ]
+    },
+    {
+      "title": "รับชำระหนี้ยกมาเต็มจำนวนด้วยเช็ค (239)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/save",
+      "body": {
+        "kind": "ap_ar_trans", "isNew": true, "docNo": "{{ee}}", "docDate": "{{today}}", "transType": 2, "transFlag": 239, "custCode": "{{cust}}", "docFormatCode": "{{eefmt}}", "remark": "{{run.tag}}",
+        "bills": [{ "billingNo": "{{ea}}", "billingDate": "{{today}}", "billType": 93, "sumDebtAmount": "{{amt}}", "balanceRef": "{{amt}}", "sumPayMoney": "{{amt}}" }],
+        "pay": { "cheques": [{ "chqNumber": "{{chq}}", "bankCode": "{{chq_bank}}", "bankBranch": "{{chq_branch}}", "chqDueDate": "{{today}}", "amount": "{{amt}}" }] }
+      },
+      "expect": [{ "path": "data.docNo", "op": "eq", "value": "{{ee}}" }]
+    },
+    {
+      "title": "ทะเบียนเช็ครับ: เช็คใหม่ 1 ใบ สถานะ 0 เช็คในมือ อ้างใบรับชำระ ยอด/ลูกหนี้ตรง",
+      "do": "db.query",
+      "sql": "select chq_type, status, amount, doc_ref, ap_ar_code, bank_code from cb_chq_list where chq_number = :'chq'",
+      "rows": 1,
+      "expect": [
+        { "col": "chq_type", "op": "eq", "value": "1" },
+        { "col": "status", "op": "eq", "value": "0" },
+        { "col": "amount", "op": "eq", "value": "{{amt}}" },
+        { "col": "doc_ref", "op": "eq", "value": "{{ee}}" },
+        { "col": "ap_ar_code", "op": "eq", "value": "{{cust}}" },
+        { "col": "bank_code", "op": "eq", "value": "{{chq_bank}}" }
+      ]
+    },
+    {
+      "title": "GL ใบรับชำระด้วยเช็ค: เดบิตเช็ครับล่วงหน้า เครดิตลูกหนี้การค้า = ยอดเช็ค และสมดุล",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit) filter (where account_code = :'chq_acc'), 0) as dr_chq, coalesce(sum(credit) filter (where account_code = :'ar_acc'), 0) as cr_ar from gl_journal_detail where doc_no = :'ee'",
+      "rows": 1,
+      "expect": [
+        { "col": "n", "op": "gt", "value": "0" },
+        { "col": "diff", "op": "eq", "value": "0" },
+        { "col": "dr_chq", "op": "eq", "value": "{{amt}}" },
+        { "col": "cr_ar", "op": "eq", "value": "{{amt}}" }
+      ]
+    },
+    {
+      "title": "รายงานใบส่งของค้างชำระ: หลังรับเช็คแล้ว หนี้ยกมานี้ไม่ค้าง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": { "menuKey": "menu_ar_report_invoice_remain_pay", "mode": "summary", "dateFrom": "{{today}}", "dateTo": "{{today}}", "fromCode": "", "toCode": "", "orderBy": "", "keyword": "{{ea}}", "viewDetail": false },
+      "expect": [{ "path": "data.rows.0", "op": "empty" }]
+    },
+    {
+      "title": "ตัวเลือกเช็คหน้านำฝาก (410) เห็นเช็คใบนี้ อ้างใบรับชำระบรรทัด 1",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/cheque/candidates",
+      "body": { "transFlag": 410, "custCode": "", "passBookCode": "{{book}}", "search": "{{chq}}" },
+      "expect": [
+        { "path": "data.0.chqNumber", "op": "eq", "value": "{{chq}}" },
+        { "path": "data.0.docRef", "op": "eq", "value": "{{ee}}" },
+        { "path": "data.0.docLineNumber", "op": "eq", "value": "1" },
+        { "path": "data.0.amount", "op": "eq", "value": "{{amt}}" }
+      ]
+    },
+    {
+      "title": "บันทึกนำฝากเช็ค (410) เช็คใบนี้เข้าสมุดธนาคาร",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true, "confirmed": true, "docNo": "{{dp}}", "docDate": "{{today}}", "transType": 2, "transFlag": 410, "inquiryType": 0, "custCode": "", "passBookCode": "{{book}}", "docFormatCode": "CHD", "remark": "{{run.tag}}",
+        "lines": [{ "itemCode": "{{book}}", "qty": "1", "standValue": "1", "divideValue": "1", "price": "{{amt}}", "sumAmount": "{{amt}}", "taxType": 0, "chqNumber": "{{chq}}", "docRef": "{{ee}}", "refRow": 1, "dateDue": "{{today}}" }]
+      },
+      "expect": [{ "path": "data.docNo", "op": "eq", "value": "{{dp}}" }]
+    },
+    {
+      "title": "หลังนำฝาก: สถานะเช็ค = 1 เช็คนำฝาก",
+      "do": "db.query",
+      "sql": "select status from cb_chq_list where chq_number = :'chq'",
+      "rows": 1,
+      "expect": [{ "col": "status", "op": "eq", "value": "1" }]
+    },
+    {
+      "title": "GL นำฝากเช็ค (410): เดบิตบัญชีเงินฝากของสมุด เครดิตเช็ครับล่วงหน้า = ยอดเช็ค และสมดุล",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit) filter (where account_code = :'acc'), 0) as dr_bank, coalesce(sum(credit) filter (where account_code = :'chq_acc'), 0) as cr_chq from gl_journal_detail where doc_no = :'dp'",
+      "rows": 1,
+      "expect": [
+        { "col": "n", "op": "gt", "value": "0" },
+        { "col": "diff", "op": "eq", "value": "0" },
+        { "col": "dr_bank", "op": "eq", "value": "{{amt}}" },
+        { "col": "cr_chq", "op": "eq", "value": "{{amt}}" }
+      ]
+    },
+    {
+      "title": "ตัวเลือกเช็คหน้าบันทึกเช็คคืน (412) เห็นเช็คที่นำฝากแล้ว",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/cheque/candidates",
+      "body": { "transFlag": 412, "custCode": "", "passBookCode": "", "search": "{{chq}}" },
+      "expect": [{ "path": "data.0.chqNumber", "op": "eq", "value": "{{chq}}" }, { "path": "data.0.amount", "op": "eq", "value": "{{amt}}" }]
+    },
+    {
+      "title": "บันทึกเช็คคืน (412) ธนาคารคืนเช็คใบนี้",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true, "confirmed": true, "docNo": "{{rt}}", "docDate": "{{today}}", "transType": 2, "transFlag": 412, "inquiryType": 0, "custCode": "", "passBookCode": "{{book}}", "docFormatCode": "CRT", "remark": "{{run.tag}}",
+        "lines": [{ "itemCode": "{{book}}", "qty": "1", "standValue": "1", "divideValue": "1", "price": "{{amt}}", "sumAmount": "{{amt}}", "taxType": 0, "chqNumber": "{{chq}}", "docRef": "{{ee}}", "refRow": 1, "dateDue": "{{today}}" }]
+      },
+      "expect": [{ "path": "data.docNo", "op": "eq", "value": "{{rt}}" }]
+    },
+    {
+      "title": "หลังเช็คคืน: สถานะเช็ค = 3 เช็ครับคืน",
+      "do": "db.query",
+      "sql": "select status from cb_chq_list where chq_number = :'chq'",
+      "rows": 1,
+      "expect": [{ "col": "status", "op": "eq", "value": "3" }]
+    },
+    {
+      "title": "GL เช็คคืน (412): มีรายการ สมดุล และยอดเดบิต = ยอดเช็ค",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit), 0) as dr from gl_journal_detail where doc_no = :'rt'",
+      "rows": 1,
+      "expect": [{ "col": "n", "op": "gt", "value": "0" }, { "col": "diff", "op": "eq", "value": "0" }, { "col": "dr", "op": "eq", "value": "{{amt}}" }]
+    },
+    {
+      "title": "บัญชีหลังเช็คคืน: ยอดบัญชีเงินฝากใน GL ของ นำฝาก+เช็คคืน ต้องสุทธิ 0 (เช็คเด้ง เงินไม่เคยเข้าธนาคาร)",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit - credit), 0) as bank_net from gl_journal_detail where doc_no in (:'dp', :'rt') and account_code = :'acc'",
+      "rows": 1,
+      "expect": [{ "col": "bank_net", "op": "eq", "value": "0" }],
+      "continueOnFail": true
+    },
+    {
+      "title": "รายงานรายละเอียดเช็ครับ: เช็คใบนี้สถานะ เช็ครับคืน ยอดตรง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": { "menuKey": "menu_cb_report_chq_in_receive_by_date", "mode": "summary", "dateFrom": "{{today}}", "dateTo": "{{today}}", "fromCode": "", "toCode": "", "orderBy": "", "keyword": "{{chq}}", "viewDetail": false },
+      "expect": [
+        { "path": "data.rows.0.เลขที่เช็ค", "op": "eq", "value": "{{chq}}" },
+        { "path": "data.rows.0.สถานะเช็ค", "op": "eq", "value": "เช็ครับคืน" },
+        { "path": "data.rows.0.จำนวนเงิน", "op": "eq", "value": "{{amt}}" }
+      ]
+    },
+    {
+      "title": "ตัวเลือกเช็คหน้าคืนเช็ค/ตั้งหนี้ใหม่ (418) ของลูกหนี้รายนี้ เห็นเช็คที่คืนแล้ว",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/cheque/candidates",
+      "body": { "transFlag": 418, "custCode": "{{cust}}", "passBookCode": "", "search": "{{chq}}" },
+      "expect": [{ "path": "data.0.chqNumber", "op": "eq", "value": "{{chq}}" }, { "path": "data.0.docRef", "op": "eq", "value": "{{ee}}" }]
+    },
+    {
+      "title": "บันทึกคืนเช็ค/ตั้งหนี้ใหม่ (418) ให้ลูกหนี้รายเดิมเต็มยอดเช็ค",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true, "confirmed": true, "docNo": "{{nd}}", "docDate": "{{today}}", "transType": 2, "transFlag": 418, "inquiryType": 0, "custCode": "{{cust}}", "docFormatCode": "CND", "remark": "{{run.tag}}",
+        "lines": [{ "itemCode": "{{chq}}", "qty": "1", "standValue": "1", "divideValue": "1", "price": "{{amt}}", "sumAmount": "{{amt}}", "taxType": 0, "docRef": "{{ee}}", "refRow": 1, "dateDue": "{{today}}" }]
+      },
+      "expect": [{ "path": "data.docNo", "op": "eq", "value": "{{nd}}" }]
+    },
+    {
+      "title": "หลังตั้งหนี้ใหม่: สถานะเช็ค = 8 และหัวเอกสารยอด = ยอดเช็ค ลูกหนี้รายเดิม",
+      "do": "db.query",
+      "sql": "select c.status, t.total_amount, t.cust_code from cb_chq_list c, ic_trans t where c.chq_number = :'chq' and t.doc_no = :'nd' and t.trans_flag = 418",
+      "rows": 1,
+      "expect": [
+        { "col": "status", "op": "eq", "value": "8" },
+        { "col": "total_amount", "op": "eq", "value": "{{amt}}" },
+        { "col": "cust_code", "op": "eq", "value": "{{cust}}" }
+      ]
+    },
+    {
+      "title": "รายงานใบส่งของค้างชำระ: หนี้ใหม่จากเช็คคืนขึ้นค้างเต็มยอด",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": { "menuKey": "menu_ar_report_invoice_remain_pay", "mode": "summary", "dateFrom": "{{today}}", "dateTo": "{{today}}", "fromCode": "", "toCode": "", "orderBy": "", "keyword": "{{nd}}", "viewDetail": false },
+      "expect": [
+        { "path": "data.rows.0.doc_no", "op": "eq", "value": "{{nd}}" },
+        { "path": "data.rows.0.รหัสลูกหนี้", "op": "eq", "value": "{{cust}}" },
+        { "path": "data.rows.0.ยอดคงเหลือ", "op": "eq", "value": "{{amt}}" }
+      ]
+    },
+    {
+      "title": "ตัวเลือกเช็คหน้านำฝาก (410) ไม่เห็นเช็คที่ตั้งหนี้ใหม่ไปแล้ว",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/cheque/candidates",
+      "body": { "transFlag": 410, "custCode": "", "passBookCode": "{{book}}", "search": "{{chq}}" },
+      "expect": [{ "path": "data.0", "op": "empty" }]
+    },
+    {
+      "title": "บัญชีหลังตั้งหนี้ใหม่: ลูกหนี้การค้าใน GL ของ รับชำระ+ตั้งหนี้ใหม่ ต้องสุทธิ 0 (หนี้กลับมาเท่ารายงานลูกหนี้)",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit - credit), 0) as ar_net, (select count(*) from gl_journal_detail where doc_no = :'nd') as nd_lines from gl_journal_detail where doc_no in (:'ee', :'nd') and account_code = :'ar_acc'",
+      "rows": 1,
+      "expect": [{ "col": "ar_net", "op": "eq", "value": "0" }, { "col": "nd_lines", "op": "gt", "value": "0" }],
+      "continueOnFail": true
+    },
+    {
+      "title": "หลักฐาน: รายการ GL ทุกบรรทัดของ รับชำระ นำฝาก เช็คคืน ตั้งหนี้ใหม่",
+      "do": "db.query",
+      "sql": "select doc_no, account_code, debit, credit from gl_journal_detail where doc_no in (:'ee', :'dp', :'rt', :'nd') order by doc_no, roworder"
+    }
+  ],
+  "cleanup": [
+    { "title": "ลบบันทึกคืนเช็ค/ตั้งหนี้ใหม่ทดสอบ (418)", "do": "api.request", "method": "POST", "path": "/api/process/trans/delete", "body": { "docNo": "{{nd}}", "transFlag": 418 }, "expectStatus": [200, 400, 404, 409, 422] },
+    { "title": "ลบบันทึกเช็คคืนทดสอบ (412)", "do": "api.request", "method": "POST", "path": "/api/process/trans/delete", "body": { "docNo": "{{rt}}", "transFlag": 412 }, "expectStatus": [200, 400, 404, 409, 422] },
+    { "title": "ลบบันทึกนำฝากเช็คทดสอบ (410)", "do": "api.request", "method": "POST", "path": "/api/process/trans/delete", "body": { "docNo": "{{dp}}", "transFlag": 410 }, "expectStatus": [200, 400, 404, 409, 422] },
+    { "title": "ลบใบรับชำระทดสอบ (239)", "do": "api.request", "method": "POST", "path": "/api/process/doc/delete", "body": { "kind": "ap_ar_trans", "docNo": "{{ee}}", "transFlag": 239 }, "expectStatus": [200, 400, 404, 409, 422] },
+    { "title": "ลบเอกสารตั้งหนี้ลูกหนี้ยกมาทดสอบ (93)", "do": "api.request", "method": "POST", "path": "/api/process/trans/delete", "body": { "docNo": "{{ea}}", "transFlag": 93 }, "expectStatus": [200, 400, 404, 409, 422] },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo (เอกสาร การรับชำระ ทะเบียนเช็ค GL ภาษี)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'ea', :'dp', :'rt', :'nd')) + (select count(*) from ic_trans_detail where doc_no in (:'ea', :'dp', :'rt', :'nd')) + (select count(*) from ap_ar_trans where doc_no = :'ee') + (select count(*) from ap_ar_trans_detail where doc_no = :'ee' or billing_no in (:'ea', :'nd')) + (select count(*) from cb_trans where doc_no in (:'ee', :'dp', :'rt', :'nd')) + (select count(*) from cb_trans_detail where doc_no in (:'ee', :'dp', :'rt', :'nd')) + (select count(*) from cb_chq_list where chq_number = :'chq' or doc_ref in (:'ee', :'dp', :'rt', :'nd')) + (select count(*) from gl_journal where doc_no in (:'ea', :'ee', :'dp', :'rt', :'nd')) + (select count(*) from gl_journal_detail where doc_no in (:'ea', :'ee', :'dp', :'rt', :'nd')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'ee', :'nd')) + (select count(*) from gl_wht_list where doc_no = :'ee') as left_rows",
+      "expect": [{ "col": "left_rows", "op": "eq", "value": "0" }]
+    }
+  ]
+}

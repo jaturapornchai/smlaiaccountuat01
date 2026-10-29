@@ -1,0 +1,1132 @@
+{
+ "module": "reports",
+ "lens": "screen",
+ "severityOnFail": "S1",
+ "timeoutMs": 900000,
+ "id": "ui-rpt-ux",
+ "title": "หน้าจอรายงานกลาง: ค่าเริ่มต้นเงื่อนไข กด Enter ประมวลผล เงื่อนไขคงอยู่ ล้างเงื่อนไข ไม่พบข้อมูล ปุ่ม CSV และเปิดใหม่รีเซ็ต (สรุปรายวัน)",
+ "description": "บันทึกสมุดรายวันทดสอบ 2 ใบวันนี้ (บัญชีจริงที่ยังไม่มีรายการ GL, ยอดจากรายการเดบิตจริง, สมุดรายวันจากทะเบียนจริง) แล้วใช้รายงานสรุปรายวัน (menu_gl_report_journal_sum) ตรวจ: ค่าเริ่มต้นตอนเปิด (1 ม.ค. ปีนี้ ถึงวันนี้ ช่องรหัส/คำค้นว่าง สมุดรายวันติ๊กครบ), กด Enter ที่คำค้น/ถึงรหัส/จากรหัส/ถึงวันที่/ตั้งแต่วันที่ แล้วประมวลผล, ค่าเงื่อนไขคงอยู่หลังประมวลผลและหลังเปลี่ยนการเรียง, ล้างช่วงรหัส, เงื่อนไขสมุดรายวัน, ข้อความไม่พบข้อมูลและปุ่ม CSV กดไม่ได้, ยอดรวมทุกกรณีตรงกับยอดที่บันทึก, พิมพ์ PDF, เปิดเมนูใหม่แล้วเงื่อนไขกลับเป็นค่าเริ่มต้น · ลบเอกสารผ่าน API แล้วตรวจว่าไม่เหลือแถว",
+ "steps": [
+  {
+   "title": "กำหนดเลขสมุดรายวันทดสอบใบที่ 1",
+   "do": "set",
+   "name": "j1",
+   "value": "UAT-{{run.short}}-UX1"
+  },
+  {
+   "title": "กำหนดเลขสมุดรายวันทดสอบใบที่ 2",
+   "do": "set",
+   "name": "j2",
+   "value": "UAT-{{run.short}}-UX2"
+  },
+  {
+   "title": "กำหนดคำค้นที่ตรงทั้ง 2 ใบ",
+   "do": "set",
+   "name": "kwp",
+   "value": "UAT-{{run.short}}-UX"
+  },
+  {
+   "title": "เก็บรหัสรอบสำหรับสุ่ม",
+   "do": "set",
+   "name": "rs",
+   "value": "{{run.short}}"
+  },
+  {
+   "title": "วันที่วันนี้/เมื่อวาน/เดือนก่อน (ปฏิทินไทย พ.ศ. สำหรับช่องวันที่)",
+   "do": "db.query",
+   "sql": "with b as (select (now() at time zone 'Asia/Bangkok')::date d), x as (select d, d - 1 as y, (date_trunc('month', d) - interval '1 month')::date as pf, (date_trunc('month', d)::date - 1) as pt, (date_trunc('month', d) + interval '1 month')::date as nf, (date_trunc('month', d) + interval '2 month')::date - 1 as nt from b) select to_char(d, 'YYYY-MM-DD') as today, to_char(d, 'DD/MM/') || (extract(year from d)::int + 543) as today_th, to_char(y, 'DD/MM/') || (extract(year from y)::int + 543) as yday_th, to_char(pf, 'DD/MM/') || (extract(year from pf)::int + 543) as pm_from_th, to_char(pt, 'DD/MM/') || (extract(year from pt)::int + 543) as pm_to_th, to_char(nf, 'DD/MM/') || (extract(year from nf)::int + 543) as nm_from_th, to_char(nt, 'DD/MM/') || (extract(year from nt)::int + 543) as nm_to_th, to_char(y, 'YYYY-MM-DD') as yday from x",
+   "rows": 1,
+   "save": {
+    "today": "today",
+    "today_th": "today_th",
+    "yday_th": "yday_th",
+    "pm_from_th": "pm_from_th",
+    "pm_to_th": "pm_to_th",
+    "nm_from_th": "nm_from_th",
+    "nm_to_th": "nm_to_th",
+    "yday": "yday"
+   }
+  },
+  {
+   "title": "วันที่ในรูปแบบที่รายงานแสดง (ตาม erp_option.year_type)",
+   "do": "db.query",
+   "sql": "with b as (select (now() at time zone 'Asia/Bangkok')::date as d, case when (select coalesce(year_type::text, '0') from erp_option limit 1) = '1' then 543 else 0 end as k), x as (select d, k, (date_trunc('month', d) + interval '1 month')::date as nf from b) select to_char(d, 'DD/MM/') || (extract(year from d)::int + k) as today_r, to_char(nf, 'DD/MM/') || (extract(year from nf)::int + k) as nm_from_r from x",
+   "rows": 1,
+   "save": {
+    "today_r": "today_r",
+    "nm_from_r": "nm_from_r"
+   }
+  },
+  {
+   "title": "วันที่ 1 ม.ค. ปีนี้ในรูปแบบที่หน้าจอแสดง (ตาม erp_option.year_type)",
+   "do": "db.query",
+   "sql": "with b as (select (now() at time zone 'Asia/Bangkok')::date as d, case when (select coalesce(year_type::text, '0') from erp_option limit 1) = '1' then 543 else 0 end as k) select '01/01/' || (extract(year from d)::int + k) as jan1_r from b",
+   "rows": 1,
+   "save": {
+    "jan1_r": "jan1_r"
+   }
+  },
+  {
+   "title": "เลือกผังบัญชีย่อยจริง 2 บัญชีที่ยังไม่มีรายการ GL เลย (สุ่มตามรอบ)",
+   "do": "db.query",
+   "sql": "with c as (select c.code from gl_chart_of_account c where coalesce(c.status, 0) = 0 and coalesce(c.account_type, 0) in (0, 1, 2) and c.code ~ '^[0-9A-Z._-]+$' and c.code not like 'UAT%' and coalesce(c.name_1, '') <> '' and c.name_1 = btrim(c.name_1) and c.name_1 !~ '\\s\\s' and (select count(*) from gl_chart_of_account x where x.code = c.code) = 1 and not exists (select 1 from gl_chart_of_account k where k.main_code = c.code) and not exists (select 1 from gl_journal_detail d where d.account_code = c.code) order by md5(c.code || :'rs') limit 2), s as (select array_agg(code order by code) a, count(*) k from c) select a[1] as acct_a, a[2] as acct_b, k::text as k from s",
+   "rows": 1,
+   "save": {
+    "acctA": "acct_a",
+    "acctB": "acct_b"
+   },
+   "expect": [
+    {
+     "col": "k",
+     "op": "eq",
+     "value": "2"
+    }
+   ]
+  },
+  {
+   "title": "ยอดเงินจากรายการเดบิตจริงล่าสุด: ใบที่ 1 = X, ใบที่ 2 = X/4",
+   "do": "db.query",
+   "sql": "with s as (select d.debit as x from gl_journal_detail d where d.debit >= 4 and d.debit = round(d.debit, 2) and d.doc_no not like 'UAT%' order by (coalesce(d.trans_flag, 0) = 0) desc, d.doc_date desc, d.roworder desc limit 1), v as (select x, round(x / 4, 2) as y from s) select x::text as x, y::text as y, (x + y)::text as xy, to_char(x, 'FM999,999,999,990.00') as x_f, to_char(y, 'FM999,999,999,990.00') as y_f, to_char(x + y, 'FM999,999,999,990.00') as xy_f from v",
+   "rows": 1,
+   "save": {
+    "x": "x",
+    "y": "y",
+    "xy": "xy",
+    "x_f": "x_f",
+    "y_f": "y_f",
+    "xy_f": "xy_f"
+   },
+   "expect": [
+    {
+     "col": "y",
+     "op": "gt",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "เลือกสมุดรายวันจากทะเบียนจริง (มีอย่างน้อย 2 สมุด) และรูปแบบเลขเอกสารจากรายการบันทึกมือจริง",
+   "do": "db.query",
+   "sql": "select b.code as book, (select count(*) from gl_journal_book)::text as nb, coalesce((select j.doc_format_code from gl_journal j where coalesce(j.trans_flag, 0) = 0 and j.doc_no not like 'UAT%' and coalesce(j.doc_format_code, '') <> '' order by j.doc_date desc, j.roworder desc limit 1), 'JV') as jfmt from gl_journal_book b where b.code ~ '^[0-9A-Z]+$' and (select count(*) from gl_journal_book x where x.code = b.code) = 1 and not exists (select 1 from gl_journal_book o where o.code <> b.code and strpos(upper(btrim(o.code || ' ' || coalesce(o.name_1, ''))), b.code) > 0) order by md5(b.code || :'rs') limit 1",
+   "rows": 1,
+   "save": {
+    "book": "book",
+    "jfmt": "jfmt"
+   },
+   "expect": [
+    {
+     "col": "nb",
+     "op": "gte",
+     "value": "2"
+    }
+   ]
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "บันทึกสมุดรายวันทดสอบใบที่ 1 วันนี้ ยอด X",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/save",
+   "body": {
+    "kind": "gl_journal",
+    "isNew": true,
+    "docNo": "{{j1}}",
+    "docDate": "{{today}}",
+    "transFlag": 0,
+    "bookCode": "{{book}}",
+    "docFormatCode": "{{jfmt}}",
+    "remark": "{{j1}}",
+    "glLines": [
+     {
+      "accountCode": "{{acctA}}",
+      "debit": "{{x}}",
+      "credit": "0",
+      "remark": "{{j1}}"
+     },
+     {
+      "accountCode": "{{acctB}}",
+      "debit": "0",
+      "credit": "{{x}}",
+      "remark": "{{j1}}"
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    }
+   ]
+  },
+  {
+   "title": "บันทึกสมุดรายวันทดสอบใบที่ 2 วันนี้ ยอด X/4",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/save",
+   "body": {
+    "kind": "gl_journal",
+    "isNew": true,
+    "docNo": "{{j2}}",
+    "docDate": "{{today}}",
+    "transFlag": 0,
+    "bookCode": "{{book}}",
+    "docFormatCode": "{{jfmt}}",
+    "remark": "{{j2}}",
+    "glLines": [
+     {
+      "accountCode": "{{acctA}}",
+      "debit": "{{y}}",
+      "credit": "0",
+      "remark": "{{j2}}"
+     },
+     {
+      "accountCode": "{{acctB}}",
+      "debit": "0",
+      "credit": "{{y}}",
+      "remark": "{{j2}}"
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    }
+   ]
+  },
+  {
+   "title": "ฐานข้อมูล: 2 ใบ สมุดรายวันที่เลือก ยอดเดบิตรวม = X + X/4",
+   "do": "db.query",
+   "sql": "select count(*)::text as n, sum(debit)::text as dr, min(book_code) as bk, max(book_code) as bk2 from gl_journal where doc_no in (:'j1', :'j2')",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "2"
+    },
+    {
+     "col": "dr",
+     "op": "eq",
+     "value": "{{xy}}"
+    },
+    {
+     "col": "bk",
+     "op": "same",
+     "value": "{{book}}"
+    },
+    {
+     "col": "bk2",
+     "op": "same",
+     "value": "{{book}}"
+    }
+   ]
+  },
+  {
+   "title": "เปิดเมนู รายงานสรุปรายวัน",
+   "do": "ui.openMenu",
+   "key": "menu_gl_report_journal_sum"
+  },
+  {
+   "title": "ค่าเริ่มต้นตอนเปิด: ตั้งแต่วันที่ = 1 ม.ค. ปีนี้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{jan1_r}}",
+   "op": "same",
+   "nth": 0,
+   "continueOnFail": true
+  },
+  {
+   "title": "ค่าเริ่มต้นตอนเปิด: ถึงวันที่ = วันนี้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{today_r}}",
+   "op": "same",
+   "nth": 1,
+   "continueOnFail": true
+  },
+  {
+   "title": "ค่าเริ่มต้นตอนเปิด: จากรหัส ว่าง",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "",
+   "op": "same",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค่าเริ่มต้นตอนเปิด: ถึงรหัส ว่าง",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "",
+   "op": "same",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค่าเริ่มต้นตอนเปิด: คำค้นหา ว่าง",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "",
+   "op": "same",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค่าเริ่มต้นตอนเปิด: สมุดรายวันทดสอบ ถูกติ๊ก (ค่าเริ่มต้นเลือกทั้งหมด)",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] label:has-text(\"{{book}}\") input[type=\"checkbox\"]:checked",
+   "continueOnFail": true
+  },
+  {
+   "title": "มีข้อมูล ปุ่ม ส่งออก CSV กดได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] button:has-text(\"ส่งออก CSV\"):not([disabled])",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = คำค้นของรอบนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{kwp}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ที่ช่องคำค้นหา (ประมวลผลทันที)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "Enter ที่คำค้น: มีใบที่ 1",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "Enter ที่คำค้น: มีใบที่ 2",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j2}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวม 2 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(2 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: จำนวนเงินรวม = X + X/4",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{xy}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบที่ 1: วันที่ = วันนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\") >> td >> nth=1",
+   "op": "same",
+   "text": "{{today_r}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบที่ 1: เลขที่เอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\") >> td >> nth=2",
+   "op": "same",
+   "text": "{{j1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบที่ 1: สมุดรายวัน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\") >> td >> nth=3",
+   "op": "same",
+   "text": "{{book}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบที่ 1: วันที่อ้างอิง ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\") >> td >> nth=4",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบที่ 1: เลขที่อ้างอิง ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\") >> td >> nth=5",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบที่ 1: รายละเอียด = คำอธิบายหัวเอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\") >> td >> nth=6",
+   "op": "same",
+   "text": "{{j1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบที่ 1: จำนวนเงิน = X",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{x}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบที่ 2: จำนวนเงิน = X/4",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j2}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{y}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงค่าเริ่มต้น (วันที่, เลขที่): แถวแรกคือใบที่ 1",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{j1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวที่สองคือใบที่ 2",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr >> nth=1",
+   "op": "contains",
+   "text": "{{j2}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "มีข้อมูล ปุ่ม ส่งออก CSV กดได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] button:has-text(\"ส่งออก CSV\"):not([disabled])",
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ ux-enter-keyword",
+   "do": "ui.screenshot",
+   "name": "ux-enter-keyword",
+   "continueOnFail": true
+  },
+  {
+   "title": "หลังประมวลผล: ตั้งแต่วันที่ ยังเป็นวันนี้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{today_th}}",
+   "op": "same",
+   "nth": 0,
+   "continueOnFail": true
+  },
+  {
+   "title": "หลังประมวลผล: ถึงวันที่ ยังเป็นวันนี้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{today_th}}",
+   "op": "same",
+   "nth": 1,
+   "continueOnFail": true
+  },
+  {
+   "title": "หลังประมวลผล: คำค้นหา ยังอยู่",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{kwp}}",
+   "op": "same",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงตาม จำนวนเงิน (ประมวลผลทันที)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] [role=\"radiogroup\"]:has(span:has-text(\"ค่าเริ่มต้นตามระบบ\")) input[type=\"radio\"][value=\"จำนวนเงิน\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงจำนวนเงินน้อยไปมาก: แถวแรกคือใบที่ 2",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{j2}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หลังเปลี่ยนการเรียง: คำค้นหา ยังอยู่",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{kwp}}",
+   "op": "same",
+   "continueOnFail": true
+  },
+  {
+   "title": "หลังเปลี่ยนการเรียง: ตั้งแต่วันที่ ยังเป็นวันนี้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{today_th}}",
+   "op": "same",
+   "nth": 0,
+   "continueOnFail": true
+  },
+  {
+   "title": "หลังเปลี่ยนการเรียง: ยอดรวมไม่เปลี่ยน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{xy}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับไปเรียงค่าเริ่มต้น",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] [role=\"radiogroup\"]:has(span:has-text(\"ค่าเริ่มต้นตามระบบ\")) input[type=\"radio\"][value=\"\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงค่าเริ่มต้นอีกครั้ง: แถวแรกคือใบที่ 1",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{j1}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = สมุดรายวันใบที่ 1",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{j1}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = สมุดรายวันใบที่ 1",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{j1}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ที่ช่องถึงรหัส",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"สิ้นสุด...\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "Enter ที่ถึงรหัส: มีใบที่ 1",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "Enter ที่ถึงรหัส: ไม่มีใบที่ 2",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j2}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสใบที่ 1: จำนวนเงินรวม = X",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{x}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = สมุดรายวันใบที่ 2",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{j2}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = สมุดรายวันใบที่ 2",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{j2}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ที่ช่องจากรหัส",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"เริ่มต้น...\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "Enter ที่จากรหัส: มีใบที่ 2",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j2}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "Enter ที่จากรหัส: ไม่มีใบที่ 1",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสใบที่ 2: จำนวนเงินรวม = X/4",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{y}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หลังประมวลผล: จากรหัส ยังอยู่",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{j2}}",
+   "op": "same",
+   "continueOnFail": true
+  },
+  {
+   "title": "หลังประมวลผล: ถึงรหัส ยังอยู่",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{j2}}",
+   "op": "same",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = (ว่าง)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = (ว่าง)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างช่วงรหัสแล้วประมวลผล",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างแล้ว: จากรหัส ว่าง",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "",
+   "op": "same",
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างช่วงรหัส: ใบที่ 1 กลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างช่วงรหัส: ใบที่ 2 กลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j2}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างช่วงรหัส: จำนวนเงินรวม = X + X/4",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{xy}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เอาติ๊ก สมุดรายวันทดสอบ ออก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] label:has-text(\"{{book}}\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "สมุดรายวันทดสอบ ไม่ถูกติ๊กแล้ว",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] label:has-text(\"{{book}}\") input[type=\"checkbox\"]:not(:checked)",
+   "continueOnFail": true
+  },
+  {
+   "title": "ประมวลผลโดยไม่รวมสมุดรายวันทดสอบ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีข้อมูล ปุ่ม ส่งออก CSV ต้องกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] button:has-text(\"ส่งออก CSV\")[disabled]",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด เลือกทั้งหมด (สมุดรายวัน)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] button:has-text(\"เลือกทั้งหมด\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกทั้งหมด: สมุดรายวันทดสอบ ถูกติ๊กกลับ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] label:has-text(\"{{book}}\") input[type=\"checkbox\"]:checked",
+   "continueOnFail": true
+  },
+  {
+   "title": "ประมวลผลหลังเลือกทั้งหมด",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกทั้งหมด: ใบที่ 1 กลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ที่ช่องถึงวันที่ (เมื่อวาน)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "key": "Enter",
+   "nth": 1,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีข้อมูล ปุ่ม ส่งออก CSV ต้องกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] button:has-text(\"ส่งออก CSV\")[disabled]",
+   "continueOnFail": true
+  },
+  {
+   "title": "วันที่เมื่อวาน: ไม่มีใบที่ 1",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ที่ช่องตั้งแต่วันที่ (วันนี้)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "key": "Enter",
+   "nth": 0,
+   "continueOnFail": true
+  },
+  {
+   "title": "Enter ที่ตั้งแต่วันที่: ใบที่ 1 กลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tbody tr:has-text(\"{{j1}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "มีข้อมูล ปุ่ม ส่งออก CSV กดได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] button:has-text(\"ส่งออก CSV\"):not([disabled])",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = UAT-NOPE-ค่าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "UAT-NOPE-{{run.short}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ค้นหาคำที่ไม่มี",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีข้อมูล ปุ่ม ส่งออก CSV ต้องกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] button:has-text(\"ส่งออก CSV\")[disabled]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่พบข้อมูล: คำค้นที่พิมพ์ยังอยู่",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "UAT-NOPE-{{run.short}}",
+   "op": "same",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = คำค้นของรอบนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{kwp}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับเป็นคำค้นของเรา",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับครบทุกเงื่อนไข: จำนวนเงินรวม = X + X/4",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{xy}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดแท็บ รูปแบบรายงาน (Studio)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] button:has-text(\"รูปแบบรายงาน (\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งชื่อหัวรายงานกำหนดเอง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"เช่น รายงานตรวจนับสินค้าคงคลังประจำเดือน...\"]",
+   "value": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งคำโปรยหัวกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"เช่น สำหรับฝ่ายบริหารและผู้สอบบัญชี...\"]",
+   "value": "UAT-{{run.short}}-SUB",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งหมายเหตุท้ายกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"เช่น เอกสารภายในองค์กร ห้ามเผยแพร่...\"]",
+   "value": "UAT-{{run.short}}-FOOT",
+   "continueOnFail": true
+  },
+  {
+   "title": "หัวรายงานบนจอเปลี่ยนเป็นชื่อที่ตั้ง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] h1",
+   "op": "contains",
+   "text": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม พิมพ์รายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] button:has-text(\"พิมพ์รายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าต่างตั้งค่าหน้ากระดาษเปิด",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"][aria-label=\"หน้าต่างตั้งค่าหน้ากระดาษและพิมพ์รายงาน PDF ส่วนกลาง\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวนอน",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวนอน ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวนอน: มีเลขเอกสาร ยอดเงิน หัว/ท้ายรายงานที่ตั้ง",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{j1}}",
+    "{{j2}}",
+    "{{x_f}}",
+    "{{y_f}}",
+    "{{xy_f}}",
+    "UAT-{{run.short}}-TITLE",
+    "UAT-{{run.short}}-SUB",
+    "UAT-{{run.short}}-FOOT"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวตั้ง",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวตั้ง ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวตั้ง: ยังมีเลขเอกสารและยอดเงินครบ",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{j1}}",
+    "{{j2}}",
+    "{{x_f}}",
+    "{{y_f}}",
+    "{{xy_f}}",
+    "UAT-{{run.short}}-TITLE"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "ปิดหน้าต่างพิมพ์",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"ปิดหน้าต่าง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดเมนูรายงานสรุปรายวันใหม่",
+   "do": "ui.openMenu",
+   "key": "menu_gl_report_journal_sum"
+  },
+  {
+   "title": "เปิดใหม่: ตั้งแต่วันที่ = 1 ม.ค. ปีนี้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{jan1_r}}",
+   "op": "same",
+   "nth": 0,
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดใหม่: ถึงวันที่ = วันนี้",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{today_r}}",
+   "op": "same",
+   "nth": 1,
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดใหม่: จากรหัส ว่าง",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "",
+   "op": "same",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดใหม่: ถึงรหัส ว่าง",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "",
+   "op": "same",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดใหม่: คำค้นหา ว่าง",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "",
+   "op": "same",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดใหม่: สมุดรายวันทดสอบ ถูกติ๊ก (ค่าเริ่มต้นเลือกทั้งหมด)",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_gl_report_journal_sum\"] label:has-text(\"{{book}}\") input[type=\"checkbox\"]:checked",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบสมุดรายวันทดสอบใบที่ 1",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/delete",
+   "body": {
+    "kind": "gl_journal",
+    "docNo": "{{j1}}",
+    "transFlag": 0
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ลบสมุดรายวันทดสอบใบที่ 2",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/delete",
+   "body": {
+    "kind": "gl_journal",
+    "docNo": "{{j2}}",
+    "transFlag": 0
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือแถวของเอกสารทดสอบในทุกตารางที่แตะ",
+   "do": "db.query",
+   "sql": "select (select count(*) from ic_trans where doc_no in (:'j1', :'j2')) + (select count(*) from ic_trans_detail where doc_no in (:'j1', :'j2')) + (select count(*) from ap_ar_trans where doc_no in (:'j1', :'j2')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'j1', :'j2')) + (select count(*) from cb_trans where doc_no in (:'j1', :'j2')) + (select count(*) from cb_trans_detail where doc_no in (:'j1', :'j2')) + (select count(*) from gl_journal where doc_no in (:'j1', :'j2')) + (select count(*) from gl_journal_detail where doc_no in (:'j1', :'j2')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'j1', :'j2')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'j1', :'j2')) as left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}

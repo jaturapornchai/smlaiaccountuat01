@@ -1,0 +1,941 @@
+{
+  "id": "ui-prc-doc-format",
+  "title": "กำหนดรูปแบบเลขที่เอกสาร: เพิ่ม-บันทึก-โหลดกลับครบทุกช่อง แก้ไข กันรหัสซ้ำ และลบรูปแบบทดสอบ",
+  "module": "reports",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "สร้างรูปแบบเอกสาร UAT{{run.short}}DF บนหน้าจอ 1012 กำหนดรูปแบบเลขที่เอกสาร (menu_setup_doc_format) ใช้รหัสหน้าจอทดสอบ U{{run.short}} ที่ไม่มีหน้าจอจริงใช้ จึงไม่โผล่ในรายการรูปแบบของหน้าจอเอกสารที่ผู้อื่นใช้ ตรวจช่องบังคับ (ชื่อ/รหัสหน้าจอ) บันทึกทุกช่องรวม e-Tax แล้วตรวจฐานข้อมูลทุกคอลัมน์ เปิดหน้าจอใหม่โหลดกลับตรวจค่าทุกช่อง แก้ไขชื่อ+ประเภทภาษี กันรหัสซ้ำ แล้วลบผ่านหน้าจอ พิสูจน์ 0 แถวทั้ง erp_doc_format/_etax/_gl (ไม่ทดสอบรายชื่อสาขาเพราะแสดงเฉพาะรุ่นที่มีสาขา และไม่ทดสอบปุ่มดึงผังบัญชี GL จาก template)",
+  "timeoutMs": 360000,
+  "steps": [
+    {
+      "title": "กำหนดค่าทดสอบ fc",
+      "do": "set",
+      "name": "fc",
+      "value": "UAT{{run.short}}DF"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ sc",
+      "do": "set",
+      "name": "sc",
+      "value": "U{{run.short}}"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ n1",
+      "do": "set",
+      "name": "n1",
+      "value": "{{run.tag}} รูปแบบเอกสารทดสอบ"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ n1b",
+      "do": "set",
+      "name": "n1b",
+      "value": "{{run.tag}} รูปแบบเอกสารแก้ไขแล้ว"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ n2",
+      "do": "set",
+      "name": "n2",
+      "value": "UAT doc format {{run.short}}"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ fmt",
+      "do": "set",
+      "name": "fmt",
+      "value": "UT@YYMM-####"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ tfmt",
+      "do": "set",
+      "name": "tfmt",
+      "value": "UTX@YY####"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ f0",
+      "do": "set",
+      "name": "f0",
+      "value": "UATF0{{run.short}}"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ f1",
+      "do": "set",
+      "name": "f1",
+      "value": "UATF1"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ f2",
+      "do": "set",
+      "name": "f2",
+      "value": "UATF2"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ f3",
+      "do": "set",
+      "name": "f3",
+      "value": "UATF3"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ f4",
+      "do": "set",
+      "name": "f4",
+      "value": "UATF4"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ f5",
+      "do": "set",
+      "name": "f5",
+      "value": "UATF5"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ scan",
+      "do": "set",
+      "name": "scan",
+      "value": "UAT-SCAN/{{run.short}}"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ pc",
+      "do": "set",
+      "name": "pc",
+      "value": "UATPC-{{run.short}}"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ gld",
+      "do": "set",
+      "name": "gld",
+      "value": "{{run.tag}} คำอธิบาย GL"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ etn",
+      "do": "set",
+      "name": "etn",
+      "value": "{{run.tag}} e-Tax ใบกำกับ"
+    },
+    {
+      "title": "กำหนดค่าทดสอบ etf",
+      "do": "set",
+      "name": "etf",
+      "value": "UATETAX{{run.short}}"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เลือกสมุดรายวันจริง 1 เล่มจากฐานข้อมูล และยืนยันว่ายังไม่มีรูปแบบรหัสของเรา",
+      "do": "db.query",
+      "sql": "select (select code from gl_journal_book where coalesce(code, '') <> '' and length(code) <= 10 order by code limit 1) book, (((select count(*) from erp_doc_format where upper(code) = :'fc') + (select count(*) from erp_doc_format_etax where doc_format_code = :'fc') + (select count(*) from erp_doc_format_gl where doc_code = :'fc')))::text n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "book",
+          "op": "ne",
+          "value": ""
+        }
+      ],
+      "save": {
+        "book": "book"
+      }
+    },
+    {
+      "title": "กด Shift ปิดกล่องช่วยเหลือที่อาจลอยค้าง",
+      "do": "ui.press",
+      "key": "Shift"
+    },
+    {
+      "title": "เปิดหน้าจอกำหนดรูปแบบเลขที่เอกสาร",
+      "do": "ui.openMenu",
+      "key": "menu_setup_doc_format"
+    },
+    {
+      "title": "กดเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] button:has(span:text-is(\"เพิ่มใหม่\"))"
+    },
+    {
+      "title": "รหัสหน้าจอเริ่มต้นของรายการใหม่ = IB",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"เช่น IB, IC, PO\"]",
+      "value": "IB"
+    },
+    {
+      "title": "กรอกรหัสรูปแบบอย่างเดียว",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"เช่น RMB, IV, PO\"]",
+      "value": "{{fc}}"
+    },
+    {
+      "title": "กดบันทึกโดยยังไม่กรอกชื่อ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] button:has(span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "ระบบเตือนให้ระบุชื่อรูปแบบเอกสาร",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]",
+      "text": "กรุณาระบุชื่อรูปแบบเอกสาร"
+    },
+    {
+      "title": "ปิดกล่องข้อความ",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"] button:has(span:text-is(\"ตกลง\"))"
+    },
+    {
+      "title": "กรอกชื่อรูปแบบ (ไทย)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"ระบุชื่อรูปแบบเอกสารภาษาไทย\"]",
+      "value": "{{n1}}"
+    },
+    {
+      "title": "ลบรหัสหน้าจอออก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"เช่น IB, IC, PO\"]",
+      "value": ""
+    },
+    {
+      "title": "กดบันทึกโดยไม่มีรหัสหน้าจอ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] button:has(span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "ระบบเตือนให้ระบุรหัสหน้าจอ",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]",
+      "text": "กรุณาระบุรหัสหน้าจอ"
+    },
+    {
+      "title": "ปิดกล่องข้อความ",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"] button:has(span:text-is(\"ตกลง\"))"
+    },
+    {
+      "title": "ข้อมูลไม่ครบต้องยังไม่ถูกบันทึก",
+      "do": "db.query",
+      "sql": "select ((select count(*) from erp_doc_format where upper(code) = :'fc') + (select count(*) from erp_doc_format_etax where doc_format_code = :'fc') + (select count(*) from erp_doc_format_gl where doc_code = :'fc'))::text n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "กด Shift ปิดกล่องช่วยเหลือที่อาจลอยค้าง",
+      "do": "ui.press",
+      "key": "Shift"
+    },
+    {
+      "title": "กรอกรหัสหน้าจอ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"เช่น IB, IC, PO\"]",
+      "nth": 0,
+      "value": "{{sc}}"
+    },
+    {
+      "title": "กรอกชื่อรูปแบบเอกสาร (ไทย)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"ระบุชื่อรูปแบบเอกสารภาษาไทย\"]",
+      "nth": 0,
+      "value": "{{n1}}"
+    },
+    {
+      "title": "กรอกชื่อรูปแบบเอกสาร (อังกฤษ)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"Doc Format Name (English)\"]",
+      "nth": 0,
+      "value": "{{n2}}"
+    },
+    {
+      "title": "กรอกรูปแบบเลขที่เอกสาร",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"เช่น @YYMM####\"]",
+      "nth": 0,
+      "value": "{{fmt}}"
+    },
+    {
+      "title": "กรอกรูปแบบเลขที่ใบกำกับภาษี",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"เช่น @YYMM####\"]",
+      "nth": 1,
+      "value": "{{tfmt}}"
+    },
+    {
+      "title": "กรอกรหัสแบบพิมพ์หลัก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสฟอร์มพิมพ์\"]",
+      "nth": 0,
+      "value": "{{f0}}"
+    },
+    {
+      "title": "กรอกรหัสแบบพิมพ์ 1",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสแบบพิมพ์สำรอง 1\"]",
+      "nth": 0,
+      "value": "{{f1}}"
+    },
+    {
+      "title": "กรอกรหัสแบบพิมพ์ 2",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสแบบพิมพ์สำรอง 2\"]",
+      "nth": 0,
+      "value": "{{f2}}"
+    },
+    {
+      "title": "กรอกรหัสแบบพิมพ์ 3",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสแบบพิมพ์สำรอง 3\"]",
+      "nth": 0,
+      "value": "{{f3}}"
+    },
+    {
+      "title": "กรอกรหัสแบบพิมพ์ 4",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสแบบพิมพ์สำรอง 4\"]",
+      "nth": 0,
+      "value": "{{f4}}"
+    },
+    {
+      "title": "กรอกรหัสแบบพิมพ์ 5",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสแบบพิมพ์สำรอง 5\"]",
+      "nth": 0,
+      "value": "{{f5}}"
+    },
+    {
+      "title": "กรอกสมุดรายวัน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสสมุดรายวัน เช่น 01, 02\"]",
+      "nth": 0,
+      "value": "{{book}}"
+    },
+    {
+      "title": "กรอกโฟลเดอร์ Scan",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder^=\"เช่น C:\"]",
+      "nth": 0,
+      "value": "{{scan}}"
+    },
+    {
+      "title": "กรอกรหัสเครื่อง Scan",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"ระบุรหัสเครื่องที่อนุญาตให้ Scan\"]",
+      "nth": 0,
+      "value": "{{pc}}"
+    },
+    {
+      "title": "กรอกคำอธิบายรายวัน GL",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] [placeholder=\"คำอธิบายที่จะลงในสมุดรายวันอัตโนมัติ\"]",
+      "nth": 0,
+      "value": "{{gld}}"
+    },
+    {
+      "title": "เลือกการรันเลขที่ = รายเดือน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] [role=\"radiogroup\"]:has(input[value=\"รายเดือน\"]) input[type=\"radio\"][value=\"รายเดือน\"]"
+    },
+    {
+      "title": "เลือกประเภทภาษี = 3 อัตราศูนย์",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] [role=\"radiogroup\"]:has(input[value=\"0\"]):has(input[value=\"3\"]) input[type=\"radio\"][value=\"3\"]"
+    },
+    {
+      "title": "เปิดส่ง e-Tax",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] #docfmt-sec-etax input[type=\"checkbox\"]"
+    },
+    {
+      "title": "เลือกประเภทเอกสาร e-Tax = 388 ใบกำกับภาษี",
+      "do": "ui.select",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] #docfmt-sec-etax select",
+      "value": "3"
+    },
+    {
+      "title": "เลือกประเภทแล้วระบบเติมชื่อเอกสาร e-Tax ให้อัตโนมัติ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] #docfmt-sec-etax input[placeholder=\"เช่น ใบเสร็จรับเงิน/ใบกำกับภาษี\"]",
+      "value": "ใบกำกับภาษี (Tax Invoice)"
+    },
+    {
+      "title": "กรอกชื่อเอกสาร e-Tax เอง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] #docfmt-sec-etax input[placeholder=\"เช่น ใบเสร็จรับเงิน/ใบกำกับภาษี\"]",
+      "value": "{{etn}}"
+    },
+    {
+      "title": "กรอกรหัสฟอร์ม e-Tax",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] #docfmt-sec-etax input[placeholder=\"รหัสฟอร์มที่ใช้สร้างไฟล์ PDF e-Tax\"]",
+      "value": "{{etf}}"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] button:has(span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "แจ้งบันทึกรูปแบบของเราสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]",
+      "text": "บันทึกรูปแบบเอกสาร \"{{fc}}\" เรียบร้อยแล้ว"
+    },
+    {
+      "title": "ปิดกล่องข้อความ",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"] button:has(span:text-is(\"ตกลง\"))"
+    },
+    {
+      "title": "ฐานข้อมูล erp_doc_format: ทุกคอลัมน์ตรงกับที่กรอก",
+      "do": "db.query",
+      "sql": "select screen_code, name_1, name_2, format, tax_format, doc_running, form_code, form_code_1, form_code_2, form_code_3, form_code_4, form_code_5, gl_book, gl_description, scan_folder, scan_computer_id, vat_type::text vat_type from erp_doc_format where upper(code) = :'fc'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "screen_code",
+          "op": "eq",
+          "value": "{{sc}}"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "{{n1}}"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "{{n2}}"
+        },
+        {
+          "col": "format",
+          "op": "eq",
+          "value": "{{fmt}}"
+        },
+        {
+          "col": "tax_format",
+          "op": "eq",
+          "value": "{{tfmt}}"
+        },
+        {
+          "col": "doc_running",
+          "op": "eq",
+          "value": "รายเดือน"
+        },
+        {
+          "col": "form_code",
+          "op": "eq",
+          "value": "{{f0}}"
+        },
+        {
+          "col": "form_code_1",
+          "op": "eq",
+          "value": "{{f1}}"
+        },
+        {
+          "col": "form_code_2",
+          "op": "eq",
+          "value": "{{f2}}"
+        },
+        {
+          "col": "form_code_3",
+          "op": "eq",
+          "value": "{{f3}}"
+        },
+        {
+          "col": "form_code_4",
+          "op": "eq",
+          "value": "{{f4}}"
+        },
+        {
+          "col": "form_code_5",
+          "op": "eq",
+          "value": "{{f5}}"
+        },
+        {
+          "col": "gl_book",
+          "op": "eq",
+          "value": "{{book}}"
+        },
+        {
+          "col": "gl_description",
+          "op": "eq",
+          "value": "{{gld}}"
+        },
+        {
+          "col": "scan_folder",
+          "op": "eq",
+          "value": "{{scan}}"
+        },
+        {
+          "col": "scan_computer_id",
+          "op": "eq",
+          "value": "{{pc}}"
+        },
+        {
+          "col": "vat_type",
+          "op": "eq",
+          "value": "3"
+        }
+      ]
+    },
+    {
+      "title": "กด Shift ปิดกล่องช่วยเหลือที่อาจลอยค้าง",
+      "do": "ui.press",
+      "key": "Shift"
+    },
+    {
+      "title": "ฐานข้อมูล erp_doc_format_etax: ส่ง e-Tax ประเภท 388 ชื่อ/ฟอร์มตรง และไม่มีแถว GL",
+      "do": "db.query",
+      "sql": "select send_etax::text send_etax, etax_document_type::text etax_document_type, etax_document_type_code, etax_document_name, etax_form_code, (select count(*) from erp_doc_format_gl where doc_code = :'fc')::text gl_rows from erp_doc_format_etax where doc_format_code = :'fc'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "send_etax",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "etax_document_type",
+          "op": "eq",
+          "value": "3"
+        },
+        {
+          "col": "etax_document_type_code",
+          "op": "eq",
+          "value": "388"
+        },
+        {
+          "col": "etax_document_name",
+          "op": "eq",
+          "value": "{{etn}}"
+        },
+        {
+          "col": "etax_form_code",
+          "op": "eq",
+          "value": "{{etf}}"
+        },
+        {
+          "col": "gl_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "กด Shift ปิดกล่องช่วยเหลือที่อาจลอยค้าง",
+      "do": "ui.press",
+      "key": "Shift"
+    },
+    {
+      "title": "เปิดหน้าจอรูปแบบเลขที่เอกสารใหม่ (ตรวจการโหลดกลับ)",
+      "do": "ui.openMenu",
+      "key": "menu_setup_doc_format"
+    },
+    {
+      "title": "ค้นหารหัสรูปแบบของเรา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{fc}}"
+    },
+    {
+      "title": "กด Enter เพื่อค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "คลิกแถวรูปแบบของเรา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] td:has-text(\"{{fc}}\")"
+    },
+    {
+      "title": "โหลดกลับ: รหัสรูปแบบเอกสาร ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"เช่น RMB, IV, PO\"]",
+      "nth": 0,
+      "value": "{{fc}}"
+    },
+    {
+      "title": "โหลดกลับ: รหัสหน้าจอ ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"เช่น IB, IC, PO\"]",
+      "nth": 0,
+      "value": "{{sc}}"
+    },
+    {
+      "title": "โหลดกลับ: ชื่อรูปแบบเอกสาร (ไทย) ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"ระบุชื่อรูปแบบเอกสารภาษาไทย\"]",
+      "nth": 0,
+      "value": "{{n1}}"
+    },
+    {
+      "title": "โหลดกลับ: ชื่อรูปแบบเอกสาร (อังกฤษ) ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"Doc Format Name (English)\"]",
+      "nth": 0,
+      "value": "{{n2}}"
+    },
+    {
+      "title": "โหลดกลับ: รูปแบบเลขที่เอกสาร ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"เช่น @YYMM####\"]",
+      "nth": 0,
+      "value": "{{fmt}}"
+    },
+    {
+      "title": "โหลดกลับ: รูปแบบเลขที่ใบกำกับภาษี ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"เช่น @YYMM####\"]",
+      "nth": 1,
+      "value": "{{tfmt}}"
+    },
+    {
+      "title": "โหลดกลับ: รหัสแบบพิมพ์หลัก ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสฟอร์มพิมพ์\"]",
+      "nth": 0,
+      "value": "{{f0}}"
+    },
+    {
+      "title": "โหลดกลับ: รหัสแบบพิมพ์ 1 ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสแบบพิมพ์สำรอง 1\"]",
+      "nth": 0,
+      "value": "{{f1}}"
+    },
+    {
+      "title": "โหลดกลับ: รหัสแบบพิมพ์ 2 ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสแบบพิมพ์สำรอง 2\"]",
+      "nth": 0,
+      "value": "{{f2}}"
+    },
+    {
+      "title": "โหลดกลับ: รหัสแบบพิมพ์ 3 ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสแบบพิมพ์สำรอง 3\"]",
+      "nth": 0,
+      "value": "{{f3}}"
+    },
+    {
+      "title": "โหลดกลับ: รหัสแบบพิมพ์ 4 ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสแบบพิมพ์สำรอง 4\"]",
+      "nth": 0,
+      "value": "{{f4}}"
+    },
+    {
+      "title": "โหลดกลับ: รหัสแบบพิมพ์ 5 ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสแบบพิมพ์สำรอง 5\"]",
+      "nth": 0,
+      "value": "{{f5}}"
+    },
+    {
+      "title": "โหลดกลับ: สมุดรายวัน ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"รหัสสมุดรายวัน เช่น 01, 02\"]",
+      "nth": 0,
+      "value": "{{book}}"
+    },
+    {
+      "title": "โหลดกลับ: โฟลเดอร์ Scan ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder^=\"เช่น C:\"]",
+      "nth": 0,
+      "value": "{{scan}}"
+    },
+    {
+      "title": "โหลดกลับ: รหัสเครื่อง Scan ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"ระบุรหัสเครื่องที่อนุญาตให้ Scan\"]",
+      "nth": 0,
+      "value": "{{pc}}"
+    },
+    {
+      "title": "โหลดกลับ: คำอธิบายรายวัน GL ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] [placeholder=\"คำอธิบายที่จะลงในสมุดรายวันอัตโนมัติ\"]",
+      "nth": 0,
+      "value": "{{gld}}"
+    },
+    {
+      "title": "โหลดกลับ: การรันเลขที่ = รายเดือน",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] [role=\"radiogroup\"]:has(input[value=\"รายเดือน\"]) input[type=\"radio\"][value=\"รายเดือน\"]:checked"
+    },
+    {
+      "title": "โหลดกลับ: ประเภทภาษี = 3",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] [role=\"radiogroup\"]:has(input[value=\"0\"]):has(input[value=\"3\"]) input[type=\"radio\"][value=\"3\"]:checked"
+    },
+    {
+      "title": "โหลดกลับ: ติ๊กส่ง e-Tax ไว้",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] #docfmt-sec-etax input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "โหลดกลับ: ประเภทเอกสาร e-Tax = 388",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] #docfmt-sec-etax select",
+      "value": "3"
+    },
+    {
+      "title": "โหลดกลับ: ชื่อเอกสาร e-Tax ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] #docfmt-sec-etax input[placeholder=\"เช่น ใบเสร็จรับเงิน/ใบกำกับภาษี\"]",
+      "value": "{{etn}}"
+    },
+    {
+      "title": "โหลดกลับ: รหัสฟอร์ม e-Tax ตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] #docfmt-sec-etax input[placeholder=\"รหัสฟอร์มที่ใช้สร้างไฟล์ PDF e-Tax\"]",
+      "value": "{{etf}}"
+    },
+    {
+      "title": "กดแก้ไข",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] button:has(span:text-is(\"แก้ไข\"))"
+    },
+    {
+      "title": "แก้ชื่อรูปแบบ (ไทย)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"ระบุชื่อรูปแบบเอกสารภาษาไทย\"]",
+      "value": "{{n1b}}"
+    },
+    {
+      "title": "แก้ประเภทภาษี = 1 แยกนอก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] [role=\"radiogroup\"]:has(input[value=\"0\"]):has(input[value=\"3\"]) input[type=\"radio\"][value=\"1\"]"
+    },
+    {
+      "title": "กดบันทึกการแก้ไข",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] button:has(span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "แจ้งบันทึกการแก้ไขสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]",
+      "text": "บันทึกรูปแบบเอกสาร \"{{fc}}\" เรียบร้อยแล้ว"
+    },
+    {
+      "title": "ปิดกล่องข้อความ",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"] button:has(span:text-is(\"ตกลง\"))"
+    },
+    {
+      "title": "ฐานข้อมูล: ชื่อ+ประเภทภาษีเปลี่ยน ช่องอื่นคงเดิม และ e-Tax ยังเป็น 1 แถวเดิม",
+      "do": "db.query",
+      "sql": "select f.name_1, f.vat_type::text vat_type, f.form_code_5, f.gl_book, f.scan_computer_id, (select count(*) from erp_doc_format_etax e where e.doc_format_code = :'fc' and e.send_etax = 1 and e.etax_form_code = :'etf')::text etax_rows from erp_doc_format f where upper(f.code) = :'fc'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "{{n1b}}"
+        },
+        {
+          "col": "vat_type",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "form_code_5",
+          "op": "eq",
+          "value": "{{f5}}"
+        },
+        {
+          "col": "gl_book",
+          "op": "eq",
+          "value": "{{book}}"
+        },
+        {
+          "col": "scan_computer_id",
+          "op": "eq",
+          "value": "{{pc}}"
+        },
+        {
+          "col": "etax_rows",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "กด Shift ปิดกล่องช่วยเหลือที่อาจลอยค้าง",
+      "do": "ui.press",
+      "key": "Shift"
+    },
+    {
+      "title": "กดเพิ่มใหม่เพื่อทดสอบรหัสซ้ำ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] button:has(span:text-is(\"เพิ่มใหม่\"))"
+    },
+    {
+      "title": "กรอกรหัสซ้ำกับของเรา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"เช่น RMB, IV, PO\"]",
+      "value": "{{fc}}"
+    },
+    {
+      "title": "กรอกชื่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"ระบุชื่อรูปแบบเอกสารภาษาไทย\"]",
+      "value": "{{n1}}"
+    },
+    {
+      "title": "กดบันทึกรหัสซ้ำ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] button:has(span:text-is(\"บันทึก\"))"
+    },
+    {
+      "title": "ระบบปฏิเสธรหัสซ้ำ",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]",
+      "text": "รหัส \"{{fc}}\" มีอยู่ในระบบแล้ว"
+    },
+    {
+      "title": "ปิดกล่องข้อความ",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"] button:has(span:text-is(\"ตกลง\"))"
+    },
+    {
+      "title": "รหัสซ้ำไม่ทับข้อมูลเดิม",
+      "do": "db.query",
+      "sql": "select count(*)::text n, max(name_1) name_1 from erp_doc_format where upper(code) = :'fc'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "{{n1b}}"
+        }
+      ]
+    },
+    {
+      "title": "กด Shift ปิดกล่องช่วยเหลือที่อาจลอยค้าง",
+      "do": "ui.press",
+      "key": "Shift"
+    },
+    {
+      "title": "เปิดหน้าจอรูปแบบเลขที่เอกสารใหม่ (ลบรูปแบบทดสอบ)",
+      "do": "ui.openMenu",
+      "key": "menu_setup_doc_format"
+    },
+    {
+      "title": "ค้นหารหัสรูปแบบของเรา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{fc}}"
+    },
+    {
+      "title": "กด Enter เพื่อค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "คลิกแถวรูปแบบของเรา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] td:has-text(\"{{fc}}\")"
+    },
+    {
+      "title": "โหลดชื่อที่แก้แล้ว",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] input[placeholder=\"ระบุชื่อรูปแบบเอกสารภาษาไทย\"]",
+      "value": "{{n1b}}"
+    },
+    {
+      "title": "กดลบ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_doc_format\"] button:has(span:text-is(\"ลบ\"))"
+    },
+    {
+      "title": "ถามยืนยันการลบ",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]",
+      "text": "ยืนยันการลบ"
+    },
+    {
+      "title": "ปิดกล่องข้อความ",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"] button:has(span:text-is(\"ลบข้อมูล\"))"
+    },
+    {
+      "title": "แจ้งลบสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[role=\"dialog\"]",
+      "text": "ลบข้อมูลเสร็จสิ้นเรียบร้อยแล้ว"
+    },
+    {
+      "title": "ปิดกล่องข้อความ",
+      "do": "ui.click",
+      "selector": "[role=\"dialog\"] button:has(span:text-is(\"ตกลง\"))"
+    },
+    {
+      "title": "ลบผ่านหน้าจอแล้วไม่เหลือทั้ง 3 ตาราง",
+      "do": "db.query",
+      "sql": "select ((select count(*) from erp_doc_format where upper(code) = :'fc') + (select count(*) from erp_doc_format_etax where doc_format_code = :'fc') + (select count(*) from erp_doc_format_gl where doc_code = :'fc'))::text n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "กด Shift ปิดกล่องช่วยเหลือที่อาจลอยค้าง",
+      "do": "ui.press",
+      "key": "Shift"
+    },
+    {
+      "title": "ตรวจหน้าจอไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบรูปแบบทดสอบที่อาจค้าง (เฉพาะรหัสของเรา)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/query/execBatch",
+      "body": {
+        "sql": [
+          "delete from erp_doc_format_etax where doc_format_code = '{{fc}}'",
+          "delete from erp_doc_format_gl where doc_code = '{{fc}}'",
+          "delete from erp_doc_format where upper(code) = '{{fc}}'"
+        ]
+      },
+      "expectStatus": [
+        200,
+        400
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษรูปแบบทดสอบ",
+      "do": "db.query",
+      "sql": "select ((select count(*) from erp_doc_format where upper(code) = :'fc') + (select count(*) from erp_doc_format_etax where doc_format_code = :'fc') + (select count(*) from erp_doc_format_gl where doc_code = :'fc'))::text n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

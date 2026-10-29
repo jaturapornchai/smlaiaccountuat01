@@ -1,0 +1,1625 @@
+{
+ "module": "reports",
+ "lens": "screen",
+ "severityOnFail": "S1",
+ "timeoutMs": 900000,
+ "id": "ui-rpt-ar",
+ "title": "รายงานรับชำระหนี้ + รายงานสถานะลูกหนี้ + รายงานใบส่งของค้างชำระ-ตามวันที่ บนหน้าจอ: ยอดตั้งหนี้ ชำระบางส่วน คงเหลือ ตรงทุกเงื่อนไข และพิมพ์ PDF",
+ "description": "เลือกลูกหนี้จริงที่ยังไม่มีเอกสาร (สุ่มตามรอบ) แล้วบันทึกบิลขายเชื่อเมื่อวาน 2 หน่วย (สินค้า/ราคา/ภาษีจากเอกสารจริงล่าสุด) และใบรับชำระหนี้วันนี้ชำระบางส่วน = มูลค่าก่อนภาษี (เหลือค้างเท่าภาษี) · menu_ar_report_receipt: ยอดชำระตรง, ช่วงวันที่/คำค้น/รหัสที่ไม่ตรงต้องตัดออก, แสดงเอกสารยกเลิก, รายละเอียดบิล, พิมพ์ PDF แนวนอน/แนวตั้ง · menu_ar_report_pay_debt_trans: กรอกเงื่อนไขเพิ่มเติมครบ 6 ช่อง (เลขที่ใบรับ วันที่/เลขที่ใบวางบิล) และแต่ละช่องที่ไม่ตรงต้องตัดออก · menu_ar_report_status_ar: ยอดตั้งหนี้/ตัดชำระ/ยกไป ตามช่วงวันที่ และยอดยกมาเมื่อเริ่มวันนี้ · menu_ar_report_invoice_remain_pay: คงเหลือ ณ วันนี้ = ภาษี, ณ เมื่อวาน = เต็มบิล · ลบเอกสารผ่าน API แล้วตรวจว่าไม่เหลือแถว",
+ "steps": [
+  {
+   "title": "กำหนดเลขบิลขายเชื่อทดสอบ",
+   "do": "set",
+   "name": "inv",
+   "value": "UAT-{{run.short}}-ARI"
+  },
+  {
+   "title": "กำหนดเลขใบรับชำระหนี้ทดสอบ",
+   "do": "set",
+   "name": "pay",
+   "value": "UAT-{{run.short}}-ARP"
+  },
+  {
+   "title": "เก็บรหัสรอบสำหรับสุ่ม",
+   "do": "set",
+   "name": "rs",
+   "value": "{{run.short}}"
+  },
+  {
+   "title": "วันที่วันนี้/เมื่อวาน/เดือนก่อน (ปฏิทินไทย พ.ศ. สำหรับช่องวันที่)",
+   "do": "db.query",
+   "sql": "with b as (select (now() at time zone 'Asia/Bangkok')::date d), x as (select d, d - 1 as y, (date_trunc('month', d) - interval '1 month')::date as pf, (date_trunc('month', d)::date - 1) as pt, (date_trunc('month', d) + interval '1 month')::date as nf, (date_trunc('month', d) + interval '2 month')::date - 1 as nt from b) select to_char(d, 'YYYY-MM-DD') as today, to_char(d, 'DD/MM/') || (extract(year from d)::int + 543) as today_th, to_char(y, 'DD/MM/') || (extract(year from y)::int + 543) as yday_th, to_char(pf, 'DD/MM/') || (extract(year from pf)::int + 543) as pm_from_th, to_char(pt, 'DD/MM/') || (extract(year from pt)::int + 543) as pm_to_th, to_char(nf, 'DD/MM/') || (extract(year from nf)::int + 543) as nm_from_th, to_char(nt, 'DD/MM/') || (extract(year from nt)::int + 543) as nm_to_th, to_char(y, 'YYYY-MM-DD') as yday from x",
+   "rows": 1,
+   "save": {
+    "today": "today",
+    "today_th": "today_th",
+    "yday_th": "yday_th",
+    "pm_from_th": "pm_from_th",
+    "pm_to_th": "pm_to_th",
+    "nm_from_th": "nm_from_th",
+    "nm_to_th": "nm_to_th",
+    "yday": "yday"
+   }
+  },
+  {
+   "title": "เลือกลูกหนี้จริงที่ยังไม่มีเอกสารเลย (สุ่มตามรอบ)",
+   "do": "db.query",
+   "sql": "select m.code as party from ar_customer m where m.code not like 'UAT%' and m.code ~ '^[A-Za-z0-9._/-]+$' and not exists (select 1 from ic_trans x where x.cust_code = m.code) and not exists (select 1 from ap_ar_trans y where y.cust_code = m.code) and not exists (select 1 from ar_customer_detail cd where cd.ar_code = m.code and (coalesce(cd.credit_status, 0) <> 0 or coalesce(cd.credit_money, 0) <> 0)) order by md5(m.code || :'rs') limit 1",
+   "rows": 1,
+   "save": {
+    "party": "party"
+   }
+  },
+  {
+   "title": "เลือกสินค้า/คลัง/ราคา/อัตราภาษี/รูปแบบเลขเอกสารจากบิลขายเชื่อจริงล่าสุด",
+   "do": "db.query",
+   "sql": "select coalesce(nullif(t.doc_format_code, ''), 'SI') as fmt, d.item_code as item, d.unit_code as unit, d.wh_code as wh, d.shelf_code as shelf, d.stand_value::text as stand, d.divide_value::text as divide, d.price::text as price, t.vat_rate::text as vat_rate, coalesce((select p.doc_format_code from ap_ar_trans p where p.trans_flag = 239 and p.doc_no not like 'UAT%' and coalesce(p.doc_format_code, '') <> '' order by p.doc_date desc limit 1), 'EE') as pay_fmt from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag join ic_inventory i on i.code = d.item_code where t.trans_flag = 44 and t.inquiry_type = 0 and t.vat_type = 0 and t.vat_rate > 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 and d.price > 0 and d.price = round(d.price, 2) and d.tax_type = 0 and d.stand_value > 0 and d.divide_value > 0 order by t.doc_date desc, t.roworder desc limit 1",
+   "rows": 1,
+   "save": {
+    "fmt": "fmt",
+    "item": "item",
+    "unit": "unit",
+    "wh": "wh",
+    "shelf": "shelf",
+    "stand": "stand",
+    "divide": "divide",
+    "price": "price",
+    "vat_rate": "vat_rate",
+    "pay_fmt": "pay_fmt"
+   }
+  },
+  {
+   "title": "คำนวณยอดที่คาด: บิล = 2 × ราคา + ภาษี, ชำระ = มูลค่าก่อนภาษี, คงค้าง = ภาษี",
+   "do": "db.query",
+   "sql": "with c as (select round(2 * :'price'::numeric, 2) as b), v as (select b, round(b * :'vat_rate'::numeric / 100, 2) as vt from c) select b::text as base, (b + vt)::text as total, b::text as paid, vt::text as remain, (-b)::text as paid_neg, to_char(b + vt, 'FM999,999,999,990.00') as total_f, to_char(b, 'FM999,999,999,990.00') as paid_f from v",
+   "rows": 1,
+   "save": {
+    "base": "base",
+    "total": "total",
+    "paid": "paid",
+    "remain": "remain",
+    "paid_neg": "paid_neg",
+    "total_f": "total_f",
+    "paid_f": "paid_f"
+   }
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "บันทึกบิลขายเชื่อเมื่อวาน 2 หน่วย",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/save",
+   "body": {
+    "isNew": true,
+    "confirmed": true,
+    "docNo": "{{inv}}",
+    "docDate": "{{yday}}",
+    "transType": 2,
+    "transFlag": 44,
+    "inquiryType": 0,
+    "custCode": "{{party}}",
+    "docFormatCode": "{{fmt}}",
+    "taxDocNo": "{{inv}}",
+    "taxDocDate": "{{yday}}",
+    "vatType": 0,
+    "vatRate": "{{vat_rate}}",
+    "remark": "{{run.tag}}",
+    "lines": [
+     {
+      "itemCode": "{{item}}",
+      "unitCode": "{{unit}}",
+      "whCode": "{{wh}}",
+      "shelfCode": "{{shelf}}",
+      "standValue": "{{stand}}",
+      "divideValue": "{{divide}}",
+      "qty": "2",
+      "price": "{{price}}",
+      "sumAmount": "{{base}}",
+      "taxType": 0
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "data.docNo",
+     "op": "eq",
+     "value": "{{inv}}"
+    }
+   ]
+  },
+  {
+   "title": "บันทึกใบรับชำระหนี้วันนี้ ชำระบางส่วนเป็นเงินสด",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/save",
+   "body": {
+    "kind": "ap_ar_trans",
+    "isNew": true,
+    "docNo": "{{pay}}",
+    "docDate": "{{today}}",
+    "transType": 2,
+    "transFlag": 239,
+    "custCode": "{{party}}",
+    "docFormatCode": "{{pay_fmt}}",
+    "remark": "{{run.tag}}",
+    "bills": [
+     {
+      "billingNo": "{{inv}}",
+      "billingDate": "{{yday}}",
+      "billType": 44,
+      "sumDebtAmount": "{{total}}",
+      "balanceRef": "{{total}}",
+      "sumPayMoney": "{{paid}}"
+     }
+    ],
+    "pay": {
+     "cash": "{{paid}}"
+    }
+   },
+   "expect": [
+    {
+     "path": "data.docNo",
+     "op": "eq",
+     "value": "{{pay}}"
+    }
+   ]
+  },
+  {
+   "title": "ฐานข้อมูล: ยอดบิลและยอดชำระตรงที่คำนวณ",
+   "do": "db.query",
+   "sql": "select (select total_amount::text from ic_trans where doc_no = :'inv' and trans_flag = 44) as inv_total, (select total_net_value::text from ap_ar_trans where doc_no = :'pay' and trans_flag = 239) as pay_total, (select sum_pay_money::text from ap_ar_trans_detail where doc_no = :'pay' and trans_flag = 239 and billing_no = :'inv') as pay_line",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "inv_total",
+     "op": "eq",
+     "value": "{{total}}"
+    },
+    {
+     "col": "pay_total",
+     "op": "eq",
+     "value": "{{paid}}"
+    },
+    {
+     "col": "pay_line",
+     "op": "eq",
+     "value": "{{paid}}"
+    }
+   ]
+  },
+  {
+   "title": "เปิดเมนู รายงานรับชำระหนี้",
+   "do": "ui.openMenu",
+   "key": "menu_ar_report_receipt"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขใบรับ/จ่ายชำระทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{pay}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "รายงานรับชำระหนี้: รวม 1 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(1 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบรับชำระหนี้: เอกสารเลขที่",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tbody tr:has-text(\"{{pay}}\") >> td >> nth=2",
+   "op": "eq",
+   "text": "{{pay}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบรับชำระหนี้: รหัสลูกหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tbody tr:has-text(\"{{pay}}\") >> td >> nth=3",
+   "op": "eq",
+   "text": "{{party}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบรับชำระหนี้: จำนวนเงิน = ยอดชำระบางส่วน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tbody tr:has-text(\"{{pay}}\") >> td >> nth=5",
+   "op": "eq",
+   "text": "{{paid}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมจำนวนเงิน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{paid}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "มีข้อมูล ปุ่ม ส่งออก CSV กดได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] button:has-text(\"ส่งออก CSV\"):not([disabled])",
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ ar-pay-doc",
+   "do": "ui.screenshot",
+   "name": "ar-pay-doc",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงวันที่เมื่อวาน: ไม่มีใบรับชำระหนี้ (ลงวันนี้)",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tbody tr:has-text(\"{{pay}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีข้อมูล ปุ่ม ส่งออก CSV ต้องกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] button:has-text(\"ส่งออก CSV\")[disabled]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = UAT-NOPE-ค่าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "UAT-NOPE-{{run.short}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นไม่ตรง: ไม่มีใบรับชำระหนี้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tbody tr:has-text(\"{{pay}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขใบรับ/จ่ายชำระทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{pay}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสคู่ค้าทดสอบZ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{party}}Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสคู่ค้าทดสอบZ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{party}}Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รหัสลูกหนี้ไม่ตรง: ไม่มีใบรับชำระหนี้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tbody tr:has-text(\"{{pay}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ติ๊ก แสดงเอกสารที่ยกเลิก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] label:has-text(\"แสดงเอกสารที่ยกเลิก\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "แสดงเอกสารยกเลิก: ใบรับชำระหนี้ไม่ถูกยกเลิกยังแสดง",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tbody tr:has-text(\"{{pay}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แสดงเอกสารยกเลิก: ยังรวม 1 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(1 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เอาติ๊ก แสดงเอกสารที่ยกเลิก ออก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] label:has-text(\"แสดงเอกสารที่ยกเลิก\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด แสดงรายละเอียด (รายการบิล)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] button:has-text(\"แสดงรายละเอียดสินค้า\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด: เลขที่บิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tbody tr:has-text(\"{{pay}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{inv}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด: จำนวนเงินของบิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tbody tr:has-text(\"{{pay}}\") >> td >> nth=10",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด: ยอดคงเหลือก่อนชำระ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tbody tr:has-text(\"{{pay}}\") >> td >> nth=11",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด: ยอดชำระ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tbody tr:has-text(\"{{pay}}\") >> td >> nth=12",
+   "op": "eq",
+   "text": "{{paid}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด: รวมจำนวนเงิน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รายละเอียด: รวมยอดชำระ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] table tfoot tr >> td >> nth=3",
+   "op": "eq",
+   "text": "{{paid}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ ar-pay-detail",
+   "do": "ui.screenshot",
+   "name": "ar-pay-detail",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดแท็บ รูปแบบรายงาน (Studio)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] button:has-text(\"รูปแบบรายงาน (\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งชื่อหัวรายงานกำหนดเอง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"เช่น รายงานตรวจนับสินค้าคงคลังประจำเดือน...\"]",
+   "value": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งคำโปรยหัวกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"เช่น สำหรับฝ่ายบริหารและผู้สอบบัญชี...\"]",
+   "value": "UAT-{{run.short}}-SUB",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งหมายเหตุท้ายกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] input[placeholder=\"เช่น เอกสารภายในองค์กร ห้ามเผยแพร่...\"]",
+   "value": "UAT-{{run.short}}-FOOT",
+   "continueOnFail": true
+  },
+  {
+   "title": "หัวรายงานบนจอเปลี่ยนเป็นชื่อที่ตั้ง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] h1",
+   "op": "contains",
+   "text": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม พิมพ์รายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_receipt\"] button:has-text(\"พิมพ์รายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าต่างตั้งค่าหน้ากระดาษเปิด",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"][aria-label=\"หน้าต่างตั้งค่าหน้ากระดาษและพิมพ์รายงาน PDF ส่วนกลาง\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวนอน",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวนอน ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวนอน: มีเลขเอกสาร ยอดเงิน หัว/ท้ายรายงานที่ตั้ง",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{pay}}",
+    "{{inv}}",
+    "{{party}}",
+    "{{total_f}}",
+    "{{paid_f}}",
+    "UAT-{{run.short}}-TITLE",
+    "UAT-{{run.short}}-SUB",
+    "UAT-{{run.short}}-FOOT"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวตั้ง",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวตั้ง ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวตั้ง: ยังมีเลขเอกสารและยอดเงินครบ",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{pay}}",
+    "{{inv}}",
+    "{{party}}",
+    "{{total_f}}",
+    "{{paid_f}}",
+    "UAT-{{run.short}}-TITLE"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "ปิดหน้าต่างพิมพ์",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"ปิดหน้าต่าง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอพิมพ์ไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดเมนู รายงานการรับชำระหนี้ประจำวัน",
+   "do": "ui.openMenu",
+   "key": "menu_ar_report_pay_debt_trans"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขใบรับ/จ่ายชำระทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{pay}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "รับชำระประจำวัน: รวม 1 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(1 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รับชำระประจำวัน: เลขที่บิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tbody tr:has-text(\"{{inv}}\") >> td >> nth=2",
+   "op": "eq",
+   "text": "{{inv}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รับชำระประจำวัน: รหัสลูกหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tbody tr:has-text(\"{{inv}}\") >> td >> nth=3",
+   "op": "eq",
+   "text": "{{party}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รับชำระประจำวัน: จำนวนเงินของบิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tbody tr:has-text(\"{{inv}}\") >> td >> nth=5",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รับชำระประจำวัน: ยอดคงเหลือก่อนรับ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tbody tr:has-text(\"{{inv}}\") >> td >> nth=6",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รับชำระประจำวัน: ยอดชำระ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tbody tr:has-text(\"{{inv}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{paid}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รับชำระประจำวัน: เอกสารเลขที่ใบรับ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tbody tr:has-text(\"{{inv}}\") >> td >> nth=9",
+   "op": "eq",
+   "text": "{{pay}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รับชำระประจำวัน: รวมจำนวนเงิน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รับชำระประจำวัน: รวมยอดชำระ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tfoot tr >> td >> nth=3",
+   "op": "eq",
+   "text": "{{paid}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากเลขที่ใบรับ = ใบรับทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"จากเลขที่ใบรับ\")) > input",
+   "value": "{{pay}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงเลขที่ใบรับ = ใบรับทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"ถึงเลขที่ใบรับ\")) > input",
+   "value": "{{pay}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากวันที่ใบวางบิล = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"จากวันที่ใบวางบิล\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ใบวางบิล = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"ถึงวันที่ใบวางบิล\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากเลขที่ใบวางบิล = บิลทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"จากเลขที่ใบวางบิล\")) > input",
+   "value": "{{inv}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงเลขที่ใบวางบิล = บิลทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"ถึงเลขที่ใบวางบิล\")) > input",
+   "value": "{{inv}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่อง ถึงเลขที่ใบวางบิล",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"ถึงเลขที่ใบวางบิล\")) > input",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "เงื่อนไขครบทุกช่องตรงเอกสาร: มีบิลทดสอบ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tbody tr:has-text(\"{{inv}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เงื่อนไขครบทุกช่อง: รวมยอดชำระ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tfoot tr >> td >> nth=3",
+   "op": "eq",
+   "text": "{{paid}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ ar-daily-receipt-all-conditions",
+   "do": "ui.screenshot",
+   "name": "ar-daily-receipt-all-conditions",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากเลขที่ใบวางบิล = เลขอื่น",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"จากเลขที่ใบวางบิล\")) > input",
+   "value": "{{inv}}Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงเลขที่ใบวางบิล = เลขอื่น",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"ถึงเลขที่ใบวางบิล\")) > input",
+   "value": "{{inv}}Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่อง ถึงเลขที่ใบวางบิล",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"ถึงเลขที่ใบวางบิล\")) > input",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "เลขที่ใบวางบิลไม่ตรง: ไม่มีบิลทดสอบ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tbody tr:has-text(\"{{inv}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีข้อมูล ปุ่ม ส่งออก CSV ต้องกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] button:has-text(\"ส่งออก CSV\")[disabled]",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากเลขที่ใบวางบิล = บิลทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"จากเลขที่ใบวางบิล\")) > input",
+   "value": "{{inv}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงเลขที่ใบวางบิล = บิลทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"ถึงเลขที่ใบวางบิล\")) > input",
+   "value": "{{inv}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากวันที่ใบวางบิล = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"จากวันที่ใบวางบิล\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ใบวางบิล = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"ถึงวันที่ใบวางบิล\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "วันที่บิลวันนี้ (บิลลงเมื่อวาน): ไม่มีบิลทดสอบ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tbody tr:has-text(\"{{inv}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากวันที่ใบวางบิล = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"จากวันที่ใบวางบิล\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ใบวางบิล = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"ถึงวันที่ใบวางบิล\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากเลขที่ใบรับ = เลขอื่น",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"จากเลขที่ใบรับ\")) > input",
+   "value": "{{pay}}Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงเลขที่ใบรับ = เลขอื่น",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"ถึงเลขที่ใบรับ\")) > input",
+   "value": "{{pay}}Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เลขที่ใบรับไม่ตรง: ไม่มีบิลทดสอบ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tbody tr:has-text(\"{{inv}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากเลขที่ใบรับ = ใบรับทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"จากเลขที่ใบรับ\")) > input",
+   "value": "{{pay}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงเลขที่ใบรับ = ใบรับทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] div:has(> label:has-text(\"ถึงเลขที่ใบรับ\")) > input",
+   "value": "{{pay}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับครบทุกเงื่อนไข: บิลทดสอบกลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_pay_debt_trans\"] table tbody tr:has-text(\"{{inv}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดเมนู รายงานสถานะลูกหนี้",
+   "do": "ui.openMenu",
+   "key": "menu_ar_report_status_ar"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "สถานะ: รวม 1 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(1 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เมื่อวาน-วันนี้: ยอดยกมา ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tbody tr:has-text(\"{{party}}\") >> td >> nth=3",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เมื่อวาน-วันนี้: ยอดตั้งหนี้ = ยอดบิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tbody tr:has-text(\"{{party}}\") >> td >> nth=4",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เมื่อวาน-วันนี้: ยอดเพิ่มหนี้ ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tbody tr:has-text(\"{{party}}\") >> td >> nth=5",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เมื่อวาน-วันนี้: ยอดลดหนี้ ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tbody tr:has-text(\"{{party}}\") >> td >> nth=6",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เมื่อวาน-วันนี้: ยอดตัดชำระหนี้ = ติดลบยอดชำระ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tbody tr:has-text(\"{{party}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{paid_neg}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เมื่อวาน-วันนี้: ยอดยกไป = คงค้าง (ภาษี)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tbody tr:has-text(\"{{party}}\") >> td >> nth=8",
+   "op": "eq",
+   "text": "{{remain}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมยอดตั้งหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tfoot tr >> td >> nth=2",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมยอดยกไป",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tfoot tr >> td >> nth=6",
+   "op": "eq",
+   "text": "{{remain}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ ar-status",
+   "do": "ui.screenshot",
+   "name": "ar-status",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เริ่มวันนี้: ยอดยกมา = ยอดบิลเมื่อวาน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tbody tr:has-text(\"{{party}}\") >> td >> nth=3",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เริ่มวันนี้: ยอดตั้งหนี้ ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tbody tr:has-text(\"{{party}}\") >> td >> nth=4",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เริ่มวันนี้: ยอดตัดชำระหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tbody tr:has-text(\"{{party}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{paid_neg}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เริ่มวันนี้: ยอดยกไป = คงค้าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tbody tr:has-text(\"{{party}}\") >> td >> nth=8",
+   "op": "eq",
+   "text": "{{remain}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันแรกของเดือนก่อน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{pm_from_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันสุดท้ายของเดือนก่อน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{pm_to_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงเดือนก่อน: ไม่มีลูกหนี้ทดสอบ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tbody tr:has-text(\"{{party}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = UAT-NOPE-ค่าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "UAT-NOPE-{{run.short}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นตรง: แถวกลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_status_ar\"] table tbody tr:has-text(\"{{party}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดเมนู รายงานใบส่งของค้างชำระ-ตามวันที่",
+   "do": "ui.openMenu",
+   "key": "menu_ar_report_invoice_remain_pay"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสคู่ค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{party}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = เลขบิลทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{inv}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "ค้างชำระ: รวม 1 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(1 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ค้างชำระ: เลขที่เอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] table tbody tr:has-text(\"{{inv}}\") >> td >> nth=2",
+   "op": "eq",
+   "text": "{{inv}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ค้างชำระ: รหัสลูกหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] table tbody tr:has-text(\"{{inv}}\") >> td >> nth=5",
+   "op": "eq",
+   "text": "{{party}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ค้างชำระ: ยอดตั้งหนี้ = ยอดบิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] table tbody tr:has-text(\"{{inv}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ค้างชำระ: ยอดชำระแล้ว (ไม่สนเครื่องหมาย)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] table tbody tr:has-text(\"{{inv}}\") >> td >> nth=8",
+   "op": "contains",
+   "text": "{{paid_f}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ค้างชำระ ณ วันนี้: ยอดคงเหลือ = ภาษี",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] table tbody tr:has-text(\"{{inv}}\") >> td >> nth=9",
+   "op": "eq",
+   "text": "{{remain}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมยอดตั้งหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมยอดคงเหลือ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] table tfoot tr >> td >> nth=3",
+   "op": "eq",
+   "text": "{{remain}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ ar-open-docs",
+   "do": "ui.screenshot",
+   "name": "ar-open-docs",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ณ เมื่อวาน (ก่อนชำระ): ยอดคงเหลือ = เต็มบิล",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] table tbody tr:has-text(\"{{inv}}\") >> td >> nth=9",
+   "op": "eq",
+   "text": "{{total}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ณ เมื่อวาน: ยังไม่มียอดชำระ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] table tbody tr:has-text(\"{{inv}}\") >> td >> nth=8",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เริ่มวันนี้ (บิลลงเมื่อวาน): ไม่มีบิลทดสอบ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] table tbody tr:has-text(\"{{inv}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_ar_report_invoice_remain_pay\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบใบรับชำระหนี้ทดสอบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/delete",
+   "body": {
+    "kind": "ap_ar_trans",
+    "docNo": "{{pay}}",
+    "transFlag": 239
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ลบบิลขายเชื่อทดสอบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/delete",
+   "body": {
+    "docNo": "{{inv}}",
+    "transFlag": 44
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือแถวของเอกสารทดสอบในทุกตารางที่แตะ",
+   "do": "db.query",
+   "sql": "select (select count(*) from ic_trans where doc_no in (:'pay', :'inv')) + (select count(*) from ic_trans_detail where doc_no in (:'pay', :'inv')) + (select count(*) from ap_ar_trans where doc_no in (:'pay', :'inv')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'pay', :'inv')) + (select count(*) from cb_trans where doc_no in (:'pay', :'inv')) + (select count(*) from cb_trans_detail where doc_no in (:'pay', :'inv')) + (select count(*) from gl_journal where doc_no in (:'pay', :'inv')) + (select count(*) from gl_journal_detail where doc_no in (:'pay', :'inv')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'pay', :'inv')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'pay', :'inv')) as left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}

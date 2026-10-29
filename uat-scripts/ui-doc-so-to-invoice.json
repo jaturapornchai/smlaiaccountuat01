@@ -1,0 +1,1119 @@
+{
+  "id": "ui-doc-so-to-invoice",
+  "title": "หน้าจอใบสั่งขาย → บิลขายเชื่อ: ดึงเอกสารอ้างอิงผ่านจอ ตรวจรายการที่ดึงมา ยอดคงเหลือใบสั่งขาย กันขายเกิน ผังเอกสารเชื่อมสองทาง และลบผ่านจอ",
+  "module": "sales",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "ใบสั่งขาย (menu_so_sale_order) สร้างผ่านจอ: ลูกค้า + สินค้า 5 หน่วย ราคาจริง บันทึก (ตรวจหัว/รายการใน DB) → บิลขายเชื่อ (menu_so_invoice) เพิ่มใหม่ ใส่ลูกค้าเดียวกัน กด ดึงเอกสาร เลือกใบสั่งขาย → ต้องได้รายการเดิม (ประเภทเอกสาร ใบสั่งขาย, เลขที่อ้างอิง, รหัส, จำนวน 5, ราคา, ยอด) และช่องเอกสารอ้างอิงหัวบิล → แก้จำนวนเป็น 6 บันทึกต้องถูกกัน 'จำนวนเกินเอกสารอ้างอิง' → แก้เป็น 3 บันทึก (DB: ref_doc_no/ref_row/doc_ref_type 3/doc_ref, ยอดเงิน ภาษี GL ตรง SQL; ใบสั่งขาย used_status 1 คงเหลือ 2) → เพิ่มบิลใหม่ดึงซ้ำต้องได้แค่คงเหลือ 2 แล้วทิ้ง → Document Flow ของบิลและของใบสั่งขายต้องเห็นกันและกัน → ลบบิลผ่านจอ (ใบสั่งขายกลับเป็นคงเหลือ 5 used_status 0) → ลบใบสั่งขายผ่านจอ → 0 แถวทุกตาราง",
+  "timeoutMs": 600000,
+  "steps": [
+    {
+      "title": "กำหนดเลขใบสั่งขายทดสอบ",
+      "do": "set",
+      "name": "so",
+      "value": "UAT-{{run.short}}-S"
+    },
+    {
+      "title": "กำหนดเลขบิลขายทดสอบ",
+      "do": "set",
+      "name": "iv",
+      "value": "UAT-{{run.short}}-I"
+    },
+    {
+      "title": "อัตราภาษีขายจริงจากบิลขายเชื่อล่าสุดที่ไม่ใช่เอกสารทดสอบ และวันที่วันนี้ (เวลาไทย)",
+      "do": "db.query",
+      "sql": "select (select t.vat_rate::numeric from ic_trans t where t.trans_flag = 44 and t.vat_type = 0 and t.doc_no !~* '^UAT' and t.last_status = 0 and t.total_vat_value > 0 order by t.doc_date desc, t.roworder desc limit 1)::text as rate, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today, to_char((now() at time zone 'Asia/Bangkok')::date, 'DD') as dd, (select coalesce(discout_type, 0)::int from erp_option limit 1)::text as disc_type",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "rate",
+          "op": "gt",
+          "value": "0"
+        }
+      ],
+      "save": {
+        "rate": "rate",
+        "today": "today",
+        "dd": "dd",
+        "disc_type": "disc_type"
+      }
+    },
+    {
+      "title": "เลือกลูกค้าจริงรายที่ 1 (เรียงรหัสจากท้าย): ใช้งานอยู่ ไม่ถูกปิดเครดิต วงเงินไม่บล็อก (ไม่มีวงเงิน หรือระบบไม่ล็อกวงเงิน) มีเครดิต 1-300 วัน ไม่มีส่วนลด/พนักงานขาย/บังคับภาษีของลูกค้า",
+      "do": "db.query",
+      "sql": "select c.code as c, c.name_1 as c_name, substr(c.name_1, 1, greatest(3, (char_length(c.name_1) * 2) / 3)) as c_part, d.credit_day::int::text as c_cday, to_char((now() at time zone 'Asia/Bangkok')::date + d.credit_day::int, 'YYYY-MM-DD') as c_due, (case when coalesce(c.price_level, 0)::int between 1 and 9 then coalesce(c.price_level, 0)::int else 0 end)::text as c_lvl from ar_customer c join lateral (select * from ar_customer_detail x where x.ar_code = c.code limit 1) d on true where c.code !~* '^UAT' and coalesce(c.status, 0) = 0 and char_length(coalesce(c.name_1, '')) >= 3 and coalesce(d.credit_status, 0) = 0 and (coalesce(d.credit_money, 0) = 0 or (select coalesce(lock_credit_money, 0) = 0 and coalesce(request_ar_credit, 0) = 0 from erp_option limit 1)) and coalesce(d.credit_day, 0) between 1 and 300 and coalesce(d.sale_type, 0) in (0, 2) and coalesce(d.set_tax_type, 0) = 0 and coalesce(trim(d.discount_item), '') = '' and coalesce(trim(d.discount_bill), '') = '' and coalesce(trim(d.sale_code), '') = '' order by c.code desc offset 0 limit 1",
+      "rows": 1,
+      "save": {
+        "c": "c",
+        "c_name": "c_name",
+        "c_part": "c_part",
+        "c_cday": "c_cday",
+        "c_due": "c_due",
+        "c_lvl": "c_lvl"
+      }
+    },
+    {
+      "title": "เลือกสินค้าจริงตัวที่ 1 (เรียงรหัสจากท้าย): สินค้าสต๊อกหน่วยเดียว 1:1 มีคลัง/ที่เก็บเดียว สูตรราคาขายเงินเชื่อ (ตามระดับราคาของลูกค้า) เป็นตัวเลขเดียวไม่ต่ำกว่าทุน ไม่มีตารางราคา/ส่วนลด และสต๊อกที่คลังนั้น >= 10 (ราคาไม่เกิน 2 ตำแหน่ง)",
+      "do": "db.query",
+      "sql": "select i.code as it, i.name_1 as it_name, substr(i.name_1, 1, greatest(3, (char_length(i.name_1) * 2) / 3)) as it_part, i.unit_standard as it_unit, ws.wh as it_wh, ws.shelf as it_shelf, f.p::text as it_price, b.bal::text as it_bal from ic_inventory i join ic_unit_use u on u.ic_code = i.code and u.code = i.unit_standard and u.stand_value = 1 and u.divide_value = 1 left join lateral (select * from ic_inventory_detail x where x.ic_code = i.code limit 1) d on true join lateral (select min(wh_code) as wh, min(shelf_code) as shelf, count(*) as n from ic_wh_shelf where ic_code = i.code) ws on ws.n = 1 join lateral (select min(pf)::numeric as p, count(distinct pf) as nd, count(*) filter (where coalesce(pf, '') !~ '^[0-9]+(\\.[0-9]+)?$') as bad from (select (array[price_0, price_1, price_2, price_3, price_4, price_5, price_6, price_7, price_8, price_9])[:'c_lvl'::int + 1] as pf from ic_inventory_price_formula where ic_code = i.code and unit_code = i.unit_standard and sale_type in (0, 2) and coalesce(tax_type, 0) in (0, 1)) ff) f on f.nd = 1 and f.bad = 0 and f.p > 0 cross join lateral (select coalesce(sum(d.qty * d.calc_flag * coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1)), 0) from ic_trans_detail d where d.item_code = i.code and d.wh_code = ws.wh and d.shelf_code = ws.shelf and d.doc_no !~* '^UAT' and coalesce(d.last_status, 0) = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12, 310, 14, 311, 16, 44, 46, 48, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 521, 522, 523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14, 16, 311) and coalesce(d.inquiry_type, 0) in (1, 3))) b(bal) where i.code !~* '^UAT' and coalesce(i.item_type, 0) = 0 and coalesce(i.tax_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0 and coalesce(i.use_expire, 0) = 0 and char_length(coalesce(i.name_1, '')) >= 3 and coalesce(d.start_sale_unit, '') in ('', i.unit_standard) and coalesce(d.start_unit_code, '') in ('', i.unit_standard) and coalesce(d.start_sale_wh, '') = '' and coalesce(trim(d.discount), '') = '' and coalesce(d.is_hold_sale, 0) = 0 and not exists (select 1 from ic_inventory_price p where p.ic_code = i.code) and not exists (select 1 from ic_inventory_discount p where p.ic_code = i.code) and (select coalesce(enable_all_ic_wh_shelf, 0) from erp_option limit 1) = 0 and f.p >= coalesce(i.average_cost, 0) and b.bal >= 10 and f.p = round(f.p, 2) order by i.code desc offset 0 limit 1",
+      "rows": 1,
+      "save": {
+        "it": "it",
+        "it_name": "it_name",
+        "it_part": "it_part",
+        "it_unit": "it_unit",
+        "it_wh": "it_wh",
+        "it_shelf": "it_shelf",
+        "it_price": "it_price"
+      }
+    },
+    {
+      "title": "ยอดที่ควรได้: 5/3/2 x ราคา (ทศนิยมยอดจาก erp_option) ภาษีแยกนอกตามอัตรา",
+      "do": "db.query",
+      "sql": "with o as (select coalesce(item_amount_decimal, 2)::int as ad from erp_option limit 1), v as (select round(5 * :'it_price'::numeric, ad) as l5, round(3 * :'it_price'::numeric, ad) as l3, round(2 * :'it_price'::numeric, ad) as l2 from o), w as (select *, round(l5 * :'rate'::numeric / 100, 2) as v5, round(l3 * :'rate'::numeric / 100, 2) as v3 from v) select l5::text, l3::text, l2::text, v3::text, (l5 + v5)::text as amt5, (l3 + v3)::text as amt_exp from w",
+      "rows": 1,
+      "save": {
+        "l5": "l5",
+        "l3": "l3",
+        "l2": "l2",
+        "v3": "v3",
+        "amt5": "amt5",
+        "amt_exp": "amt_exp"
+      }
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เปิดหน้าจอใบสั่งขายสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_so_sale_order"
+    },
+    {
+      "title": "กดปุ่ม เพิ่มใหม่ บนแถบเครื่องมือ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div.h-11 button:has-text(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "ช่องเลขที่เอกสารเปิดให้กรอก (โหมดเพิ่มใหม่)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input:not([disabled])"
+    },
+    {
+      "title": "กรอกเลขที่เอกสารทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input",
+      "value": "{{so}}"
+    },
+    {
+      "title": "ช่องเลขที่เอกสารแสดงเลขที่กรอก (ตัวพิมพ์ใหญ่)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input",
+      "value": "{{so}}",
+      "op": "same"
+    },
+    {
+      "title": "หัวจอแสดงโหมด เพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] header.card-head span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "ใบสั่งขาย: เลือกประเภทรายการ = ขายเชื่อ (ค่า 0)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] [role=\"radiogroup\"] >> nth=0 >> input[type=\"radio\"][value=\"0\"]"
+    },
+    {
+      "title": "ใบสั่งขาย: ประเภทภาษีเริ่มต้นคือแยกนอก (ต้องตรงกับบิลขายจึงดึงได้)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div:has(> label:text-is(\"ภาษี:\")) > [role=\"radiogroup\"] span.bg-emerald-50",
+      "text": "แยก"
+    },
+    {
+      "title": "ใบสั่งขาย: พิมพ์รหัสลูกค้า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{c}}"
+    },
+    {
+      "title": "กด Tab ยืนยันรหัสลูกค้า",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] input[placeholder=\"รหัส...\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "ใบสั่งขาย: ชื่อลูกค้าเติมเองตาม ar_customer.name_1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] textarea[placeholder=\"ชื่อเจ้าหนี้ / ลูกหนี้...\"]",
+      "value": "{{c_name}}",
+      "op": "same"
+    },
+    {
+      "title": "ใบสั่งขาย บรรทัดที่ 1: พิมพ์รหัสสินค้า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) input[placeholder=\"รหัสสินค้า...\"]",
+      "value": "{{it}}"
+    },
+    {
+      "title": "กด Enter ยืนยันช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) input[placeholder=\"รหัสสินค้า...\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ใบสั่งขาย บรรทัดที่ 1: ชื่อสินค้าตาม ic_inventory.name_1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) textarea",
+      "value": "{{it_name}}",
+      "op": "same"
+    },
+    {
+      "title": "ใบสั่งขาย บรรทัดที่ 1: จำนวน 5",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(7) input",
+      "value": "5"
+    },
+    {
+      "title": "กด Enter ยืนยันช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(7) input",
+      "key": "Enter"
+    },
+    {
+      "title": "ใบสั่งขาย บรรทัดที่ 1: ราคาต่อหน่วย = ราคาขายจริงของสินค้า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(8) input",
+      "value": "{{it_price}}"
+    },
+    {
+      "title": "กด Enter ยืนยันช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(8) input",
+      "key": "Enter"
+    },
+    {
+      "title": "ใบสั่งขาย บรรทัดที่ 1: ราคาต่อหน่วยที่แสดง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(8) input",
+      "value": "{{it_price}}",
+      "op": "eq"
+    },
+    {
+      "title": "ใบสั่งขาย บรรทัดที่ 1: จำนวนเงิน = 5 x ราคา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(10)",
+      "text": "{{l5}}",
+      "op": "eq"
+    },
+    {
+      "title": "ใบสั่งขาย: รวมมูลค่าทั้งสิ้น = ยอด + ภาษี ตรง SQL",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div:has(> label:text-is(\"รวมมูลค่าทั้งสิ้น:\")) > div",
+      "text": "{{amt5}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปุ่ม บันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div.h-11 button:has-text(\"บันทึก\")"
+    },
+    {
+      "title": "หน้าต่างบันทึกสำเร็จแสดง (ถามพิมพ์แบบฟอร์ม)",
+      "do": "ui.expectVisible",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+      "timeout": 30000
+    },
+    {
+      "title": "กด ยังไม่พิมพ์ (ไม่พิมพ์จริง)",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งบันทึกเอกสารสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] header.card-head span.font-medium",
+      "text": "บันทึกเอกสาร {{so}} เรียบร้อยแล้ว"
+    },
+    {
+      "title": "หลังบันทึก หัวจอใบสั่งขายเป็น โหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] header.card-head span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "ใบสั่งขายใน DB: 1 หัว (flag 36) 1 บรรทัด จำนวน 5 ราคา ยอด ตรง SQL ยังไม่ถูกใช้ (used_status 0) ยังไม่ปิด",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no = :'so')::text as nh, (select count(*) from ic_trans_detail where doc_no = :'so')::text as nd, h.trans_flag::text as flag, h.cust_code, coalesce(h.used_status, 0)::text as used, coalesce(h.doc_success, 0)::text as succ, h.total_amount::numeric::text as amt, d.item_code, d.qty::numeric::text as qty, d.price::numeric::text as price, d.sum_amount::numeric::text as sa, d.line_number::text as so_line from ic_trans h join ic_trans_detail d on d.doc_no = h.doc_no and d.trans_flag = h.trans_flag where h.doc_no = :'so'",
+      "rows": 1,
+      "save": {
+        "so_line": "so_line"
+      },
+      "expect": [
+        {
+          "col": "nh",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "nd",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "flag",
+          "op": "eq",
+          "value": "36"
+        },
+        {
+          "col": "cust_code",
+          "op": "same",
+          "value": "{{c}}"
+        },
+        {
+          "col": "used",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "succ",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "amt",
+          "op": "eq",
+          "value": "{{amt5}}"
+        },
+        {
+          "col": "item_code",
+          "op": "same",
+          "value": "{{it}}"
+        },
+        {
+          "col": "qty",
+          "op": "eq",
+          "value": "5"
+        },
+        {
+          "col": "price",
+          "op": "eq",
+          "value": "{{it_price}}"
+        },
+        {
+          "col": "sa",
+          "op": "eq",
+          "value": "{{l5}}"
+        }
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอขายสินค้าและบริการ (ขายเชื่อ)",
+      "do": "ui.openMenu",
+      "key": "menu_so_invoice"
+    },
+    {
+      "title": "กดปุ่ม เพิ่มใหม่ บนแถบเครื่องมือ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.h-11 button:has-text(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "ช่องเลขที่เอกสารเปิดให้กรอก (โหมดเพิ่มใหม่)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input:not([disabled])"
+    },
+    {
+      "title": "กรอกเลขที่บิลขายทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input",
+      "value": "{{iv}}"
+    },
+    {
+      "title": "ช่องเลขที่เอกสารแสดงเลขที่กรอก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input",
+      "value": "{{iv}}",
+      "op": "same"
+    },
+    {
+      "title": "บิลขาย: เลือกประเภทการขาย = ขายเงินเชื่อ (ค่า 0)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] [role=\"radiogroup\"] >> nth=0 >> input[type=\"radio\"][value=\"0\"]"
+    },
+    {
+      "title": "บิลขาย: พิมพ์รหัสลูกค้าเดียวกับใบสั่งขาย",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{c}}"
+    },
+    {
+      "title": "กด Tab ยืนยันรหัสลูกค้า",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] input[placeholder=\"รหัส...\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "บิลขาย: ชื่อลูกค้าเติมเอง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] textarea[placeholder=\"ชื่อเจ้าหนี้ / ลูกหนี้...\"]",
+      "value": "{{c_name}}",
+      "op": "same"
+    },
+    {
+      "title": "กดปุ่ม ดึงเอกสาร (ค้นหาเอกสารอ้างอิง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] button[title=\"ค้นหาและดึงรายการจากเอกสารอ้างอิง\"]"
+    },
+    {
+      "title": "หน้าต่างเลือกเอกสารอ้างอิงแสดง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has([data-testid=\"ref-doc-search\"])"
+    },
+    {
+      "title": "พิมพ์เลขที่ใบสั่งขายทดสอบในช่องค้นหา (ค้นอัตโนมัติ)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has([data-testid=\"ref-doc-search\"]) [data-testid=\"ref-doc-search\"]",
+      "value": "{{so}}"
+    },
+    {
+      "title": "คลิกใบสั่งขายทดสอบในรายการเอกสารอ้างอิง (กรองตามลูกค้า/ประเภทภาษี/ยังไม่ปิด)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has([data-testid=\"ref-doc-search\"]) button:has(div.font-mono:text-is(\"{{so}}\"))"
+    },
+    {
+      "title": "หน้าต่างเลือกเอกสารอ้างอิงปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has([data-testid=\"ref-doc-search\"])",
+      "visible": false
+    },
+    {
+      "title": "หัวบิล: ช่องเอกสารอ้างอิง = เลขที่ใบสั่งขาย",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] input[placeholder=\"เลขที่เอกสารอ้างอิง...\"]",
+      "value": "{{so}}",
+      "op": "same",
+      "continueOnFail": true
+    },
+    {
+      "title": "บรรทัดที่ 1: ประเภทเอกสาร = ใบสั่งขาย (doc_ref_type 3)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(2)",
+      "text": "ใบสั่งขาย",
+      "continueOnFail": true
+    },
+    {
+      "title": "บรรทัดที่ 1: เอกสารอ้างอิง = เลขที่ใบสั่งขาย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(3)",
+      "text": "{{so}}"
+    },
+    {
+      "title": "บรรทัดที่ 1: รหัสสินค้าที่ดึงมา = สินค้าในใบสั่งขาย",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) input[placeholder=\"รหัสสินค้า...\"]",
+      "value": "{{it}}",
+      "op": "same"
+    },
+    {
+      "title": "บรรทัดที่ 1: ชื่อสินค้าที่ดึงมา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) textarea",
+      "value": "{{it_name}}",
+      "op": "same",
+      "continueOnFail": true
+    },
+    {
+      "title": "บรรทัดที่ 1: จำนวนที่ดึงมา = คงเหลือในใบสั่งขาย 5",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(9) input",
+      "value": "5",
+      "op": "eq"
+    },
+    {
+      "title": "บรรทัดที่ 1: ราคาที่ดึงมา = ราคาในใบสั่งขาย",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(10) input",
+      "value": "{{it_price}}",
+      "op": "eq"
+    },
+    {
+      "title": "บรรทัดที่ 1: จำนวนเงิน = 5 x ราคา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(12)",
+      "text": "{{l5}}",
+      "op": "eq"
+    },
+    {
+      "title": "รวมมูลค่าทั้งสิ้นหลังดึง = ยอดใบสั่งขาย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div:has(> label:text-is(\"รวมมูลค่าทั้งสิ้น:\")) > div",
+      "text": "{{amt5}}",
+      "op": "eq",
+      "continueOnFail": true
+    },
+    {
+      "title": "แก้จำนวนเป็น 6 (เกินใบสั่งขาย 5)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(9) input",
+      "value": "6"
+    },
+    {
+      "title": "กด Enter ยืนยันช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(9) input",
+      "key": "Enter"
+    },
+    {
+      "title": "กดปุ่ม บันทึก ขณะจำนวนเกินเอกสารอ้างอิง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.h-11 button:has-text(\"บันทึก\")"
+    },
+    {
+      "title": "บันทึกถูกกัน แถบสถานะแจ้ง จำนวนเกินเอกสารอ้างอิง พร้อมรหัสสินค้า",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] header.card-head span.font-medium",
+      "text": "จำนวนเกินเอกสารอ้างอิง : {{it}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ยังไม่มีบิลใน ic_trans (บันทึกเกินถูกกัน)",
+      "do": "db.query",
+      "sql": "select count(*)::text as n from ic_trans where doc_no = :'iv'",
+      "rows": 1,
+      "continueOnFail": true,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝง (ยกเว้น HTTP 4xx ของการบันทึกที่ถูกกันตั้งใจ)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 4\\d\\d POST /api/process/trans/save",
+        "^console: Failed to load resource: the server responded with a status of 4\\d\\d"
+      ]
+    },
+    {
+      "title": "แก้จำนวนเป็น 3 (ขายบางส่วน)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(9) input",
+      "value": "3"
+    },
+    {
+      "title": "กด Enter ยืนยันช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(9) input",
+      "key": "Enter"
+    },
+    {
+      "title": "บรรทัดที่ 1: จำนวนเงิน = 3 x ราคา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(12)",
+      "text": "{{l3}}",
+      "op": "eq"
+    },
+    {
+      "title": "รวมมูลค่าทั้งสิ้น = 3 x ราคา + ภาษี ตรง SQL",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div:has(> label:text-is(\"รวมมูลค่าทั้งสิ้น:\")) > div",
+      "text": "{{amt_exp}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปุ่ม บันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.h-11 button:has-text(\"บันทึก\")"
+    },
+    {
+      "title": "หน้าต่างบันทึกสำเร็จแสดง (ถามพิมพ์แบบฟอร์ม)",
+      "do": "ui.expectVisible",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+      "timeout": 30000
+    },
+    {
+      "title": "กด ยังไม่พิมพ์ (ไม่พิมพ์จริง)",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งบันทึกเอกสารสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] header.card-head span.font-medium",
+      "text": "บันทึกเอกสาร {{iv}} เรียบร้อยแล้ว"
+    },
+    {
+      "title": "หลังบันทึก หัวจอบิลเป็น โหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] header.card-head span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "บิลใน DB: 1 หัว 1 บรรทัด อ้างใบสั่งขาย (doc_ref หัว, ref_doc_no/ref_row = บรรทัดใบสั่งขาย, doc_ref_type 3) จำนวน 3 ราคา ยอด ภาษี รวม ตรง SQL",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no = :'iv')::text as nh, (select count(*) from ic_trans_detail where doc_no = :'iv')::text as nd, h.cust_code, coalesce(h.doc_ref, '') as doc_ref, d.item_code, d.qty::numeric::text as qty, d.price::numeric::text as price, d.sum_amount::numeric::text as sa, coalesce(d.ref_doc_no, '') as ref_doc_no, coalesce(d.ref_row, -1)::text as ref_row, coalesce(d.doc_ref_type, 0)::text as drt, h.total_value::numeric::text as tv, h.total_vat_value::numeric::text as vat, h.total_amount::numeric::text as amt from ic_trans h join ic_trans_detail d on d.doc_no = h.doc_no and d.trans_flag = 44 where h.doc_no = :'iv' and h.trans_flag = 44",
+      "rows": 1,
+      "continueOnFail": true,
+      "expect": [
+        {
+          "col": "nh",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "nd",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "cust_code",
+          "op": "same",
+          "value": "{{c}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "same",
+          "value": "{{so}}"
+        },
+        {
+          "col": "item_code",
+          "op": "same",
+          "value": "{{it}}"
+        },
+        {
+          "col": "qty",
+          "op": "eq",
+          "value": "3"
+        },
+        {
+          "col": "price",
+          "op": "eq",
+          "value": "{{it_price}}"
+        },
+        {
+          "col": "sa",
+          "op": "eq",
+          "value": "{{l3}}"
+        },
+        {
+          "col": "ref_doc_no",
+          "op": "same",
+          "value": "{{so}}"
+        },
+        {
+          "col": "ref_row",
+          "op": "eq",
+          "value": "{{so_line}}"
+        },
+        {
+          "col": "drt",
+          "op": "eq",
+          "value": "3"
+        },
+        {
+          "col": "tv",
+          "op": "eq",
+          "value": "{{l3}}"
+        },
+        {
+          "col": "vat",
+          "op": "eq",
+          "value": "{{v3}}"
+        },
+        {
+          "col": "amt",
+          "op": "eq",
+          "value": "{{amt_exp}}"
+        }
+      ]
+    },
+    {
+      "title": "GL ของบิล: เดบิต = เครดิต = ยอดรวมทั้งสิ้น มีบรรทัดเดบิตลูกหนี้ = ยอดรวม และเครดิตภาษีขาย = ยอดภาษี · รายงานภาษีขาย ฐาน/ภาษี/อัตรา ตรงหัวเอกสาร",
+      "do": "db.query",
+      "sql": "select t.total_amount::numeric::text as amt, (select coalesce(sum(debit), 0) from gl_journal_detail where doc_no = t.doc_no)::text as dr, (select coalesce(sum(credit), 0) from gl_journal_detail where doc_no = t.doc_no)::text as cr, (select count(*) from gl_journal_detail where doc_no = t.doc_no and debit = t.total_amount and credit = 0)::text as ar_line, (select count(*) from gl_journal_detail where doc_no = t.doc_no and credit = t.total_vat_value and debit = 0)::text as vat_line, (select count(*) from gl_journal_vat_sale v where v.doc_no = t.doc_no and v.base_caltax_amount = t.total_before_vat and v.amount = t.total_vat_value and v.tax_rate = t.vat_rate)::text as vat_rows, (select count(*) from gl_journal_vat_sale v where v.doc_no = t.doc_no)::text as vat_all, ((select coalesce(sum(debit), 0) from gl_journal_detail where doc_no = t.doc_no) - (select coalesce(sum(credit), 0) from gl_journal_detail where doc_no = t.doc_no))::text as diff from ic_trans t where t.doc_no = :'iv' and t.trans_flag = 44",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "dr",
+          "op": "eq",
+          "value": "{{amt_exp}}"
+        },
+        {
+          "col": "cr",
+          "op": "eq",
+          "value": "{{amt_exp}}"
+        },
+        {
+          "col": "ar_line",
+          "op": "gte",
+          "value": "1"
+        },
+        {
+          "col": "vat_line",
+          "op": "gte",
+          "value": "1"
+        },
+        {
+          "col": "vat_rows",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "vat_all",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ใบสั่งขายหลังขายบางส่วน: used_status 1 ยังไม่ปิด (doc_success 0) คงเหลือ 5 - 3 = 2",
+      "do": "db.query",
+      "sql": "select coalesce(h.used_status, 0)::text as used, coalesce(h.doc_success, 0)::text as succ, (d.qty - coalesce((select sum(x.qty) from ic_trans_detail x where x.ref_doc_no = :'so' and x.trans_flag in (44, 37) and coalesce(x.last_status, 0) = 0), 0))::numeric::text as left_qty from ic_trans h join ic_trans_detail d on d.doc_no = h.doc_no and d.trans_flag = 36 where h.doc_no = :'so' and h.trans_flag = 36",
+      "rows": 1,
+      "continueOnFail": true,
+      "expect": [
+        {
+          "col": "used",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "succ",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "left_qty",
+          "op": "eq",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "title": "กดปุ่ม Document Flow",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.h-11 button:has-text(\"Document Flow\")"
+    },
+    {
+      "title": "หน้าต่างผังเส้นทางเอกสารแสดง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))"
+    },
+    {
+      "title": "ผังมีกล่องเอกสารปัจจุบัน = เอกสารที่เปิดอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\")) div.rounded-xl.border-emerald-600:has(span.text-emerald-800:text-is(\"{{iv}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "ผังมีกล่องใบสั่งขายต้นทาง (เชื่อมกันผ่านเลขที่อ้างอิง)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\")) div.rounded-xl:has(span.text-emerald-800:text-is(\"{{so}}\"))",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพหน้าจอผังเส้นทางเอกสาร",
+      "do": "ui.screenshot",
+      "name": "so-invoice-flow-from-invoice"
+    },
+    {
+      "title": "กด ปิดหน้าต่าง ผังเส้นทางเอกสาร",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\")) header button:has-text(\"ปิดหน้าต่าง\")"
+    },
+    {
+      "title": "หน้าต่างผังเส้นทางเอกสารปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))",
+      "visible": false
+    },
+    {
+      "title": "กดปุ่ม เพิ่มใหม่ (บิลใหม่ ไม่บันทึก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.h-11 button:has-text(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "หัวจอแสดงโหมด เพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] header.card-head span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "บิลใหม่: พิมพ์รหัสลูกค้าเดิม",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{c}}"
+    },
+    {
+      "title": "กด Tab ยืนยันรหัสลูกค้า",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] input[placeholder=\"รหัส...\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "บิลใหม่: ชื่อลูกค้าเติมเอง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] textarea[placeholder=\"ชื่อเจ้าหนี้ / ลูกหนี้...\"]",
+      "value": "{{c_name}}",
+      "op": "same"
+    },
+    {
+      "title": "กดปุ่ม ดึงเอกสาร (ค้นหาเอกสารอ้างอิง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] button[title=\"ค้นหาและดึงรายการจากเอกสารอ้างอิง\"]"
+    },
+    {
+      "title": "หน้าต่างเลือกเอกสารอ้างอิงแสดง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has([data-testid=\"ref-doc-search\"])"
+    },
+    {
+      "title": "พิมพ์เลขที่ใบสั่งขายทดสอบในช่องค้นหา (ค้นอัตโนมัติ)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has([data-testid=\"ref-doc-search\"]) [data-testid=\"ref-doc-search\"]",
+      "value": "{{so}}"
+    },
+    {
+      "title": "คลิกใบสั่งขายทดสอบในรายการเอกสารอ้างอิง (กรองตามลูกค้า/ประเภทภาษี/ยังไม่ปิด)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has([data-testid=\"ref-doc-search\"]) button:has(div.font-mono:text-is(\"{{so}}\"))"
+    },
+    {
+      "title": "หน้าต่างเลือกเอกสารอ้างอิงปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has([data-testid=\"ref-doc-search\"])",
+      "visible": false
+    },
+    {
+      "title": "บิลใหม่: จำนวนที่ดึงได้ = คงเหลือใบสั่งขาย 2",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(9) input",
+      "value": "2",
+      "op": "eq",
+      "continueOnFail": true
+    },
+    {
+      "title": "บิลใหม่: จำนวนเงิน = 2 x ราคา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(12)",
+      "text": "{{l2}}",
+      "op": "eq",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปุ่ม ปิดหน้าจอ (ทิ้งบิลใหม่)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.h-11 button:has-text(\"ปิดหน้าจอ\")"
+    },
+    {
+      "title": "ระบบถามก่อนทิ้งข้อมูลที่ยังไม่บันทึก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] [role=\"dialog\"]:has-text(\"มีการเปลี่ยนแปลงข้อมูลที่ยังไม่ได้บันทึก\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "กด สลับรายการ (ไม่บันทึก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] [role=\"dialog\"]:has-text(\"มีการเปลี่ยนแปลงข้อมูลที่ยังไม่ได้บันทึก\") button:has-text(\"สลับรายการ (ไม่บันทึก)\")",
+      "optional": true
+    },
+    {
+      "title": "หัวจอกลับเป็น โหมดดูข้อมูล ของบิลที่บันทึกไว้",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] header.card-head span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารที่แสดง = บิลทดสอบเดิม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input",
+      "value": "{{iv}}",
+      "op": "same",
+      "continueOnFail": true
+    },
+    {
+      "title": "บิลใหม่ที่ทิ้งไม่ถูกบันทึก: มีบรรทัดอ้างใบสั่งขายนี้แค่ของบิลทดสอบ 1 บรรทัด",
+      "do": "db.query",
+      "sql": "select count(*)::text as n, count(*) filter (where doc_no = :'iv')::text as mine from ic_trans_detail where ref_doc_no = :'so'",
+      "rows": 1,
+      "continueOnFail": true,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "mine",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอใบสั่งขายสินค้าใหม่อีกครั้ง",
+      "do": "ui.openMenu",
+      "key": "menu_so_sale_order"
+    },
+    {
+      "title": "รายการเอกสารด้านซ้ายพร้อมค้นหา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] [data-testid=\"sml-datalist-search-input\"]"
+    },
+    {
+      "title": "พิมพ์เลขที่เอกสารทดสอบในช่องค้นหารายการ (ค้นอัตโนมัติ)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{so}}"
+    },
+    {
+      "title": "คลิกแถวเอกสารทดสอบในรายการ (เปิดดู)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] tr:has(button[title=\"แก้ไขรายการ {{so}}\"]) td[data-col-key=\"doc_no\"]"
+    },
+    {
+      "title": "หัวจอแสดง โหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] header.card-head span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารที่เปิด = เอกสารทดสอบ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input",
+      "value": "{{so}}",
+      "op": "same"
+    },
+    {
+      "title": "กดปุ่ม Document Flow",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div.h-11 button:has-text(\"Document Flow\")"
+    },
+    {
+      "title": "หน้าต่างผังเส้นทางเอกสารแสดง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))"
+    },
+    {
+      "title": "ผังมีกล่องเอกสารปัจจุบัน = เอกสารที่เปิดอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\")) div.rounded-xl.border-emerald-600:has(span.text-emerald-800:text-is(\"{{so}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "ผังมีกล่องบิลขายปลายทาง (เชื่อมกันผ่านเลขที่อ้างอิง)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\")) div.rounded-xl:has(span.text-emerald-800:text-is(\"{{iv}}\"))",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพหน้าจอผังเส้นทางเอกสาร",
+      "do": "ui.screenshot",
+      "name": "so-invoice-flow-from-so"
+    },
+    {
+      "title": "กด ปิดหน้าต่าง ผังเส้นทางเอกสาร",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\")) header button:has-text(\"ปิดหน้าต่าง\")"
+    },
+    {
+      "title": "หน้าต่างผังเส้นทางเอกสารปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))",
+      "visible": false
+    },
+    {
+      "title": "เปิดหน้าจอขายสินค้าและบริการ (ขายเชื่อ)ใหม่อีกครั้ง",
+      "do": "ui.openMenu",
+      "key": "menu_so_invoice"
+    },
+    {
+      "title": "รายการเอกสารด้านซ้ายพร้อมค้นหา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] [data-testid=\"sml-datalist-search-input\"]"
+    },
+    {
+      "title": "พิมพ์เลขที่เอกสารทดสอบในช่องค้นหารายการ (ค้นอัตโนมัติ)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{iv}}"
+    },
+    {
+      "title": "คลิกแถวเอกสารทดสอบในรายการ (เปิดดู)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] tr:has(button[title=\"แก้ไขรายการ {{iv}}\"]) td[data-col-key=\"doc_no\"]"
+    },
+    {
+      "title": "หัวจอแสดง โหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] header.card-head span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารที่เปิด = เอกสารทดสอบ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input",
+      "value": "{{iv}}",
+      "op": "same"
+    },
+    {
+      "title": "กดปุ่ม ลบ (ยืนยันลบเอกสารในกล่องยืนยัน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.h-11 button:has-text(\"ลบ\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งลบเอกสารสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] header.card-head span.font-medium",
+      "text": "ลบเอกสาร {{iv}} เรียบร้อยแล้ว",
+      "timeout": 30000
+    },
+    {
+      "title": "หลังลบบิลผ่านจอ: ไม่เหลือแถวของบิลทดสอบในทุกตารางที่บันทึกขายเขียน",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ic_trans where doc_no in (:'iv')) + (select count(*) from ic_trans_detail where doc_no in (:'iv')) + (select count(*) from ic_trans_shipment where doc_no in (:'iv')) + (select count(*) from ic_trans_serial_number where doc_no in (:'iv')) + (select count(*) from ap_ar_trans where doc_no in (:'iv')) + (select count(*) from cb_trans where doc_no in (:'iv')) + (select count(*) from cb_trans_detail where doc_no in (:'iv')) + (select count(*) from gl_journal where doc_no in (:'iv')) + (select count(*) from gl_journal_detail where doc_no in (:'iv')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'iv')) + (select count(*) from erp_credit_request where doc_no in (:'iv')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'iv') or billing_no in (:'iv')))::text as n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ใบสั่งขายหลังลบบิล: used_status กลับเป็น 0 คงเหลือกลับเป็น 5",
+      "do": "db.query",
+      "sql": "select coalesce(h.used_status, 0)::text as used, coalesce(h.doc_success, 0)::text as succ, (d.qty - coalesce((select sum(x.qty) from ic_trans_detail x where x.ref_doc_no = :'so' and x.trans_flag in (44, 37) and coalesce(x.last_status, 0) = 0), 0))::numeric::text as left_qty from ic_trans h join ic_trans_detail d on d.doc_no = h.doc_no and d.trans_flag = 36 where h.doc_no = :'so' and h.trans_flag = 36",
+      "rows": 1,
+      "continueOnFail": true,
+      "expect": [
+        {
+          "col": "used",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "succ",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "left_qty",
+          "op": "eq",
+          "value": "5"
+        }
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอใบสั่งขายสินค้าใหม่อีกครั้ง",
+      "do": "ui.openMenu",
+      "key": "menu_so_sale_order"
+    },
+    {
+      "title": "รายการเอกสารด้านซ้ายพร้อมค้นหา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] [data-testid=\"sml-datalist-search-input\"]"
+    },
+    {
+      "title": "พิมพ์เลขที่เอกสารทดสอบในช่องค้นหารายการ (ค้นอัตโนมัติ)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{so}}"
+    },
+    {
+      "title": "คลิกแถวเอกสารทดสอบในรายการ (เปิดดู)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] tr:has(button[title=\"แก้ไขรายการ {{so}}\"]) td[data-col-key=\"doc_no\"]"
+    },
+    {
+      "title": "หัวจอแสดง โหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] header.card-head span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารที่เปิด = เอกสารทดสอบ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input",
+      "value": "{{so}}",
+      "op": "same"
+    },
+    {
+      "title": "กดปุ่ม ลบ (ยืนยันลบเอกสารในกล่องยืนยัน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] div.h-11 button:has-text(\"ลบ\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งลบเอกสารสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_sale_order\"] header.card-head span.font-medium",
+      "text": "ลบเอกสาร {{so}} เรียบร้อยแล้ว",
+      "timeout": 30000
+    },
+    {
+      "title": "หลังลบใบสั่งขายผ่านจอ: ไม่เหลือแถวของใบสั่งขายและบิลทดสอบ (0 แถว)",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ic_trans where doc_no in (:'iv', :'so')) + (select count(*) from ic_trans_detail where doc_no in (:'iv', :'so')) + (select count(*) from ic_trans_shipment where doc_no in (:'iv', :'so')) + (select count(*) from ic_trans_serial_number where doc_no in (:'iv', :'so')) + (select count(*) from ap_ar_trans where doc_no in (:'iv', :'so')) + (select count(*) from cb_trans where doc_no in (:'iv', :'so')) + (select count(*) from cb_trans_detail where doc_no in (:'iv', :'so')) + (select count(*) from gl_journal where doc_no in (:'iv', :'so')) + (select count(*) from gl_journal_detail where doc_no in (:'iv', :'so')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'iv', :'so')) + (select count(*) from erp_credit_request where doc_no in (:'iv', :'so')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'iv', :'so') or billing_no in (:'iv', :'so')))::text as n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงบนหน้าจอ (HTTP/JS/DB)",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบบิลขายทดสอบผ่าน API (กรณีขั้นหลักค้าง)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{iv}}",
+        "transFlag": 44
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบสั่งขายทดสอบผ่าน API (หลังลบบิลแล้ว)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{so}}",
+        "transFlag": 36
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือแถวของเอกสารทดสอบทั้งสองใบ (0 แถว)",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ic_trans where doc_no in (:'iv', :'so')) + (select count(*) from ic_trans_detail where doc_no in (:'iv', :'so')) + (select count(*) from ic_trans_shipment where doc_no in (:'iv', :'so')) + (select count(*) from ic_trans_serial_number where doc_no in (:'iv', :'so')) + (select count(*) from ap_ar_trans where doc_no in (:'iv', :'so')) + (select count(*) from cb_trans where doc_no in (:'iv', :'so')) + (select count(*) from cb_trans_detail where doc_no in (:'iv', :'so')) + (select count(*) from gl_journal where doc_no in (:'iv', :'so')) + (select count(*) from gl_journal_detail where doc_no in (:'iv', :'so')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'iv', :'so')) + (select count(*) from erp_credit_request where doc_no in (:'iv', :'so')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'iv', :'so') or billing_no in (:'iv', :'so')))::text as n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

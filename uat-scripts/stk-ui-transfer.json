@@ -1,0 +1,1095 @@
+{
+  "module": "inventory",
+  "lens": "screen",
+  "severityOnFail": "S1",
+  "timeoutMs": 600000,
+  "id": "stk-ui-transfer",
+  "title": "หน้าจอโอนสินค้าระหว่างคลัง: กรอกหัวเอกสารและบรรทัดผ่านหน้าต่างค้นหา บันทึกแล้วต้นทาง−2 ปลายทาง+2 มูลค่าเท่ากัน เปิดดูซ้ำ พิมพ์ฟอร์ม และลบผ่านหน้าจอไม่เหลือเศษ",
+  "description": "หน้าจอ menu_ic_transfer_wh_out (72 + ขาเข้า 70): สินค้าจริงใน smldemo (เรียงรหัสจากมากไปน้อย ลำดับที่ 2 ของกลุ่มเดียวกับสคริปต์ API โอนย้าย) · เพิ่มใหม่ → วันที่ = วันนี้ → เลขที่ UAT → จากคลัง/จากที่เก็บ/เข้าคลัง/เข้าที่เก็บบนหัวเอกสารด้วยหน้าต่างค้นหา → บรรทัด: สินค้า, จากคลัง, จากที่เก็บ, เข้าคลัง, เข้าที่เก็บ, หน่วยนับ ด้วยหน้าต่างค้นหา จำนวน 2 → หมายเหตุ → บันทึก → ฐานข้อมูล: หัว 72+70, ขาออก/ขาเข้าถูกที่เก็บ, ยอดที่เก็บต้นทาง −2 ปลายทาง +2, ยอดรวม/ต้นทุนเฉลี่ยไม่เปลี่ยน, มูลค่าขาออก = ขาเข้า = 2 × ต้นทุนเฉลี่ย, GL สมดุล → ค้นหาเปิดดูซ้ำทุกช่อง → ฟอร์มพิมพ์แสดงเลขที่และรหัสสินค้า (ไม่กดพิมพ์จริง) → ลบผ่านปุ่มลบ → ไม่เหลือแถว ยอด/ต้นทุนกลับเท่าเดิม · cleanup ลบผ่าน API เผื่อขั้นหลักล้ม",
+  "steps": [
+    {
+      "title": "กำหนดเลขใบโอนทดสอบ",
+      "do": "set",
+      "name": "im",
+      "value": "UAT-{{run.short}}-UT"
+    },
+    {
+      "title": "เลือกสินค้าและที่เก็บจริง + คลังปลายทางอื่น และคำนวณยอด/มูลค่าที่คาดหวังใน SQL",
+      "do": "db.query",
+      "sql": "with recursive o as (select coalesce(item_price_decimal, 2)::int as ps, coalesce(item_amount_decimal, 2)::int as pa from erp_option limit 1), sim_r as (select d.item_code, d.trans_flag, d.calc_flag, d.qty*(coalesce(nullif(d.stand_value,0),1)/coalesce(nullif(d.divide_value,0),1)) as b, d.qty, coalesce(d.price,0) price, coalesce(nullif(d.sum_amount_exclude_vat,0), d.sum_amount, 0) as amt, coalesce(d.sum_of_cost,0) as sc0, coalesce(d.average_cost,0) as ac0, row_number() over (partition by d.item_code order by coalesce(d.doc_date_calc,d.doc_date), coalesce(nullif(d.doc_time_calc,''),d.doc_time), case when d.trans_flag=70 then -2 else d.calc_flag end desc, d.trans_flag, d.doc_no, d.line_number, d.roworder) as rn from ic_trans_detail d where d.last_status=0 and coalesce(d.is_doc_copy,0)=0 and coalesce(d.item_type,0) in (0,4,6) and d.trans_flag in (12,44,54,56,60,70,72) and coalesce(d.is_lock_cost,0)=0 and not (d.trans_flag=44 and coalesce(d.doc_ref,'')<>'' and coalesce(d.is_pos,0)=1)), sim_s as ( select distinct item_code, 0::bigint as rn, 0::numeric rq, 0::numeric rv, 0::numeric ca, 0::numeric sc, 0::numeric ac, 0::numeric sc0, 0::numeric ac0 from sim_r union all select r.item_code, r.rn, n.rq, n.rv, m.ca, k.sc, case when r.calc_flag>0 and r.trans_flag not in (70,72) then m.ca else st.ca end, r.sc0, r.ac0 from sim_s st join sim_r r on r.item_code=st.item_code and r.rn=st.rn+1 cross join o, lateral (select case when r.trans_flag in (70,72) or r.calc_flag<0 then round(r.b*st.ca,o.pa) else round(case when r.amt<>0 then r.amt when r.sc0>0 then r.sc0 when r.price>0 then r.qty*r.price else 0 end, o.pa) end as sc) k, lateral (select case when r.trans_flag in (70,72) then st.rq when r.calc_flag>0 then case when r.b>0 then (case when st.rq<=0 then r.b else st.rq+r.b end) else st.rq end else st.rq-r.b end as rq, case when r.trans_flag in (70,72) then st.rv when r.calc_flag>0 then case when r.b>0 and st.rq<=0 then k.sc else st.rv+k.sc end else case when st.rq-r.b<=0 then 0 else st.rv-k.sc end end as rv) n, lateral (select case when r.trans_flag in (70,72) then st.ca when n.rq>0 then round(n.rv/n.rq,o.ps) else st.ca end as ca) m ), ok as (select item_code from sim_s where rn > 0 group by 1 having count(*) filter (where sc <> sc0 or ac <> ac0) = 0 and min(rq) > 0), tdy as (select (now() at time zone 'Asia/Bangkok')::date as d), mv as (select d.item_code, sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))) as q, sum(d.calc_flag * coalesce(d.sum_of_cost, 0)) as v, max(coalesce(d.doc_date_calc, d.doc_date)) as maxd, bool_and(d.trans_flag in (12,44,54,56,60,70,72) and coalesce(d.is_lock_cost, 0) = 0) as plain from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) group by d.item_code), loc as (select d.item_code, d.wh_code, d.shelf_code, sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))) as lq from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) group by 1, 2, 3), c as (select i.code as item, i.unit_cost as unit, l.wh_code as wh, l.shelf_code as shelf, l.lq as locbal, i.balance_qty as bal, i.average_cost as avg, mv.v as val, mv.q as q, o.ps, o.pa, to_char(tdy.d, 'YYYY-MM-DD') as today, (select coalesce(sum(coalesce(x.sum_of_cost, 0)), 0) + coalesce(sum(coalesce(x.average_cost, 0)), 0) from ic_trans_detail x where x.item_code = i.code) as cs, (select count(*) from ic_trans_detail x where x.item_code = i.code) as n from ic_inventory i join mv on mv.item_code = i.code join ok on ok.item_code = i.code join ic_unit_use u on u.ic_code = i.code and u.code = i.unit_cost and u.stand_value = 1 and u.divide_value = 1 join lateral (select * from loc where loc.item_code = i.code order by loc.lq desc, loc.wh_code, loc.shelf_code limit 1) l on true join ic_warehouse w on w.code = l.wh_code join ic_shelf s on s.code = l.shelf_code and coalesce(nullif(s.whcode, ''), s.wh_code) = l.wh_code cross join o cross join tdy where coalesce(i.item_type, 0) = 0 and coalesce(i.cost_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0 and i.code !~ '[:,]' and mv.plain and mv.q > 0 and i.balance_qty = mv.q and i.average_cost > 0 and i.average_cost = round(mv.v / mv.q, o.ps) and mv.maxd < tdy.d and l.lq >= 5 and mod(abs(hashtext(i.code)), 7) = 0), p as (select x.*, (select coalesce(name_1, '') from ic_inventory where code = x.item) as iname from (select c.*, row_number() over (order by c.item desc) as rn from c) x where x.rn >= 2 and exists (select 1 from ic_shelf s where s.code = x.shelf and s.whcode = x.wh) order by x.item desc limit 1), dw as (select w.code as dwh, s.code as dshelf from ic_warehouse w join ic_shelf s on s.whcode = w.code, p where coalesce(s.status, 0) = 1 and w.code <> p.wh order by w.code desc, s.code desc limit 1) select p.*, dw.dwh, dw.dshelf, (select coalesce(sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))), 0) from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) and d.item_code = p.item and d.wh_code = dw.dwh and d.shelf_code = dw.dshelf) as dbal, round(2 * p.avg, pa) as cost_exp, coalesce(nullif(trim((select coalesce(d.start_unit_code, '') from ic_inventory_detail d where d.ic_code = p.item limit 1)), ''), trim((select coalesce(unit_standard, '') from ic_inventory where code = p.item))) as dunit, to_char((now() at time zone 'Asia/Bangkok')::date, 'DD/MM/') || (extract(year from (now() at time zone 'Asia/Bangkok')::date)::int + 543)::text as today_be from p, dw",
+      "rows": 1,
+      "save": {
+        "item": "item",
+        "unit": "unit",
+        "wh": "wh",
+        "shelf": "shelf",
+        "locbal": "locbal",
+        "bal": "bal",
+        "avg": "avg",
+        "val": "val",
+        "q": "q",
+        "ps": "ps",
+        "today": "today",
+        "cs": "cs",
+        "n": "n",
+        "iname": "iname",
+        "dwh": "dwh",
+        "dshelf": "dshelf",
+        "dbal": "dbal",
+        "cost_exp": "cost_exp",
+        "dunit": "dunit",
+        "today_be": "today_be"
+      }
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เปิดหน้าจอโอนสินค้า/วัตถุดิบ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_transfer_wh_out"
+    },
+    {
+      "title": "กดเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] button:text-is(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "หน้าจออยู่ในเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "วันที่เอกสารเริ่มต้น = วันนี้ (พ.ศ.)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] div:has(> label:has-text(\"วันที่เอกสาร\")) input",
+      "value": "{{today_be}}",
+      "op": "eq"
+    },
+    {
+      "title": "ERP เติมเลขที่เอกสารอัตโนมัติให้ก่อน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "",
+      "op": "ne"
+    },
+    {
+      "title": "กรอกเลขที่เอกสารทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{im}}"
+    },
+    {
+      "title": "เลขที่เอกสารเป็นของเรา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{im}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาคลังต้นทาง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"คลังต้นทาง\"] + button"
+    },
+    {
+      "title": "หน้าต่างค้นหาคลังต้นทางเปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาคลังต้นทาง {{wh}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{wh}}"
+    },
+    {
+      "title": "ผลค้นหามีคลังต้นทาง {{wh}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{wh}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกคลังต้นทาง {{wh}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{wh}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาคลังต้นทางปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "คลังต้นทางบนหัวเอกสาร = {{wh}}",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"คลังต้นทาง\"]",
+      "value": "{{wh}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาที่เก็บต้นทาง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"ที่เก็บต้นทาง\"] + button"
+    },
+    {
+      "title": "หน้าต่างค้นหาที่เก็บต้นทางเปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาที่เก็บต้นทาง {{shelf}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{shelf}}"
+    },
+    {
+      "title": "ผลค้นหามีที่เก็บต้นทาง {{shelf}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{shelf}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกที่เก็บต้นทาง {{shelf}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{shelf}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาที่เก็บต้นทางปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "ที่เก็บต้นทางบนหัวเอกสาร = {{shelf}}",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"ที่เก็บต้นทาง\"]",
+      "value": "{{shelf}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาคลังปลายทาง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"คลังปลายทาง\"] + button"
+    },
+    {
+      "title": "หน้าต่างค้นหาคลังปลายทางเปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาคลังปลายทาง {{dwh}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{dwh}}"
+    },
+    {
+      "title": "ผลค้นหามีคลังปลายทาง {{dwh}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{dwh}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกคลังปลายทาง {{dwh}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{dwh}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาคลังปลายทางปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "คลังปลายทางบนหัวเอกสาร = {{dwh}}",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"คลังปลายทาง\"]",
+      "value": "{{dwh}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาที่เก็บปลายทาง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"ที่เก็บปลายทาง\"] + button"
+    },
+    {
+      "title": "หน้าต่างค้นหาที่เก็บปลายทางเปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาที่เก็บปลายทาง {{dshelf}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{dshelf}}"
+    },
+    {
+      "title": "ผลค้นหามีที่เก็บปลายทาง {{dshelf}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{dshelf}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกที่เก็บปลายทาง {{dshelf}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{dshelf}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาที่เก็บปลายทางปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "ที่เก็บปลายทางบนหัวเอกสาร = {{dshelf}}",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"ที่เก็บปลายทาง\"]",
+      "value": "{{dshelf}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาสินค้า",
+      "do": "ui.click",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//button[@title=\"ค้นหาสินค้า\"]"
+    },
+    {
+      "title": "หน้าต่างค้นหาสินค้าเปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาสินค้า {{item}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{item}}"
+    },
+    {
+      "title": "ผลค้นหามีสินค้า {{item}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{item}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกสินค้า {{item}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{item}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาสินค้าปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสสินค้าในบรรทัดตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//input",
+      "value": "{{item}}",
+      "op": "eq"
+    },
+    {
+      "title": "ERP เติมหน่วยนับเริ่มต้นของสินค้า (start_unit_code หรือ unit_standard)",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"หน่วยนับ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"หน่วยนับ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{dunit}}",
+      "op": "eq"
+    },
+    {
+      "title": "รอ ERP คำนวณบรรทัดหลังเลือกสินค้าเสร็จ",
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาคลังต้นทางในบรรทัด",
+      "do": "ui.click",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"จากคลัง\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จากคลัง\"]/preceding-sibling::th)+1]//button"
+    },
+    {
+      "title": "หน้าต่างค้นหาคลังต้นทางในบรรทัดเปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาคลังต้นทางในบรรทัด {{wh}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{wh}}"
+    },
+    {
+      "title": "ผลค้นหามีคลังต้นทางในบรรทัด {{wh}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{wh}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกคลังต้นทางในบรรทัด {{wh}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{wh}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาคลังต้นทางในบรรทัดปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาที่เก็บต้นทางในบรรทัด",
+      "do": "ui.click",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"จากที่เก็บ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จากที่เก็บ\"]/preceding-sibling::th)+1]//button"
+    },
+    {
+      "title": "หน้าต่างค้นหาที่เก็บต้นทางในบรรทัดเปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาที่เก็บต้นทางในบรรทัด {{shelf}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{shelf}}"
+    },
+    {
+      "title": "ผลค้นหามีที่เก็บต้นทางในบรรทัด {{shelf}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{shelf}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกที่เก็บต้นทางในบรรทัด {{shelf}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{shelf}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาที่เก็บต้นทางในบรรทัดปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาคลังปลายทางในบรรทัด",
+      "do": "ui.click",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"เข้าคลัง\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"เข้าคลัง\"]/preceding-sibling::th)+1]//button"
+    },
+    {
+      "title": "หน้าต่างค้นหาคลังปลายทางในบรรทัดเปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาคลังปลายทางในบรรทัด {{dwh}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{dwh}}"
+    },
+    {
+      "title": "ผลค้นหามีคลังปลายทางในบรรทัด {{dwh}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{dwh}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกคลังปลายทางในบรรทัด {{dwh}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{dwh}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาคลังปลายทางในบรรทัดปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาที่เก็บปลายทางในบรรทัด",
+      "do": "ui.click",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"เข้าที่เก็บ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"เข้าที่เก็บ\"]/preceding-sibling::th)+1]//button"
+    },
+    {
+      "title": "หน้าต่างค้นหาที่เก็บปลายทางในบรรทัดเปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาที่เก็บปลายทางในบรรทัด {{dshelf}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{dshelf}}"
+    },
+    {
+      "title": "ผลค้นหามีที่เก็บปลายทางในบรรทัด {{dshelf}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{dshelf}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกที่เก็บปลายทางในบรรทัด {{dshelf}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{dshelf}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาที่เก็บปลายทางในบรรทัดปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาหน่วยนับ",
+      "do": "ui.click",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"หน่วยนับ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"หน่วยนับ\"]/preceding-sibling::th)+1]//button"
+    },
+    {
+      "title": "หน้าต่างค้นหาหน่วยนับเปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาหน่วยนับ {{unit}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{unit}}"
+    },
+    {
+      "title": "ผลค้นหามีหน่วยนับ {{unit}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{unit}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกหน่วยนับ {{unit}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{unit}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาหน่วยนับปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "รอ ERP คำนวณบรรทัดหลังเปลี่ยนหน่วยนับ",
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "title": "กรอกจำนวน 2",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "2"
+    },
+    {
+      "title": "Enter ยืนยันจำนวน",
+      "do": "ui.press",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "key": "Enter"
+    },
+    {
+      "title": "รอ ERP คำนวณบรรทัดหลังกรอกจำนวน",
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "title": "หัวเอกสาร: จากคลังตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"คลังต้นทาง\"]",
+      "value": "{{wh}}",
+      "op": "eq"
+    },
+    {
+      "title": "หัวเอกสาร: จากที่เก็บตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"ที่เก็บต้นทาง\"]",
+      "value": "{{shelf}}",
+      "op": "eq"
+    },
+    {
+      "title": "หัวเอกสาร: เข้าคลังตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"คลังปลายทาง\"]",
+      "value": "{{dwh}}",
+      "op": "eq"
+    },
+    {
+      "title": "หัวเอกสาร: เข้าที่เก็บตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"ที่เก็บปลายทาง\"]",
+      "value": "{{dshelf}}",
+      "op": "eq"
+    },
+    {
+      "title": "รหัสสินค้าตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//input",
+      "value": "{{item}}",
+      "op": "eq"
+    },
+    {
+      "title": "ชื่อสินค้าตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"ชื่อสินค้า / รายละเอียด\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ชื่อสินค้า / รายละเอียด\"]/preceding-sibling::th)+1]//textarea",
+      "value": "{{iname}}",
+      "op": "eq"
+    },
+    {
+      "title": "จากคลังในบรรทัดตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"จากคลัง\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จากคลัง\"]/preceding-sibling::th)+1]//input",
+      "value": "{{wh}}",
+      "op": "eq"
+    },
+    {
+      "title": "จากที่เก็บในบรรทัดตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"จากที่เก็บ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จากที่เก็บ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{shelf}}",
+      "op": "eq"
+    },
+    {
+      "title": "เข้าคลังในบรรทัดตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"เข้าคลัง\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"เข้าคลัง\"]/preceding-sibling::th)+1]//input",
+      "value": "{{dwh}}",
+      "op": "eq"
+    },
+    {
+      "title": "เข้าที่เก็บในบรรทัดตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"เข้าที่เก็บ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"เข้าที่เก็บ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{dshelf}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน่วยนับตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"หน่วยนับ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"หน่วยนับ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{unit}}",
+      "op": "eq"
+    },
+    {
+      "title": "จำนวน = 2",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "2",
+      "op": "eq"
+    },
+    {
+      "title": "กรอกหมายเหตุเอกสาร",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}} โอนผ่านหน้าจอ"
+    },
+    {
+      "title": "ภาพหน้าจอก่อนบันทึกใบโอน",
+      "do": "ui.screenshot",
+      "name": "im-before-save"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] button:text-is(\"บันทึก\")"
+    },
+    {
+      "title": "ERP แจ้งบันทึกเอกสารเรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] span.whitespace-pre-line",
+      "text": "บันทึกเอกสาร {{im}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ตอบยังไม่พิมพ์ฟอร์ม",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")"
+    },
+    {
+      "title": "หน้าต่างถามพิมพ์ปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+      "visible": false
+    },
+    {
+      "title": "หน้าจออยู่ในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "ฐานข้อมูล: หัว 72 เก็บจาก/เข้าคลังและที่เก็บตามที่เลือก วันที่วันนี้ หมายเหตุของเรา",
+      "do": "db.query",
+      "sql": "select trans_flag, to_char(doc_date, 'YYYY-MM-DD') as doc_date, wh_from, location_from, wh_to, location_to, position(:'run_tag' in coalesce(remark, '')) > 0 as tagged from ic_trans where doc_no = :'im' and trans_flag = 72",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "trans_flag",
+          "op": "eq",
+          "value": "72"
+        },
+        {
+          "col": "doc_date",
+          "op": "eq",
+          "value": "{{today}}"
+        },
+        {
+          "col": "wh_from",
+          "op": "eq",
+          "value": "{{wh}}"
+        },
+        {
+          "col": "location_from",
+          "op": "eq",
+          "value": "{{shelf}}"
+        },
+        {
+          "col": "wh_to",
+          "op": "eq",
+          "value": "{{dwh}}"
+        },
+        {
+          "col": "location_to",
+          "op": "eq",
+          "value": "{{dshelf}}"
+        },
+        {
+          "col": "tagged",
+          "op": "eq",
+          "value": "t"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: ขาออก 72 จากที่เก็บต้นทาง 2 หน่วย ไปปลายทาง, ขาเข้า 70 เข้าที่เก็บปลายทาง 2 หน่วย",
+      "do": "db.query",
+      "sql": "select count(*) filter (where trans_flag = 72) as n72, count(*) filter (where trans_flag = 70) as n70, count(*) filter (where trans_flag = 72 and calc_flag = -1 and item_code = :'item' and unit_code = :'unit' and wh_code = :'wh' and shelf_code = :'shelf' and wh_code_2 = :'dwh' and shelf_code_2 = :'dshelf' and qty = 2) as out_ok, count(*) filter (where trans_flag = 70 and calc_flag = 1 and item_code = :'item' and unit_code = :'unit' and wh_code = :'dwh' and shelf_code = :'dshelf' and qty = 2) as in_ok, (select count(*) from ic_trans where doc_no = :'im' and trans_flag in (70, 72)) as heads from ic_trans_detail where doc_no = :'im'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n72",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "n70",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "out_ok",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "in_ok",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "heads",
+          "op": "eq",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "title": "ยอดแต่ละที่เก็บ: ต้นทาง −2, ปลายทาง +2",
+      "do": "db.query",
+      "sql": "select (select coalesce(sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))), 0) from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) and d.item_code = :'item' and d.wh_code = :'wh' and d.shelf_code = :'shelf') - :'locbal'::numeric as d_src, (select coalesce(sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))), 0) from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) and d.item_code = :'item' and d.wh_code = :'dwh' and d.shelf_code = :'dshelf') - :'dbal'::numeric as d_dst",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "d_src",
+          "op": "eq",
+          "value": "-2"
+        },
+        {
+          "col": "d_dst",
+          "op": "eq",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "title": "ยอดคงเหลือรวมและต้นทุนเฉลี่ยของสินค้าไม่เปลี่ยน",
+      "do": "db.query",
+      "sql": "select balance_qty, average_cost from ic_inventory where code = :'item'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "balance_qty",
+          "op": "eq",
+          "value": "{{bal}}"
+        },
+        {
+          "col": "average_cost",
+          "op": "eq",
+          "value": "{{avg}}"
+        }
+      ]
+    },
+    {
+      "title": "มูลค่า: ขาออก = ขาเข้า = 2 × ต้นทุนเฉลี่ย (คำนวณใน SQL)",
+      "do": "db.query",
+      "sql": "select coalesce(sum(sum_of_cost) filter (where trans_flag = 72), 0) as cost_out, coalesce(sum(sum_of_cost) filter (where trans_flag = 70), 0) as cost_in from ic_trans_detail where doc_no = :'im'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cost_out",
+          "op": "eq",
+          "value": "{{cost_exp}}"
+        },
+        {
+          "col": "cost_in",
+          "op": "eq",
+          "value": "{{cost_exp}}"
+        }
+      ]
+    },
+    {
+      "title": "GL ของใบโอน (ถ้ามีการลงบัญชี) เดบิต = เครดิต",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff from gl_journal_detail where doc_no = :'im'",
+      "expect": [
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ตรวจหน้าจอไม่มีข้อผิดพลาดแฝง (HTTP/JS/DB error)",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "เปิดหน้าจอโอนสินค้าใหม่เพื่อค้นหาใบของเรา",
+      "do": "ui.openMenu",
+      "key": "menu_ic_transfer_wh_out"
+    },
+    {
+      "title": "ค้นหาเลขที่เอกสารในรายการด้านซ้าย",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{im}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "รายการพบ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถวเอกสารของเราเพื่อเปิดดู",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] tr:has(button[title=\"แก้ไขรายการ {{im}}\"]) td:has-text(\"{{im}}\")"
+    },
+    {
+      "title": "หน้าจออยู่ในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารที่เปิดตรงกับของเรา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{im}}",
+      "op": "eq"
+    },
+    {
+      "title": "หัวเอกสาร: จากคลังตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"คลังต้นทาง\"]",
+      "value": "{{wh}}",
+      "op": "eq"
+    },
+    {
+      "title": "หัวเอกสาร: จากที่เก็บตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"ที่เก็บต้นทาง\"]",
+      "value": "{{shelf}}",
+      "op": "eq"
+    },
+    {
+      "title": "หัวเอกสาร: เข้าคลังตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"คลังปลายทาง\"]",
+      "value": "{{dwh}}",
+      "op": "eq"
+    },
+    {
+      "title": "หัวเอกสาร: เข้าที่เก็บตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] input[placeholder=\"ที่เก็บปลายทาง\"]",
+      "value": "{{dshelf}}",
+      "op": "eq"
+    },
+    {
+      "title": "รหัสสินค้าตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//input",
+      "value": "{{item}}",
+      "op": "eq"
+    },
+    {
+      "title": "ชื่อสินค้าตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"ชื่อสินค้า / รายละเอียด\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ชื่อสินค้า / รายละเอียด\"]/preceding-sibling::th)+1]//textarea",
+      "value": "{{iname}}",
+      "op": "eq"
+    },
+    {
+      "title": "จากคลังในบรรทัดตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"จากคลัง\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จากคลัง\"]/preceding-sibling::th)+1]//input",
+      "value": "{{wh}}",
+      "op": "eq"
+    },
+    {
+      "title": "จากที่เก็บในบรรทัดตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"จากที่เก็บ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จากที่เก็บ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{shelf}}",
+      "op": "eq"
+    },
+    {
+      "title": "เข้าคลังในบรรทัดตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"เข้าคลัง\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"เข้าคลัง\"]/preceding-sibling::th)+1]//input",
+      "value": "{{dwh}}",
+      "op": "eq"
+    },
+    {
+      "title": "เข้าที่เก็บในบรรทัดตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"เข้าที่เก็บ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"เข้าที่เก็บ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{dshelf}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน่วยนับตรง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"หน่วยนับ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"หน่วยนับ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{unit}}",
+      "op": "eq"
+    },
+    {
+      "title": "จำนวน = 2",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"]//table[thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "2",
+      "op": "eq"
+    },
+    {
+      "title": "หมายเหตุที่บันทึกตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}} โอนผ่านหน้าจอ",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดหน้าต่างพิมพ์ฟอร์มเอกสาร (จากโหมดดูข้อมูล)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] [data-testid=\"trans-open-doc-form-print-btn\"]"
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มเปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "ฟอร์มใช้ข้อมูลที่บันทึกในฐานแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"doc-form-mode-badge-saved\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "กระดาษฟอร์มแสดงเลขที่เอกสารของเรา",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-doc-form-paper=\"true\"]",
+      "text": "{{im}}",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "กระดาษฟอร์มแสดงรหัสสินค้า",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-doc-form-paper=\"true\"]",
+      "text": "{{item}}",
+      "op": "contains"
+    },
+    {
+      "title": "ภาพกระดาษฟอร์มเป็นหลักฐาน (ไม่กดสั่งพิมพ์จริง เพราะจะเขียน doc_print_audit)",
+      "do": "ui.screenshot",
+      "name": "form-im"
+    },
+    {
+      "title": "ปิดหน้าต่างพิมพ์ฟอร์ม",
+      "do": "ui.click",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] button:has(span:text-is(\"ปิด\"))"
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "visible": false
+    },
+    {
+      "title": "กดลบเอกสาร (ยืนยันอัตโนมัติ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] button:text-is(\"ลบ\")"
+    },
+    {
+      "title": "ERP แจ้งลบเอกสารเรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] span.whitespace-pre-line",
+      "text": "ลบเอกสาร {{im}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ค้นหาเลขที่เอกสารในรายการด้านซ้าย",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{im}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "รายการพบ 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ic_transfer_wh_out\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "ไม่เหลือแถวของเอกสารนี้ในทุกตาราง",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no = :'im') + (select count(*) from ic_trans_detail where doc_no = :'im') + (select count(*) from ic_trans_detail_lot where doc_no = :'im') + (select count(*) from ic_trans_serial_number where doc_no = :'im') + (select count(*) from ic_trans_shipment where doc_no = :'im') + (select count(*) from ap_ar_trans where doc_no = :'im') + (select count(*) from ap_ar_trans_detail where doc_no = :'im') + (select count(*) from cb_trans where doc_no = :'im') + (select count(*) from cb_trans_detail where doc_no = :'im') + (select count(*) from cb_chq_list where doc_ref = :'im') + (select count(*) from gl_journal where doc_no = :'im') + (select count(*) from gl_journal_detail where doc_no = :'im') + (select count(*) from gl_journal_vat_buy where doc_no = :'im') + (select count(*) from gl_journal_vat_sale where doc_no = :'im') + (select count(*) from gl_wht_list where doc_no = :'im') as left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "หลังลบผ่านหน้าจอ: ยอด/ต้นทุนเฉลี่ย/ต้นทุนทุกบรรทัดของสินค้ากลับเป็นค่าเริ่มต้น",
+      "do": "db.query",
+      "sql": "select i.balance_qty, i.average_cost, (select coalesce(sum(coalesce(x.sum_of_cost, 0)), 0) + coalesce(sum(coalesce(x.average_cost, 0)), 0) from ic_trans_detail x where x.item_code = i.code) as cs, (select count(*) from ic_trans_detail x where x.item_code = i.code) as n from ic_inventory i where i.code = :'item'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "balance_qty",
+          "op": "eq",
+          "value": "{{bal}}"
+        },
+        {
+          "col": "average_cost",
+          "op": "eq",
+          "value": "{{avg}}"
+        },
+        {
+          "col": "cs",
+          "op": "eq",
+          "value": "{{cs}}"
+        },
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "{{n}}"
+        }
+      ]
+    },
+    {
+      "title": "ยอดที่เก็บต้นทาง/ปลายทางกลับเท่าเดิม",
+      "do": "db.query",
+      "sql": "select (select coalesce(sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))), 0) from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) and d.item_code = :'item' and d.wh_code = :'wh' and d.shelf_code = :'shelf') - :'locbal'::numeric as d_src, (select coalesce(sum(d.qty * d.calc_flag * (coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1))), 0) from ic_trans_detail d where d.last_status = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12,310,14,311,16,44,46,48,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,521,522,523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14,16,311) and coalesce(d.inquiry_type, 0) in (1,3)) and d.item_code = :'item' and d.wh_code = :'dwh' and d.shelf_code = :'dshelf') - :'dbal'::numeric as d_dst",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "d_src",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "d_dst",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ตรวจหน้าจอไม่มีข้อผิดพลาดแฝง (HTTP/JS/DB error)",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบใบโอนทดสอบผ่าน API (เผื่อขั้นหลักล้ม)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "timeout": 60000,
+      "body": {
+        "docNo": "{{im}}",
+        "transFlag": 72
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือแถวของเอกสารทดสอบในทุกตาราง (หัว/รายการ/ล็อต/ลูกหนี้-เจ้าหนี้/เงิน/GL/ภาษี)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'im')) + (select count(*) from ic_trans_detail where doc_no in (:'im')) + (select count(*) from ic_trans_detail_lot where doc_no in (:'im')) + (select count(*) from ic_trans_serial_number where doc_no in (:'im')) + (select count(*) from ic_trans_shipment where doc_no in (:'im')) + (select count(*) from ap_ar_trans where doc_no in (:'im')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'im')) + (select count(*) from cb_trans where doc_no in (:'im')) + (select count(*) from cb_trans_detail where doc_no in (:'im')) + (select count(*) from cb_chq_list where doc_ref in (:'im')) + (select count(*) from gl_journal where doc_no in (:'im')) + (select count(*) from gl_journal_detail where doc_no in (:'im')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'im')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'im')) + (select count(*) from gl_wht_list where doc_no in (:'im')) as left_rows",
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ยอดคงเหลือ/ต้นทุนเฉลี่ย/ต้นทุนทุกบรรทัดของสินค้าทดสอบกลับเป็นค่าเริ่มต้น",
+      "do": "db.query",
+      "sql": "select i.balance_qty, i.average_cost, (select coalesce(sum(coalesce(x.sum_of_cost, 0)), 0) + coalesce(sum(coalesce(x.average_cost, 0)), 0) from ic_trans_detail x where x.item_code = i.code) as cs, (select count(*) from ic_trans_detail x where x.item_code = i.code) as n from ic_inventory i where i.code = :'item'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "balance_qty",
+          "op": "eq",
+          "value": "{{bal}}"
+        },
+        {
+          "col": "average_cost",
+          "op": "eq",
+          "value": "{{avg}}"
+        },
+        {
+          "col": "cs",
+          "op": "eq",
+          "value": "{{cs}}"
+        },
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "{{n}}"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,460 @@
+{
+  "id": "wf-buy-payment-wht",
+  "title": "จ่ายชำระเจ้าหนี้พร้อมหักภาษี ณ ที่จ่าย: ภาษีหัก = อัตราจริง × ฐาน ข้อมูลหนังสือรับรองตรงเจ้าหนี้ เงินสดและ GL ถูก",
+  "module": "purchase",
+  "lens": "api",
+  "severityOnFail": "S1",
+  "description": "ทำงานแบบผู้ใช้ Demo ผ่าน API ตัวเดียวกับหน้าจอ: สินค้า หน่วย คลัง ที่เก็บ ราคา อัตราภาษีมูลค่าเพิ่ม อ่านจากบิลซื้อจริงใน smldemo ตอนรัน (สินค้าลำดับที่ 6 เรียงตามรหัส) เจ้าหนี้จริงที่มีเลขประจำตัวผู้เสียภาษี (ลำดับที่ 8 เรียงตามรหัส) ประเภทเงินได้จากรหัสสินค้า อัตราภาษีหัก ณ ที่จ่ายจากข้อมูลจริงใน smldemo (ค่าตั้งระบบ ถ้าเป็น 0 ใช้อัตราที่พบมากสุดในรายการหัก ณ ที่จ่ายเดิม หรือในทะเบียนรถขนส่ง) · ซื้อเชื่อ 10 หน่วย → จ่ายชำระเต็มยอด หักภาษี ณ ที่จ่าย = ฐานก่อนภาษีมูลค่าเพิ่ม × อัตรา / 100 จ่ายเงินสด = ยอดบิล − ภาษีหัก → ตรวจรายการหัก ณ ที่จ่าย (ฐาน ภาษี อัตรา ประเภทเงินได้ ชื่อ เลขผู้เสียภาษี ประเภทผู้เสียภาษีของเจ้าหนี้) เงินสดจ่าย ยอดภาษีหักในการจ่าย และ GL (เดบิตเจ้าหนี้ = ยอดบิล เครดิตภาษีหัก ณ ที่จ่ายค้างจ่าย = ภาษีหัก) · ลบเอกสารทั้งหมดผ่าน API และพิสูจน์ว่าไม่เหลือแถวใด",
+  "steps": [
+    {
+      "title": "กำหนดเลขบิลซื้อทดสอบ",
+      "do": "set",
+      "name": "pu",
+      "value": "UAT-{{run.short}}-PU"
+    },
+    {
+      "title": "กำหนดเลขใบจ่ายชำระทดสอบ",
+      "do": "set",
+      "name": "de",
+      "value": "UAT-{{run.short}}-DE"
+    },
+    {
+      "title": "กำหนดเลขที่เอกสารหัก ณ ที่จ่ายทดสอบ",
+      "do": "set",
+      "name": "wt",
+      "value": "UAT-{{run.short}}-WT"
+    },
+    {
+      "title": "กำหนดจำนวนที่ซื้อ",
+      "do": "set",
+      "name": "q_pu",
+      "value": "10"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เลือกสินค้าจริงลำดับที่ 6 (เรียงตามรหัส) ที่มีหน่วยนับ 1:1 คลังและที่เก็บจริง พร้อมราคาซื้อและอัตราภาษีจากบิลซื้อจริงล่าสุดของสินค้านั้น",
+      "do": "db.query",
+      "sql": "select x.item, x.unit, x.wh, x.shelf, x.stand, x.divide, x.price, x.rate, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today from (select distinct on (d.item_code) d.item_code as item, d.unit_code as unit, d.wh_code as wh, d.shelf_code as shelf, d.stand_value::text as stand, d.divide_value::text as divide, d.price::text as price, t.vat_rate::text as rate from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag join ic_inventory i on i.code = d.item_code join ic_unit_use u on u.ic_code = d.item_code and u.code = d.unit_code and u.stand_value = 1 and u.divide_value = 1 join ic_warehouse w on w.code = d.wh_code join ic_shelf sh on sh.code = d.shelf_code and coalesce(nullif(sh.whcode, ''), sh.wh_code) = d.wh_code where t.trans_flag = 12 and t.inquiry_type = 0 and t.vat_type = 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 and d.price > 0 and coalesce(d.discount, '') = '' and d.stand_value = 1 and d.divide_value = 1 and coalesce(d.tax_type, 0) = 0 and coalesce(d.is_permium, 0) = 0 and coalesce(i.item_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0 order by d.item_code, t.doc_date desc, t.roworder desc) x order by x.item offset 5 limit 1",
+      "rows": 1,
+      "save": {
+        "item": "item",
+        "unit": "unit",
+        "wh": "wh",
+        "shelf": "shelf",
+        "stand": "stand",
+        "divide": "divide",
+        "price": "price",
+        "rate": "rate",
+        "today": "today"
+      }
+    },
+    {
+      "title": "เลือกเจ้าหนี้จริงที่มีเลขประจำตัวผู้เสียภาษี (ลำดับที่ 8 เรียงตามรหัส)",
+      "do": "db.query",
+      "sql": "select s.code as supp, s.name_1 as supp_name, d.tax_id as supp_tax, coalesce(s.ap_status, 0) as supp_status from ap_supplier s join ap_supplier_detail d on d.ap_code = s.code where coalesce(d.tax_id, '') <> '' order by s.code offset 7 limit 1",
+      "rows": 1,
+      "save": {
+        "supp": "supp",
+        "supp_name": "supp_name",
+        "supp_tax": "supp_tax",
+        "supp_status": "supp_status"
+      }
+    },
+    {
+      "title": "อ่านอัตราภาษีหัก ณ ที่จ่ายจริงใน smldemo และประเภทเงินได้ของสินค้า (ต้องมีจริง)",
+      "do": "db.query",
+      "sql": "select coalesce(nullif((select wht_rate from erp_option limit 1), 0), (select tax_rate from gl_wht_list_detail where tax_rate > 0 group by tax_rate order by count(*) desc, tax_rate limit 1), (select wht_tax_rate from tms_fleet_vehicle where wht_tax_rate > 0 group by wht_tax_rate order by count(*) desc, wht_tax_rate limit 1))::text as wrate, (select l.code from ic_inventory i join erp_income_list l on l.code = i.income_type where i.code = :'item') as income",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "wrate",
+          "op": "gt",
+          "value": "0"
+        },
+        {
+          "col": "income",
+          "op": "exists",
+          "value": ""
+        }
+      ],
+      "save": {
+        "wrate": "wrate",
+        "income": "income"
+      }
+    },
+    {
+      "title": "คำนวณยอดบิลซื้อ ภาษีหัก ณ ที่จ่าย และเงินสดที่ต้องจ่าย",
+      "do": "db.query",
+      "sql": "with m as (select round(:'q_pu'::numeric * :'price'::numeric, 2)::text as pu_sum, round(round(:'q_pu'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as pu_vat, (round(:'q_pu'::numeric * :'price'::numeric, 2) + round(round(:'q_pu'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as pu_total), w as (select *, round(pu_sum::numeric * :'wrate'::numeric / 100, 2) as wht from m) select pu_sum, pu_vat, pu_total, wht::text as wht, (pu_total::numeric - wht)::text as cash from w",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "wht",
+          "op": "gt",
+          "value": "0"
+        }
+      ],
+      "save": {
+        "pu_sum": "pu_sum",
+        "pu_vat": "pu_vat",
+        "pu_total": "pu_total",
+        "wht": "wht",
+        "cash": "cash"
+      }
+    },
+    {
+      "title": "หาบัญชีภาษีหัก ณ ที่จ่ายค้างจ่ายจากผังบัญชีจริง",
+      "do": "db.query",
+      "sql": "select code as wht_acct from gl_chart_of_account where name_1 like 'ภาษีหัก ณ ที่จ่าย%ค้างจ่าย%' order by code limit 1",
+      "rows": 1,
+      "save": {
+        "wht_acct": "wht_acct"
+      }
+    },
+    {
+      "title": "บันทึกซื้อเชื่อ (บิลซื้อ ภาษีแยกนอก)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{pu}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 12,
+        "inquiryType": 0,
+        "custCode": "{{supp}}",
+        "docFormatCode": "PU",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "{{stand}}",
+            "divideValue": "{{divide}}",
+            "qty": "{{q_pu}}",
+            "price": "{{price}}",
+            "sumAmount": "{{pu_sum}}",
+            "taxType": 0
+          }
+        ],
+        "taxDocNo": "{{pu}}",
+        "taxDocDate": "{{today}}"
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{pu}}"
+        }
+      ]
+    },
+    {
+      "title": "หัวบิลซื้อ: ฐาน ภาษี รวม ตรงที่คำนวณ",
+      "do": "db.query",
+      "sql": "select total_before_vat, total_vat_value, total_amount, vat_rate from ic_trans where doc_no = :'pu' and trans_flag = 12",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{pu_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{pu_vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{pu_total}}"
+        },
+        {
+          "col": "vat_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        }
+      ]
+    },
+    {
+      "title": "อ่านบัญชีเจ้าหนี้และบัญชีภาษีซื้อที่บิลซื้อทดสอบนี้ลงไว้จริง (ใช้เทียบกับเอกสารถัดไป)",
+      "do": "db.query",
+      "sql": "select (select account_code from gl_journal_detail where doc_no = :'pu' and credit = :'pu_total'::numeric order by account_code limit 1) as ap_acct, (select account_code from gl_journal_detail where doc_no = :'pu' and debit = :'pu_vat'::numeric order by account_code limit 1) as vat_acct",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "ap_acct",
+          "op": "exists",
+          "value": ""
+        },
+        {
+          "col": "vat_acct",
+          "op": "exists",
+          "value": ""
+        }
+      ],
+      "save": {
+        "ap_acct": "ap_acct",
+        "vat_acct": "vat_acct"
+      }
+    },
+    {
+      "title": "จ่ายชำระเต็มยอด หักภาษี ณ ที่จ่าย จ่ายเงินสดส่วนที่เหลือ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/save",
+      "body": {
+        "kind": "ap_ar_trans",
+        "isNew": true,
+        "docNo": "{{de}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 19,
+        "custCode": "{{supp}}",
+        "docFormatCode": "DE",
+        "remark": "{{run.tag}}",
+        "bills": [
+          {
+            "billingNo": "{{pu}}",
+            "billingDate": "{{today}}",
+            "billType": 12,
+            "sumDebtAmount": "{{pu_total}}",
+            "balanceRef": "{{pu_total}}",
+            "sumPayMoney": "{{pu_total}}"
+          }
+        ],
+        "pay": {
+          "cash": "{{cash}}"
+        },
+        "whtIn": [
+          {
+            "taxDocNo": "{{wt}}",
+            "dueDate": "{{today}}",
+            "custCode": "{{supp}}",
+            "lines": [
+              {
+                "incomeType": "{{income}}",
+                "amount": "{{pu_sum}}",
+                "taxRate": "{{wrate}}",
+                "taxValue": "{{wht}}"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{de}}"
+        }
+      ]
+    },
+    {
+      "title": "หัวรายการหัก ณ ที่จ่าย: ฐาน ภาษี เลขที่ ผู้ถูกหัก ประเภทเอกสารจ่ายชำระ",
+      "do": "db.query",
+      "sql": "select amount, tax_value, cust_code, trans_flag, tax_doc_no from gl_wht_list where doc_no = :'de'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{pu_sum}}"
+        },
+        {
+          "col": "tax_value",
+          "op": "eq",
+          "value": "{{wht}}"
+        },
+        {
+          "col": "cust_code",
+          "op": "eq",
+          "value": "{{supp}}"
+        },
+        {
+          "col": "trans_flag",
+          "op": "eq",
+          "value": "19"
+        },
+        {
+          "col": "tax_doc_no",
+          "op": "eq",
+          "value": "{{wt}}"
+        }
+      ]
+    },
+    {
+      "title": "ข้อมูลหนังสือรับรองตรงทะเบียนเจ้าหนี้: ชื่อ เลขผู้เสียภาษี ประเภทผู้เสียภาษี",
+      "do": "db.query",
+      "sql": "select (w.cust_name = s.name_1)::int as name_ok, w.tax_number, w.cust_tax_type from gl_wht_list w join ap_supplier s on s.code = w.cust_code where w.doc_no = :'de'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_ok",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "tax_number",
+          "op": "same",
+          "value": "{{supp_tax}}"
+        },
+        {
+          "col": "cust_tax_type",
+          "op": "eq",
+          "value": "{{supp_status}}"
+        }
+      ]
+    },
+    {
+      "title": "รายการย่อยหัก ณ ที่จ่าย: ประเภทเงินได้ ฐาน อัตรา ภาษี และภาษี = ฐาน × อัตรา / 100",
+      "do": "db.query",
+      "sql": "select income_type, amount, tax_rate, tax_value, tax_value - round(amount * tax_rate / 100, 2) as calc_diff from gl_wht_list_detail where doc_no = :'de'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "income_type",
+          "op": "same",
+          "value": "{{income}}"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{pu_sum}}"
+        },
+        {
+          "col": "tax_rate",
+          "op": "eq",
+          "value": "{{wrate}}"
+        },
+        {
+          "col": "tax_value",
+          "op": "eq",
+          "value": "{{wht}}"
+        },
+        {
+          "col": "calc_diff",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "เงินสดจ่าย = ยอดบิล − ภาษีหัก และยอดภาษีหัก ณ ที่จ่ายในการจ่ายตรง",
+      "do": "db.query",
+      "sql": "select coalesce(cash_amount, 0) as cash_amount, coalesce(total_tax_at_pay, 0) as total_tax_at_pay from cb_trans where doc_no = :'de' and trans_flag = 19",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cash_amount",
+          "op": "eq",
+          "value": "{{cash}}"
+        },
+        {
+          "col": "total_tax_at_pay",
+          "op": "eq",
+          "value": "{{wht}}"
+        }
+      ]
+    },
+    {
+      "title": "รายการจ่าย: ตัดหนี้บิลซื้อเต็มยอด",
+      "do": "db.query",
+      "sql": "select billing_no, sum_pay_money from ap_ar_trans_detail where doc_no = :'de' and trans_flag = 19",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "billing_no",
+          "op": "eq",
+          "value": "{{pu}}"
+        },
+        {
+          "col": "sum_pay_money",
+          "op": "eq",
+          "value": "{{pu_total}}"
+        }
+      ]
+    },
+    {
+      "title": "GL ใบจ่าย: สมดุล เดบิตเจ้าหนี้ = ยอดบิล เครดิตภาษีหัก ณ ที่จ่ายค้างจ่าย = ภาษีหัก",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit) filter (where account_code = :'ap_acct'), 0) as ap_debit, coalesce(sum(credit) filter (where account_code = :'wht_acct'), 0) as wht_credit from gl_journal_detail where doc_no = :'de'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "ap_debit",
+          "op": "eq",
+          "value": "{{pu_total}}"
+        },
+        {
+          "col": "wht_credit",
+          "op": "eq",
+          "value": "{{wht}}"
+        }
+      ]
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบใบจ่ายชำระทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/delete",
+      "body": {
+        "kind": "ap_ar_trans",
+        "docNo": "{{de}}",
+        "transFlag": 19
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบบิลซื้อทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{pu}}",
+        "transFlag": 12
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo (หัว รายการ เจ้าหนี้ จ่ายชำระ มัดจำ GL ภาษีซื้อ หัก ณ ที่จ่าย)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'pu', :'de')) + (select count(*) from ic_trans_detail where doc_no in (:'pu', :'de')) + (select count(*) from ap_ar_trans where doc_no in (:'pu', :'de')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'pu', :'de')) + (select count(*) from cb_trans where doc_no in (:'pu', :'de')) + (select count(*) from cb_trans_detail where doc_no in (:'pu', :'de')) + (select count(*) from gl_journal where doc_no in (:'pu', :'de')) + (select count(*) from gl_journal_detail where doc_no in (:'pu', :'de')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'pu', :'de')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'pu', :'de')) + (select count(*) from gl_wht_list where doc_no in (:'pu', :'de')) + (select count(*) from gl_wht_list_detail where doc_no in (:'pu', :'de')) + (select count(*) from gl_wht_list where tax_doc_no = :'wt') + (select count(*) from gl_wht_list_detail where tax_doc_no = :'wt') as left_rows",
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

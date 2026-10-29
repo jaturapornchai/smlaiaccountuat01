@@ -1,0 +1,1732 @@
+{
+ "id": "glx-ui-asset-sale",
+ "title": "สินทรัพย์ถาวร (หน้าจอ): ขายสินทรัพย์ผ่านหน้าจอ ตรวจค่าเสื่อมสะสม/มูลค่าตามบัญชี กำไรขาดทุน VAT และ GL จากสูตร บันทึก กันขายซ้ำ ลบผ่านหน้าจอ",
+ "module": "gl",
+ "lens": "screen",
+ "severityOnFail": "S1",
+ "description": "ลงทะเบียนสินทรัพย์ทดสอบ (ลอกกลุ่ม/บัญชี/ทุน/ซาก/อายุจากสินทรัพย์จริง) + ค่าเสื่อม 1 เดือน (API) → เปิดเมนู menu_asset_sale เพิ่มใหม่ เลือกสินทรัพย์จากหน้าต่างค้นหา ตรวจทุน/ค่าเสื่อมสะสม/มูลค่าตามบัญชี → ราคาขายกำไร/ขาดทุน ตรวจ VAT ยอดรวม GL ทีละแถว → สินทรัพย์ไม่มีจริง/ซ้ำในเอกสาร/ไม่ระบุลูกหนี้ ต้องถูกปฏิเสธ → บันทึก: as_trans/as_trans_detail/as_asset_detail/GL/ภาษีขาย ตรง → ลบเอกสารค่าเสื่อมที่ขายแล้วต้องถูกปฏิเสธ → เอกสารใหม่: ค้นหาไม่พบสินทรัพย์ที่ขายแล้ว ขายซ้ำ/เลขซ้ำต้องถูกปฏิเสธ → ลบผ่านหน้าจอ สินทรัพย์กลับเป็นยังไม่ขาย → ไม่เหลือข้อมูลทดสอบ",
+ "timeoutMs": 480000,
+ "steps": [
+  {
+   "title": "รหัสรอบนี้",
+   "do": "set",
+   "name": "rs",
+   "value": "{{run.short}}"
+  },
+  {
+   "title": "กำหนดรหัสสินทรัพย์ทดสอบเป็นตัวอักษรล้วน (ค้นหาเป็นคำเดียว)",
+   "do": "db.query",
+   "sql": "select 'UATS' || translate(upper(:'rs'), '0123456789', 'GHIJKLMNOP') fa",
+   "rows": 1,
+   "save": {
+    "fa": "fa"
+   }
+  },
+  {
+   "title": "กำหนดเลขเอกสารค่าเสื่อมทดสอบ",
+   "do": "set",
+   "name": "dp",
+   "value": "UAT-{{run.short}}-DP"
+  },
+  {
+   "title": "กำหนดเลขเอกสารขายทดสอบ",
+   "do": "set",
+   "name": "sd",
+   "value": "UAT-{{run.short}}-AS"
+  },
+  {
+   "title": "กำหนดเลขเอกสารขายที่สอง (ทดสอบขายซ้ำ)",
+   "do": "set",
+   "name": "sx",
+   "value": "UAT-{{run.short}}-AT"
+  },
+  {
+   "title": "กำหนดรหัสสินทรัพย์ที่ไม่มีจริง",
+   "do": "set",
+   "name": "bad",
+   "value": "ZQXJ{{run.short}}"
+  },
+  {
+   "title": "กำหนดรูปแบบเลขเอกสารทดสอบรอบนี้",
+   "do": "set",
+   "name": "pfx",
+   "value": "UAT-{{run.short}}-%"
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "ลอกสินทรัพย์จริง ลูกค้าจริง บัญชี/อัตราภาษีจริง และคำนวณค่าที่ต้องแสดง",
+   "do": "db.query",
+   "sql": "with src as (\n select a.as_type, upper(trim(a.account_code)) acc, upper(trim(a.depreciation_account_code)) dacc, upper(trim(a.depreciation_sum_account_code)) sacc,\n  round(d.as_buy_price, 2) buy, round(case when coalesce(d.as_dead_value, 0) <= 0 then 1 else d.as_dead_value end, 2) dead, d.as_age::int age\n from as_asset a join as_asset_detail d on d.as_code = a.code\n where a.code not like 'UAT%' and coalesce(a.as_type, '') <> '' and a.as_type = upper(trim(a.as_type))\n   and coalesce(d.as_buy_price, 0) >= 1000 and coalesce(d.as_age, 0) >= 2 and d.as_age = trunc(d.as_age)\n   and exists (select 1 from gl_chart_of_account c where c.code = upper(trim(a.account_code))) and exists (select 1 from gl_chart_of_account c where c.code = upper(trim(a.depreciation_account_code))) and exists (select 1 from gl_chart_of_account c where c.code = upper(trim(a.depreciation_sum_account_code)))\n order by a.code limit 1),\nmo as (select case when extract(month from m) = 12 then m - interval '1 month' else m end::date m from (select date_trunc('month', (now() at time zone 'Asia/Bangkok')::date) - interval '1 month' m) x),\nsc as (select coalesce((select item_amount_decimal from erp_option limit 1), 2)::int sc),\ne as (\n select src.*, mo.m, (mo.m + interval '1 month' - interval '1 day')::date m2, b.code book,\n  round(30 * round(round((src.buy - src.dead) / src.age, sc.sc) / 360, sc.sc), sc.sc) amt\n from src, mo, sc, (select code from gl_journal_book order by code limit 1) b\n where exists (select 1 from erp_account_period p where (mo.m + interval '1 month' - interval '1 day')::date between p.date_start and p.date_end and coalesce(p.status, 0) = 0) and exists (select 1 from erp_account_period p where (now() at time zone 'Asia/Bangkok')::date between p.date_start and p.date_end and coalesce(p.status, 0) = 0)),\ncu as (\n select c.code cust, c.code || '~' || c.name_1 custd, coalesce(nullif((select trim(d.account_code) from ar_customer_detail d where d.ar_code = c.code limit 1), ''), coalesce((select code from gl_chart_of_account where code = '1121' or code like '1121-%' order by (code = '1121') desc, code limit 1), (select code from gl_chart_of_account where code = '1120' or code like '1120-%' order by (code = '1120') desc, code limit 1))) party\n from ar_customer c\n where c.code not like 'UAT%' and c.code = upper(trim(c.code)) and length(c.code) <= 25 and trim(coalesce(c.name_1, '')) <> '' and c.name_1 !~ '(^\\s|\\s$|\\s\\s|[\\r\\n~])'\n   and (select count(*) from ar_customer_detail d where d.ar_code = c.code) <= 1),\nk as (\n select coalesce((select vat_rate from erp_option limit 1), 7) r, coalesce((select code from gl_chart_of_account where code = '1111' or code like '1111-%' order by (code = '1111') desc, code limit 1), (select code from gl_chart_of_account where code = '1110' or code like '1110-%' order by (code = '1110') desc, code limit 1), (select code from gl_chart_of_account where code = '1100' or code like '1100-%' order by (code = '1100') desc, code limit 1)) cash, coalesce((select code from gl_chart_of_account where code = '2134' or code like '2134-%' order by (code = '2134') desc, code limit 1), (select code from gl_chart_of_account where code = '2121' or code like '2121-%' order by (code = '2121') desc, code limit 1), (select code from gl_chart_of_account where code = '2135' or code like '2135-%' order by (code = '2135') desc, code limit 1), (select code from gl_chart_of_account where code = '2190' or code like '2190-%' order by (code = '2190') desc, code limit 1)) vacc,\n  (select code from gl_chart_of_account where name_1 ~ '(จำหน่าย|ขาย)สินทรัพย์' order by code limit 1) placc,\n  coalesce((select code from gl_journal_book where code = '04'), (select code from gl_journal_book order by code limit 1)) sbook,\n  coalesce((select code from erp_doc_format where upper(code) = 'ASS' or upper(coalesce(screen_code, '')) = 'ASS' order by (upper(code) = 'ASS') desc limit 1), 'ASS') fmt),\np as (\n select e.*, c.*, k.*, trunc(e.buy / 200) * 100 lp, trunc(e.buy / 100) * 100 + 1000 gp, e.buy - e.amt bk\n from e, k, (select * from cu where exists (select 1 from gl_chart_of_account g where g.code = cu.party) order by cust limit 1) c\n where k.r > 0 and k.cash is not null and k.vacc is not null and k.placc is not null),\nq as (select p.*, round(lp * r / 100, 2) lv, round(gp * r / 100, 2) gv from p)\nselect as_type, acc, dacc, sacc, buy::text buy, dead::text dead, age::text age, book, amt::text expamt,\n to_char(m, 'YYYY-MM-DD') d1, to_char(m2, 'YYYY-MM-DD') d2, to_char(date_trunc('year', m), 'YYYY-MM-DD') st,\n to_char(date_trunc('year', m) + make_interval(years => age) - interval '1 day', 'YYYY-MM-DD') sp, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') today,\n cust, custd, party, cash, vacc, placc, sbook, fmt, r::text r, lp::text lp, lv::text lv, (lp + lv)::text ltot, bk::text bk, (lp - bk)::text lpl, (buy + lv)::text gltot,\n case when buy = 0 then '' else to_char(buy, 'FM999,999,999,990.00') end buyd, case when amt = 0 then '' else to_char(amt, 'FM999,999,999,990.00') end depd, case when bk = 0 then '' else to_char(bk, 'FM999,999,999,990.00') end bkd, case when gp = 0 then '' else to_char(gp, 'FM999,999,999,990.00') end gpd, case when gp + gv = 0 then '' else to_char(gp + gv, 'FM999,999,999,990.00') end gtotd, case when gp - bk = 0 then '' else to_char(gp - bk, 'FM999,999,999,990.00') end gaind,\n case when lp = 0 then '' else to_char(lp, 'FM999,999,999,990.00') end lpd, case when lv = 0 then '' else to_char(lv, 'FM999,999,999,990.00') end lvd, case when lp + lv = 0 then '' else to_char(lp + lv, 'FM999,999,999,990.00') end ltotd, case when bk - lp = 0 then '' else to_char(bk - lp, 'FM999,999,999,990.00') end lossd, case when buy + lv = 0 then '' else to_char(buy + lv, 'FM999,999,999,990.00') end gltotd,\n (select string_agg(v.a || '|' || round(v.dr, 2)::text || '|' || round(v.cr, 2)::text, ';' order by v.o) from (values\n   (1, party, lp + lv, 0::numeric), (2, sacc, amt, 0), (3, placc, bk - lp, 0), (4, acc, 0, buy), (5, vacc, 0, lv)) v(o, a, dr, cr)) glx\nfrom q",
+   "rows": 1,
+   "save": {
+    "as_type": "as_type",
+    "acc": "acc",
+    "dacc": "dacc",
+    "sacc": "sacc",
+    "buy": "buy",
+    "dead": "dead",
+    "age": "age",
+    "book": "book",
+    "expamt": "expamt",
+    "d1": "d1",
+    "d2": "d2",
+    "st": "st",
+    "sp": "sp",
+    "today": "today",
+    "cust": "cust",
+    "custd": "custd",
+    "party": "party",
+    "cash": "cash",
+    "vacc": "vacc",
+    "placc": "placc",
+    "sbook": "sbook",
+    "fmt": "fmt",
+    "r": "r",
+    "lp": "lp",
+    "lv": "lv",
+    "ltot": "ltot",
+    "bk": "bk",
+    "lpl": "lpl",
+    "gltot": "gltot",
+    "buyd": "buyd",
+    "depd": "depd",
+    "bkd": "bkd",
+    "gpd": "gpd",
+    "gtotd": "gtotd",
+    "gaind": "gaind",
+    "lpd": "lpd",
+    "lvd": "lvd",
+    "ltotd": "ltotd",
+    "lossd": "lossd",
+    "gltotd": "gltotd",
+    "glx": "glx"
+   }
+  },
+  {
+   "title": "เลขเอกสารตัวพิมพ์เล็ก (หน้าจอต้องแปลงเป็นตัวใหญ่)",
+   "do": "db.query",
+   "sql": "select lower(:'sd') sdl",
+   "rows": 1,
+   "save": {
+    "sdl": "sdl"
+   }
+  },
+  {
+   "title": "รูปแบบเอกสาร {{fmt}} ไม่มีผัง GL (erp_doc_format_gl) → ลงบัญชีด้วยบัญชีมาตรฐาน",
+   "do": "db.query",
+   "sql": "select ((select count(*) from erp_doc_format f where upper(f.code) = upper(:'fmt') and upper(trim(coalesce(f.screen_code, ''))) = 'ASS') * (select count(*) from erp_doc_format_gl g where upper(g.doc_code) = upper(:'fmt') and g.condition_number > 0))::text tpl",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "tpl",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "ลงทะเบียนสินทรัพย์ทดสอบ (API)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/master-detail/save",
+   "body": {
+    "menuKey": "menu_asset_lists",
+    "key": "{{fa}}",
+    "mode": "new",
+    "header": {
+     "name_1": "{{run.tag}}",
+     "as_type": "{{as_type}}",
+     "account_code": "{{acc}}",
+     "depreciation_account_code": "{{dacc}}",
+     "depreciation_sum_account_code": "{{sacc}}",
+     "remark": "{{run.tag}}"
+    },
+    "grids": {
+     "detail": [
+      {
+       "as_buy_date": "{{st}}",
+       "as_buy_price": "{{buy}}",
+       "as_calc_value": "{{buy}}",
+       "as_dead_value": "{{dead}}",
+       "as_age": "{{age}}",
+       "start_calc_date": "{{st}}",
+       "stop_calc_date": "{{sp}}"
+      }
+     ]
+    }
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    }
+   ]
+  },
+  {
+   "title": "บันทึกค่าเสื่อม 1 เดือนของสินทรัพย์ทดสอบ (API)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/workflow/fa-depreciation",
+   "body": {
+    "menuName": "menu_asset_transfers",
+    "dateBegin": "{{d1}}",
+    "dateEnd": "{{d2}}",
+    "processBy": 2,
+    "processMode": 1,
+    "fromAsCode": "{{fa}}",
+    "toAsCode": "{{fa}}",
+    "save": true,
+    "docNo": "{{dp}}",
+    "docDate": "{{d2}}",
+    "bookCode": "{{book}}",
+    "remark": "{{run.tag}}"
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    },
+    {
+     "path": "data.saved",
+     "op": "eq",
+     "value": true
+    },
+    {
+     "path": "data.totalAmount",
+     "op": "eq",
+     "value": "{{expamt}}"
+    }
+   ]
+  },
+  {
+   "title": "สินทรัพย์ทดสอบยังไม่ขาย และค่าเสื่อมสะสม = เอกสาร 1801",
+   "do": "db.query",
+   "sql": "select coalesce(d.doc_sale_ref, '') ref, coalesce(d.as_sale_price, 0)::text price, (select sum(sum_amount) from as_trans_detail x where x.item_code = :'fa' and x.trans_flag = 1801)::text dep from as_asset_detail d where d.as_code = :'fa'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "ref",
+     "op": "same",
+     "value": ""
+    },
+    {
+     "col": "price",
+     "op": "eq",
+     "value": "0"
+    },
+    {
+     "col": "dep",
+     "op": "eq",
+     "value": "{{expamt}}"
+    }
+   ]
+  },
+  {
+   "title": "เปิดเมนูขายสินทรัพย์",
+   "do": "ui.openMenu",
+   "key": "menu_asset_sale"
+  },
+  {
+   "title": "ยังไม่เปิดเอกสาร: ปุ่มแก้ไขกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] section.card > div.h-11 button:has(> span:text-is(\"แก้ไข\")):disabled"
+  },
+  {
+   "title": "ยังไม่เปิดเอกสาร: ปุ่มลบกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] section.card > div.h-11 button:has(> span:text-is(\"ลบ\")):disabled"
+  },
+  {
+   "title": "กดเพิ่มใหม่",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] section.card > div.h-11 button:has(> span:text-is(\"เพิ่มใหม่\"))"
+  },
+  {
+   "title": "สถานะ: เพิ่มรายการใหม่",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] span.bg-amber-100",
+   "text": "เพิ่มรายการใหม่",
+   "op": "same"
+  },
+  {
+   "title": "ระบบออกเลขที่เอกสารอัตโนมัติ",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"เลขที่เอกสาร\"]",
+   "value": "^\\S+$",
+   "op": "matches"
+  },
+  {
+   "title": "รูปแบบเอกสาร = {{fmt}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.flex:has(> label:text-is(\"รูปแบบเอกสาร:\")) > input",
+   "value": "{{fmt}}",
+   "op": "same"
+  },
+  {
+   "title": "ค่าเริ่มต้น: ขายเงินเชื่อ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [role=\"radiogroup\"][aria-label=\"ประเภทการขาย\"] span:has(> span:text-is(\"ขายเงินเชื่อ\")) > input[type=\"radio\"]:checked"
+  },
+  {
+   "title": "ค่าเริ่มต้น: ภาษีแยกนอก",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [role=\"radiogroup\"][aria-label=\"ประเภทภาษี\"] span:has(> span:text-is(\"ภาษีแยกนอก\")) > input[type=\"radio\"]:checked"
+  },
+  {
+   "title": "เลขที่เอกสาร (พิมพ์ตัวเล็ก)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"เลขที่เอกสาร\"]",
+   "value": "{{sdl}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"เลขที่เอกสาร\"]",
+   "key": "Tab"
+  },
+  {
+   "title": "เลขที่เอกสาร (พิมพ์ตัวเล็ก): ช่องแสดง {{sd}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"เลขที่เอกสาร\"]",
+   "value": "{{sd}}",
+   "op": "same"
+  },
+  {
+   "title": "สมุดรายวัน: เลือก {{sbook}}",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] select[aria-label=\"สมุดรายวัน\"]",
+   "value": "{{sbook}}"
+  },
+  {
+   "title": "สมุดรายวันที่เลือก",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] select[aria-label=\"สมุดรายวัน\"]",
+   "value": "{{sbook}}",
+   "op": "same"
+  },
+  {
+   "title": "กดปุ่มค้นหาสินทรัพย์ (แถว 1)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=1 >> button"
+  },
+  {
+   "title": "หน้าต่างค้นหาสินทรัพย์ (ยังไม่ขาย) แสดง",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาสินทรัพย์ (ยังไม่ขาย)\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]"
+  },
+  {
+   "title": "ค้นหา {{fa}}",
+   "do": "ui.fill",
+   "selector": "div.fixed:has-text(\"ค้นหาสินทรัพย์ (ยังไม่ขาย)\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "value": "{{fa}}"
+  },
+  {
+   "title": "ผลค้นหามีสินทรัพย์ทดสอบ (ยังไม่ขาย)",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาสินทรัพย์ (ยังไม่ขาย)\") tr[data-row-index]:has(td:text-is(\"{{fa}}\"))"
+  },
+  {
+   "title": "เลือกสินทรัพย์ทดสอบ",
+   "do": "ui.click",
+   "selector": "div.fixed:has-text(\"ค้นหาสินทรัพย์ (ยังไม่ขาย)\") tr[data-row-index]:has(td:text-is(\"{{fa}}\"))"
+  },
+  {
+   "title": "หน้าต่างค้นหาปิด",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาสินทรัพย์ (ยังไม่ขาย)\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "visible": false
+  },
+  {
+   "title": "รหัสสินทรัพย์แถว 1",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"รหัสสินทรัพย์ 1\"]",
+   "value": "{{fa}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: ชื่อสินทรัพย์",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=2",
+   "text": "{{run.tag}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: มูลค่าสินทรัพย์ = ราคาทุน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=3",
+   "text": "{{buyd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: ค่าเสื่อมราคาสะสม = เอกสารค่าเสื่อม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=4",
+   "text": "{{depd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: มูลค่าตามบัญชี = ทุน − ค่าเสื่อมสะสม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=5",
+   "text": "{{bkd}}",
+   "op": "same"
+  },
+  {
+   "title": "ราคาขายสูงกว่ามูลค่าตามบัญชี",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=6 >> input",
+   "value": "{{gpd}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=6 >> input",
+   "key": "Tab"
+  },
+  {
+   "title": "ราคาขายสูงกว่ามูลค่าตามบัญชี: ช่องแสดง {{gpd}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=6 >> input",
+   "value": "{{gpd}}",
+   "op": "same"
+  },
+  {
+   "title": "กำไรจากการขาย = ราคาขาย − มูลค่าตามบัญชี",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"profit-loss\"]",
+   "text": "กำไรจากการขายสินทรัพย์ {{gaind}}",
+   "op": "same"
+  },
+  {
+   "title": "ราคาขายกำไร: รวมทั้งสิ้น = ราคา + VAT",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"total-รวมทั้งสิ้น\"]",
+   "text": "{{gtotd}}",
+   "op": "same"
+  },
+  {
+   "title": "ขายเงินสด",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [role=\"radiogroup\"][aria-label=\"ประเภทการขาย\"] span:has(> span:text-is(\"ขายเงินสด\")) > input[type=\"radio\"]"
+  },
+  {
+   "title": "ขายเงินสด: GL แถว 1 เดบิตเงินสด",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=0 >> td >> nth=0",
+   "text": "{{cash}}",
+   "op": "same"
+  },
+  {
+   "title": "กลับเป็นขายเงินเชื่อ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [role=\"radiogroup\"][aria-label=\"ประเภทการขาย\"] span:has(> span:text-is(\"ขายเงินเชื่อ\")) > input[type=\"radio\"]"
+  },
+  {
+   "title": "ขายเงินเชื่อ: GL แถว 1 เดบิตลูกหนี้",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=0 >> td >> nth=0",
+   "text": "{{party}}",
+   "op": "same"
+  },
+  {
+   "title": "ราคาขายต่ำกว่ามูลค่าตามบัญชี",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=6 >> input",
+   "value": "{{lpd}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=6 >> input",
+   "key": "Tab"
+  },
+  {
+   "title": "ราคาขายต่ำกว่ามูลค่าตามบัญชี: ช่องแสดง {{lpd}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=6 >> input",
+   "value": "{{lpd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: GL แถว 1 เดบิตลูกหนี้ (บัญชีลูกหนี้ของลูกค้า)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=0 >> td >> nth=0",
+   "text": "{{party}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: GL แถว 1 เดบิต = ราคาขาย + VAT",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=0 >> td >> nth=2",
+   "text": "{{ltotd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: GL แถว 2 เดบิตค่าเสื่อมราคาสะสม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=1 >> td >> nth=0",
+   "text": "{{sacc}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: GL แถว 2 เดบิต = ค่าเสื่อมสะสม (เอกสาร 1801)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=1 >> td >> nth=2",
+   "text": "{{depd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: GL แถว 3 เดบิตขาดทุนจากการขายสินทรัพย์",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=2 >> td >> nth=0",
+   "text": "{{placc}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: GL แถว 3 เดบิต = มูลค่าตามบัญชี − ราคาขาย",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=2 >> td >> nth=2",
+   "text": "{{lossd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: GL แถว 4 เครดิตบัญชีสินทรัพย์",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=3 >> td >> nth=0",
+   "text": "{{acc}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: GL แถว 4 เครดิต = ราคาทุน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=3 >> td >> nth=3",
+   "text": "{{buyd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: GL แถว 5 เครดิตภาษีขาย",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=4 >> td >> nth=0",
+   "text": "{{vacc}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: GL แถว 5 เครดิต = VAT",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=4 >> td >> nth=3",
+   "text": "{{lvd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: GL มี 5 แถว",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=5",
+   "visible": false
+  },
+  {
+   "title": "ตัวอย่าง: รวมเดบิต = ราคาทุน + VAT",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"gl-debit\"]",
+   "text": "{{gltotd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: รวมเครดิต = ราคาทุน + VAT",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"gl-credit\"]",
+   "text": "{{gltotd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: แจ้งเดบิต = เครดิต",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tfoot td >> nth=0",
+   "text": "เดบิต = เครดิต (สมดุล)",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: ขาดทุนจากการขาย = มูลค่าตามบัญชี − ราคาขาย",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"profit-loss\"]",
+   "text": "ขาดทุนจากการขายสินทรัพย์ {{lossd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: มูลค่าสินค้า",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"total-มูลค่าสินค้า\"]",
+   "text": "{{lpd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: มูลค่าก่อนภาษี",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"total-มูลค่าก่อนภาษี\"]",
+   "text": "{{lpd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: ภาษีมูลค่าเพิ่ม (ราคา × อัตรา/100)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"total-ภาษีมูลค่าเพิ่ม\"]",
+   "text": "{{lvd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: มูลค่าหลังภาษี",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"total-มูลค่าหลังภาษี\"]",
+   "text": "{{ltotd}}",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: มูลค่ายกเว้นภาษี ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"total-มูลค่ายกเว้นภาษี\"]",
+   "text": "",
+   "op": "same"
+  },
+  {
+   "title": "ตัวอย่าง: รวมทั้งสิ้น",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"total-รวมทั้งสิ้น\"]",
+   "text": "{{ltotd}}",
+   "op": "same"
+  },
+  {
+   "title": "ภาพหน้าจอตัวอย่างก่อนบันทึก",
+   "do": "ui.screenshot",
+   "name": "sale-preview"
+  },
+  {
+   "title": "ตัวอย่างไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean"
+  },
+  {
+   "title": "ดูตัวอย่างไม่บันทึกอะไรลงฐานข้อมูล",
+   "do": "db.query",
+   "sql": "select (select count(*) from as_trans where doc_no = :'sd') + (select count(*) from as_trans_detail where doc_no = :'sd') + (select count(*) from gl_journal where doc_no = :'sd') + (select count(*) from gl_journal_detail where doc_no = :'sd') + (select count(*) from gl_journal_vat_sale where doc_no = :'sd') + (select count(*) from cb_trans where doc_no = :'sd') + (select count(*) from gl_wht_list where doc_no = :'sd') as n",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "เพิ่มบรรทัด",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] button:has(> span:text-is(\"เพิ่มบรรทัด\"))"
+  },
+  {
+   "title": "รหัสสินทรัพย์ที่ไม่มีจริง (แถว 2)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"รหัสสินทรัพย์ 2\"]",
+   "value": "{{bad}}"
+  },
+  {
+   "title": "แจ้ง \"ไม่พบสินทรัพย์\"",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.bg-red-50[role=\"alert\"]",
+   "text": "ไม่พบสินทรัพย์ {{bad}}"
+  },
+  {
+   "title": "สินทรัพย์เดียวกันซ้ำ (แถว 2)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"รหัสสินทรัพย์ 2\"]",
+   "value": "{{fa}}"
+  },
+  {
+   "title": "แจ้ง \"ซ้ำในเอกสาร\"",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.bg-red-50[role=\"alert\"]",
+   "text": "รหัสสินทรัพย์ {{fa}} ซ้ำในเอกสาร"
+  },
+  {
+   "title": "ลบบรรทัด 2",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=1 >> button.text-danger"
+  },
+  {
+   "title": "ข้อความผิดพลาดหายไป",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.bg-red-50[role=\"alert\"]",
+   "visible": false
+  },
+  {
+   "title": "คำนวณกลับเป็นขาดทุนเดิม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"profit-loss\"]",
+   "text": "ขาดทุนจากการขายสินทรัพย์ {{lossd}}",
+   "op": "same"
+  },
+  {
+   "title": "กดบันทึก (ยังไม่ระบุลูกหนี้)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] section.card > div.h-11 button:has(> span:text-is(\"บันทึก\"))"
+  },
+  {
+   "title": "หน้าต่างแจ้ง \"กรุณาป้อน รหัสลูกค้า\"",
+   "do": "ui.expectText",
+   "selector": "[role=\"dialog\"]",
+   "text": "กรุณาป้อน รหัสลูกค้า"
+  },
+  {
+   "title": "ปิดหน้าต่างแจ้ง (ยังไม่ระบุลูกหนี้)",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has(> span:text-is(\"ตกลง\"))"
+  },
+  {
+   "title": "หน้าต่างแจ้งปิดแล้ว",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"]",
+   "visible": false
+  },
+  {
+   "title": "ไม่ระบุลูกหนี้: ไม่มีเอกสารถูกบันทึก",
+   "do": "db.query",
+   "sql": "select (select count(*) from as_trans where doc_no = :'sd') + (select count(*) from as_trans_detail where doc_no = :'sd') + (select count(*) from gl_journal where doc_no = :'sd') + (select count(*) from gl_journal_detail where doc_no = :'sd') + (select count(*) from gl_journal_vat_sale where doc_no = :'sd') + (select count(*) from cb_trans where doc_no = :'sd') + (select count(*) from gl_wht_list where doc_no = :'sd') as n",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "ข้อผิดพลาดแฝงมีเฉพาะ 4xx ที่ตั้งใจ",
+   "do": "ui.expectClean",
+   "ignore": [
+    "^HTTP 4\\d\\d POST /api/process/workflow/asset-sale",
+    "status of 4\\d\\d"
+   ]
+  },
+  {
+   "title": "ลูกหนี้: พิมพ์รหัส",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.flex:has(> label:text-is(\"ลูกหนี้:\")) textarea",
+   "value": "{{cust}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.flex:has(> label:text-is(\"ลูกหนี้:\")) textarea",
+   "key": "Tab"
+  },
+  {
+   "title": "ลูกหนี้: พิมพ์รหัส: ช่องแสดง {{custd}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.flex:has(> label:text-is(\"ลูกหนี้:\")) textarea",
+   "value": "{{custd}}",
+   "op": "same"
+  },
+  {
+   "title": "หมายเหตุ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.flex:has(> label:text-is(\"หมายเหตุ:\")) > input",
+   "value": "{{run.tag}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.flex:has(> label:text-is(\"หมายเหตุ:\")) > input",
+   "key": "Tab"
+  },
+  {
+   "title": "หมายเหตุ: ช่องแสดง {{run.tag}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.flex:has(> label:text-is(\"หมายเหตุ:\")) > input",
+   "value": "{{run.tag}}",
+   "op": "same"
+  },
+  {
+   "title": "กดบันทึก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] section.card > div.h-11 button:has(> span:text-is(\"บันทึก\"))"
+  },
+  {
+   "title": "แสดงบันทึกล่าสุด",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] span.text-ok:has-text(\"บันทึกล่าสุด\")"
+  },
+  {
+   "title": "กลับเป็นโหมดดู (ไม่มีสถานะเพิ่ม/แก้ไข)",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] span.bg-amber-100",
+   "visible": false
+  },
+  {
+   "title": "ไม่มีหน้าต่างแจ้งข้อผิดพลาด",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"]",
+   "visible": false
+  },
+  {
+   "title": "เปิดเอกสารที่บันทึก",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"เลขที่เอกสาร\"]",
+   "value": "{{sd}}",
+   "op": "same"
+  },
+  {
+   "title": "รายการซ้ายแสดงเอกสาร",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] tbody tr:has(td > div > span:text-is(\"{{sd}}\"))"
+  },
+  {
+   "title": "ลูกหนี้จากฐานข้อมูล",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.flex:has(> label:text-is(\"ลูกหนี้:\")) textarea",
+   "value": "{{custd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: ชื่อสินทรัพย์",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=2",
+   "text": "{{run.tag}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: มูลค่าสินทรัพย์ = ราคาทุน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=3",
+   "text": "{{buyd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: ค่าเสื่อมราคาสะสม = เอกสารค่าเสื่อม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=4",
+   "text": "{{depd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: มูลค่าตามบัญชี = ทุน − ค่าเสื่อมสะสม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=5",
+   "text": "{{bkd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: ราคาขาย",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=6",
+   "text": "{{lpd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: GL แถว 1 เดบิตลูกหนี้ (บัญชีลูกหนี้ของลูกค้า)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=0 >> td >> nth=0",
+   "text": "{{party}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: GL แถว 1 เดบิต = ราคาขาย + VAT",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=0 >> td >> nth=2",
+   "text": "{{ltotd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: GL แถว 2 เดบิตค่าเสื่อมราคาสะสม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=1 >> td >> nth=0",
+   "text": "{{sacc}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: GL แถว 2 เดบิต = ค่าเสื่อมสะสม (เอกสาร 1801)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=1 >> td >> nth=2",
+   "text": "{{depd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: GL แถว 3 เดบิตขาดทุนจากการขายสินทรัพย์",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=2 >> td >> nth=0",
+   "text": "{{placc}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: GL แถว 3 เดบิต = มูลค่าตามบัญชี − ราคาขาย",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=2 >> td >> nth=2",
+   "text": "{{lossd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: GL แถว 4 เครดิตบัญชีสินทรัพย์",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=3 >> td >> nth=0",
+   "text": "{{acc}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: GL แถว 4 เครดิต = ราคาทุน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=3 >> td >> nth=3",
+   "text": "{{buyd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: GL แถว 5 เครดิตภาษีขาย",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=4 >> td >> nth=0",
+   "text": "{{vacc}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: GL แถว 5 เครดิต = VAT",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=4 >> td >> nth=3",
+   "text": "{{lvd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: GL มี 5 แถว",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tbody tr >> nth=5",
+   "visible": false
+  },
+  {
+   "title": "หลังบันทึก: รวมเดบิต = ราคาทุน + VAT",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"gl-debit\"]",
+   "text": "{{gltotd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: รวมเครดิต = ราคาทุน + VAT",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"gl-credit\"]",
+   "text": "{{gltotd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: แจ้งเดบิต = เครดิต",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-gl\"] tfoot td >> nth=0",
+   "text": "เดบิต = เครดิต (สมดุล)",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: ขาดทุนจากการขาย = มูลค่าตามบัญชี − ราคาขาย",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"profit-loss\"]",
+   "text": "ขาดทุนจากการขายสินทรัพย์ {{lossd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: มูลค่าสินค้า",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"total-มูลค่าสินค้า\"]",
+   "text": "{{lpd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: มูลค่าก่อนภาษี",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"total-มูลค่าก่อนภาษี\"]",
+   "text": "{{lpd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: ภาษีมูลค่าเพิ่ม (ราคา × อัตรา/100)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"total-ภาษีมูลค่าเพิ่ม\"]",
+   "text": "{{lvd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: มูลค่าหลังภาษี",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"total-มูลค่าหลังภาษี\"]",
+   "text": "{{ltotd}}",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: มูลค่ายกเว้นภาษี ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"total-มูลค่ายกเว้นภาษี\"]",
+   "text": "",
+   "op": "same"
+  },
+  {
+   "title": "หลังบันทึก: รวมทั้งสิ้น",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"total-รวมทั้งสิ้น\"]",
+   "text": "{{ltotd}}",
+   "op": "same"
+  },
+  {
+   "title": "ภาพหน้าจอหลังบันทึก",
+   "do": "ui.screenshot",
+   "name": "sale-saved"
+  },
+  {
+   "title": "การบันทึกไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean"
+  },
+  {
+   "title": "as_trans: วันที่ ลูกหนี้ ใบกำกับ ประเภท อัตราภาษี ยอดรวม หมายเหตุ",
+   "do": "db.query",
+   "sql": "select doc_date::text dd, cust_code, tax_doc_no, tax_doc_date::text tdd, doc_format_code fmt, inquiry_type::text it, vat_type::text vt, vat_rate::text rate, total_value::text tv, total_before_vat::text tb, total_vat_value::text tvat, total_after_vat::text ta, total_except_vat::text te, total_amount::text amt, remark from as_trans where doc_no = :'sd' and trans_flag = 1802",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "dd",
+     "op": "eq",
+     "value": "{{today}}"
+    },
+    {
+     "col": "cust_code",
+     "op": "eq",
+     "value": "{{cust}}"
+    },
+    {
+     "col": "tax_doc_no",
+     "op": "eq",
+     "value": "{{sd}}"
+    },
+    {
+     "col": "tdd",
+     "op": "eq",
+     "value": "{{today}}"
+    },
+    {
+     "col": "fmt",
+     "op": "same",
+     "value": "{{fmt}}"
+    },
+    {
+     "col": "it",
+     "op": "eq",
+     "value": "0"
+    },
+    {
+     "col": "vt",
+     "op": "eq",
+     "value": "0"
+    },
+    {
+     "col": "rate",
+     "op": "eq",
+     "value": "{{r}}"
+    },
+    {
+     "col": "tv",
+     "op": "eq",
+     "value": "{{lp}}"
+    },
+    {
+     "col": "tb",
+     "op": "eq",
+     "value": "{{lp}}"
+    },
+    {
+     "col": "tvat",
+     "op": "eq",
+     "value": "{{lv}}"
+    },
+    {
+     "col": "ta",
+     "op": "eq",
+     "value": "{{ltot}}"
+    },
+    {
+     "col": "te",
+     "op": "eq",
+     "value": "0"
+    },
+    {
+     "col": "amt",
+     "op": "eq",
+     "value": "{{ltot}}"
+    },
+    {
+     "col": "remark",
+     "op": "same",
+     "value": "{{run.tag}}"
+    }
+   ]
+  },
+  {
+   "title": "as_trans_detail: ทุน ค่าเสื่อมสะสม มูลค่าตามบัญชี ราคาขาย VAT กำไรขาดทุน",
+   "do": "db.query",
+   "sql": "select count(*)::text n, max(item_code) item, max(item_name) nm, sum(price_default)::text cost, sum(average_cost)::text dep, sum(price)::text bk, sum(sum_amount)::text amt, sum(sum_amount_exclude_vat)::text excl, sum(total_vat_value)::text vat, sum(profit_lost_cost_amount)::text pl from as_trans_detail where doc_no = :'sd' and trans_flag = 1802",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "1"
+    },
+    {
+     "col": "item",
+     "op": "same",
+     "value": "{{fa}}"
+    },
+    {
+     "col": "nm",
+     "op": "same",
+     "value": "{{run.tag}}"
+    },
+    {
+     "col": "cost",
+     "op": "eq",
+     "value": "{{buy}}"
+    },
+    {
+     "col": "dep",
+     "op": "eq",
+     "value": "{{expamt}}"
+    },
+    {
+     "col": "bk",
+     "op": "eq",
+     "value": "{{bk}}"
+    },
+    {
+     "col": "amt",
+     "op": "eq",
+     "value": "{{lp}}"
+    },
+    {
+     "col": "excl",
+     "op": "eq",
+     "value": "{{lp}}"
+    },
+    {
+     "col": "vat",
+     "op": "eq",
+     "value": "{{lv}}"
+    },
+    {
+     "col": "pl",
+     "op": "eq",
+     "value": "{{lpl}}"
+    }
+   ]
+  },
+  {
+   "title": "as_asset_detail: วันที่ขาย เอกสารขาย ผู้ซื้อ ราคาขาย",
+   "do": "db.query",
+   "sql": "select as_sale_date::date::text sdt, doc_sale_date::date::text ddt, doc_sale_ref ref, as_sale_to sto, as_sale_price::text price from as_asset_detail where as_code = :'fa'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "sdt",
+     "op": "eq",
+     "value": "{{today}}"
+    },
+    {
+     "col": "ddt",
+     "op": "eq",
+     "value": "{{today}}"
+    },
+    {
+     "col": "ref",
+     "op": "same",
+     "value": "{{sd}}"
+    },
+    {
+     "col": "sto",
+     "op": "same",
+     "value": "{{cust}}"
+    },
+    {
+     "col": "price",
+     "op": "eq",
+     "value": "{{lp}}"
+    }
+   ]
+  },
+  {
+   "title": "ขายเงินเชื่อ: ไม่มีรายการรับเงิน (cb_trans)",
+   "do": "db.query",
+   "sql": "select count(*)::text n from cb_trans where doc_no = :'sd'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "GL หัว: สมุดรายวัน วันที่ คำอธิบาย เดบิต = เครดิต = ทุน + VAT",
+   "do": "db.query",
+   "sql": "select count(*)::text n, max(book_code) book, max(doc_date)::text dd, max(description) descr, sum(debit)::text dr, sum(credit)::text cr from gl_journal where doc_no = :'sd' and trans_flag = 1802",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "1"
+    },
+    {
+     "col": "book",
+     "op": "same",
+     "value": "{{sbook}}"
+    },
+    {
+     "col": "dd",
+     "op": "eq",
+     "value": "{{today}}"
+    },
+    {
+     "col": "descr",
+     "op": "same",
+     "value": "{{run.tag}}"
+    },
+    {
+     "col": "dr",
+     "op": "eq",
+     "value": "{{gltot}}"
+    },
+    {
+     "col": "cr",
+     "op": "eq",
+     "value": "{{gltot}}"
+    }
+   ]
+  },
+  {
+   "title": "GL รายการ: บัญชีและยอดทีละแถวตามสูตร (ลูกหนี้/ค่าเสื่อมสะสม/ขาดทุน/สินทรัพย์/ภาษีขาย)",
+   "do": "db.query",
+   "sql": "select string_agg(account_code || '|' || round(debit, 2)::text || '|' || round(credit, 2)::text, ';' order by line_number) gl from gl_journal_detail where doc_no = :'sd' and trans_flag = 1802",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "gl",
+     "op": "same",
+     "value": "{{glx}}"
+    }
+   ]
+  },
+  {
+   "title": "ภาษีขาย: เลขที่ใบกำกับ วันที่ ฐานภาษี อัตรา ภาษี ลูกหนี้",
+   "do": "db.query",
+   "sql": "select count(*)::text n, max(vat_number) vno, max(vat_date)::text vd, sum(base_caltax_amount)::text base, max(tax_rate)::text rate, sum(amount)::text vat, max(ar_code) ar from gl_journal_vat_sale where doc_no = :'sd' and trans_flag = 1802",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "1"
+    },
+    {
+     "col": "vno",
+     "op": "same",
+     "value": "{{sd}}"
+    },
+    {
+     "col": "vd",
+     "op": "eq",
+     "value": "{{today}}"
+    },
+    {
+     "col": "base",
+     "op": "eq",
+     "value": "{{lp}}"
+    },
+    {
+     "col": "rate",
+     "op": "eq",
+     "value": "{{r}}"
+    },
+    {
+     "col": "vat",
+     "op": "eq",
+     "value": "{{lv}}"
+    },
+    {
+     "col": "ar",
+     "op": "same",
+     "value": "{{cust}}"
+    }
+   ]
+  },
+  {
+   "title": "ลบเอกสารค่าเสื่อมของสินทรัพย์ที่ขายแล้ว ต้องถูกปฏิเสธ (API)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/workflow/fa-depreciation",
+   "body": {
+    "menuName": "menu_asset_transfers",
+    "docNo": "{{dp}}",
+    "delete": true
+   },
+   "expectStatus": [
+    409
+   ],
+   "expect": [
+    {
+     "path": "error",
+     "op": "contains",
+     "value": "ขายไปแล้วในเอกสาร {{sd}}"
+    }
+   ]
+  },
+  {
+   "title": "เอกสารค่าเสื่อมยังอยู่",
+   "do": "db.query",
+   "sql": "select count(*)::text n from as_trans where doc_no = :'dp' and trans_flag = 1801",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "1"
+    }
+   ]
+  },
+  {
+   "title": "กดเพิ่มใหม่ (เอกสารที่สอง)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] section.card > div.h-11 button:has(> span:text-is(\"เพิ่มใหม่\"))"
+  },
+  {
+   "title": "สถานะ: เพิ่มรายการใหม่",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] span.bg-amber-100",
+   "text": "เพิ่มรายการใหม่",
+   "op": "same"
+  },
+  {
+   "title": "ระบบออกเลขที่เอกสารอัตโนมัติ",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"เลขที่เอกสาร\"]",
+   "value": "^\\S+$",
+   "op": "matches"
+  },
+  {
+   "title": "กดปุ่มค้นหาสินทรัพย์ (แถว 1)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] table[data-testid=\"asset-sale-grid\"] tbody tr >> nth=0 >> td >> nth=1 >> button"
+  },
+  {
+   "title": "หน้าต่างค้นหาสินทรัพย์ (ยังไม่ขาย) แสดง",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาสินทรัพย์ (ยังไม่ขาย)\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]"
+  },
+  {
+   "title": "ค้นหา {{fa}}",
+   "do": "ui.fill",
+   "selector": "div.fixed:has-text(\"ค้นหาสินทรัพย์ (ยังไม่ขาย)\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "value": "{{fa}}"
+  },
+  {
+   "title": "สินทรัพย์ที่ขายแล้วไม่อยู่ในผลค้นหา",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาสินทรัพย์ (ยังไม่ขาย)\") td:text-is(\"ไม่พบข้อมูล\")"
+  },
+  {
+   "title": "ปิดหน้าต่างค้นหา (Esc)",
+   "do": "ui.press",
+   "selector": "div.fixed:has-text(\"ค้นหาสินทรัพย์ (ยังไม่ขาย)\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "key": "Escape"
+  },
+  {
+   "title": "หน้าต่างค้นหาปิด",
+   "do": "ui.expectVisible",
+   "selector": "div.fixed:has-text(\"ค้นหาสินทรัพย์ (ยังไม่ขาย)\") input[placeholder=\"พิมพ์คำค้นหา (ตัดคำไทย/อังกฤษอัตโนมัติ)...\"]",
+   "visible": false
+  },
+  {
+   "title": "พิมพ์รหัสสินทรัพย์ที่ขายแล้ว",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"รหัสสินทรัพย์ 1\"]",
+   "value": "{{fa}}"
+  },
+  {
+   "title": "แจ้ง \"ขายไปแล้วในเอกสาร\"",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.bg-red-50[role=\"alert\"]",
+   "text": "สินทรัพย์ {{fa}} ขายไปแล้วในเอกสาร {{sd}}"
+  },
+  {
+   "title": "ลูกหนี้: พิมพ์รหัส",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.flex:has(> label:text-is(\"ลูกหนี้:\")) textarea",
+   "value": "{{cust}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.flex:has(> label:text-is(\"ลูกหนี้:\")) textarea",
+   "key": "Tab"
+  },
+  {
+   "title": "ลูกหนี้: พิมพ์รหัส: ช่องแสดง {{custd}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] div.flex:has(> label:text-is(\"ลูกหนี้:\")) textarea",
+   "value": "{{custd}}",
+   "op": "same"
+  },
+  {
+   "title": "เลขที่เอกสารซ้ำกับที่บันทึก",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"เลขที่เอกสาร\"]",
+   "value": "{{sd}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"เลขที่เอกสาร\"]",
+   "key": "Tab"
+  },
+  {
+   "title": "เลขที่เอกสารซ้ำกับที่บันทึก: ช่องแสดง {{sd}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"เลขที่เอกสาร\"]",
+   "value": "{{sd}}",
+   "op": "same"
+  },
+  {
+   "title": "กดบันทึก (เลขที่เอกสารซ้ำ)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] section.card > div.h-11 button:has(> span:text-is(\"บันทึก\"))"
+  },
+  {
+   "title": "หน้าต่างแจ้ง \"เลขที่เอกสาร {{sd}} มีอยู่แล้ว\"",
+   "do": "ui.expectText",
+   "selector": "[role=\"dialog\"]",
+   "text": "เลขที่เอกสาร {{sd}} มีอยู่แล้ว"
+  },
+  {
+   "title": "ปิดหน้าต่างแจ้ง (เลขที่เอกสารซ้ำ)",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has(> span:text-is(\"ตกลง\"))"
+  },
+  {
+   "title": "หน้าต่างแจ้งปิดแล้ว",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"]",
+   "visible": false
+  },
+  {
+   "title": "เลขที่เอกสารใหม่",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"เลขที่เอกสาร\"]",
+   "value": "{{sx}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"เลขที่เอกสาร\"]",
+   "key": "Tab"
+  },
+  {
+   "title": "เลขที่เอกสารใหม่: ช่องแสดง {{sx}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"เลขที่เอกสาร\"]",
+   "value": "{{sx}}",
+   "op": "same"
+  },
+  {
+   "title": "กดบันทึก (ขายสินทรัพย์ซ้ำ)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] section.card > div.h-11 button:has(> span:text-is(\"บันทึก\"))"
+  },
+  {
+   "title": "หน้าต่างแจ้ง \"สินทรัพย์ {{fa}} ขายไปแล้วในเอกสาร {{sd}}\"",
+   "do": "ui.expectText",
+   "selector": "[role=\"dialog\"]",
+   "text": "สินทรัพย์ {{fa}} ขายไปแล้วในเอกสาร {{sd}}"
+  },
+  {
+   "title": "ปิดหน้าต่างแจ้ง (ขายสินทรัพย์ซ้ำ)",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has(> span:text-is(\"ตกลง\"))"
+  },
+  {
+   "title": "หน้าต่างแจ้งปิดแล้ว",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"]",
+   "visible": false
+  },
+  {
+   "title": "ขายซ้ำถูกปฏิเสธ: ไม่มีเอกสารที่สอง",
+   "do": "db.query",
+   "sql": "select (select count(*) from as_trans where doc_no = :'sx') + (select count(*) from as_trans_detail where doc_no = :'sx') + (select count(*) from gl_journal where doc_no = :'sx') + (select count(*) from gl_journal_detail where doc_no = :'sx') + (select count(*) from gl_journal_vat_sale where doc_no = :'sx') + (select count(*) from cb_trans where doc_no = :'sx') + (select count(*) from gl_wht_list where doc_no = :'sx') as n",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "ข้อผิดพลาดแฝงมีเฉพาะ 4xx ที่ตั้งใจ",
+   "do": "ui.expectClean",
+   "ignore": [
+    "^HTTP 4\\d\\d POST /api/process/workflow/asset-sale",
+    "status of 4\\d\\d"
+   ]
+  },
+  {
+   "title": "ยกเลิกเอกสารที่สอง (ปิดหน้าจอในโหมดเพิ่ม)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] section.card > div.h-11 button:has(> span:text-is(\"ปิดหน้าจอ\"))"
+  },
+  {
+   "title": "ออกจากโหมดเพิ่ม",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] span.bg-amber-100",
+   "visible": false
+  },
+  {
+   "title": "เลือกเอกสารขายจากรายการซ้าย",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] tbody tr:has(td > div > span:text-is(\"{{sd}}\"))"
+  },
+  {
+   "title": "เปิดเอกสารที่เลือก",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] input[aria-label=\"เลขที่เอกสาร\"]",
+   "value": "{{sd}}",
+   "op": "same"
+  },
+  {
+   "title": "ปุ่มลบกดได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] section.card > div.h-11 button:has(> span:text-is(\"ลบ\")):enabled"
+  },
+  {
+   "title": "กดลบ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] section.card > div.h-11 button:has(> span:text-is(\"ลบ\"))"
+  },
+  {
+   "title": "หน้าต่างยืนยันการลบ",
+   "do": "ui.expectText",
+   "selector": "[role=\"dialog\"]",
+   "text": "ลบเอกสารขายสินทรัพย์ {{sd}} ใช่หรือไม่?"
+  },
+  {
+   "title": "ยืนยันลบ",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has(> span:text-is(\"ตกลง\"))"
+  },
+  {
+   "title": "แจ้งลบแล้ว สินทรัพย์กลับเป็นยังไม่ขาย",
+   "do": "ui.expectText",
+   "selector": "[role=\"dialog\"]",
+   "text": "ลบเอกสาร {{sd}} แล้ว สินทรัพย์กลับเป็นสถานะยังไม่ขาย"
+  },
+  {
+   "title": "ภาพหน้าจอหลังลบ",
+   "do": "ui.screenshot",
+   "name": "sale-deleted"
+  },
+  {
+   "title": "ปิดหน้าต่างแจ้ง",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has(> span:text-is(\"ตกลง\"))"
+  },
+  {
+   "title": "หน้าต่างแจ้งปิดแล้ว",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"]",
+   "visible": false
+  },
+  {
+   "title": "เอกสารที่ลบไม่อยู่ในรายการ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] tbody tr:has(td > div > span:text-is(\"{{sd}}\"))",
+   "visible": false
+  },
+  {
+   "title": "การลบไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean"
+  },
+  {
+   "title": "ลบแล้ว: ไม่เหลือ as_trans/รายการ/GL/ภาษีขาย ของเอกสาร",
+   "do": "db.query",
+   "sql": "select (select count(*) from as_trans where doc_no = :'sd') + (select count(*) from as_trans_detail where doc_no = :'sd') + (select count(*) from gl_journal where doc_no = :'sd') + (select count(*) from gl_journal_detail where doc_no = :'sd') + (select count(*) from gl_journal_vat_sale where doc_no = :'sd') + (select count(*) from cb_trans where doc_no = :'sd') + (select count(*) from gl_wht_list where doc_no = :'sd') as n",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "ลบแล้ว: as_asset_detail ล้างข้อมูลการขาย",
+   "do": "db.query",
+   "sql": "select coalesce(as_sale_date::text, '') sdt, coalesce(doc_sale_date::text, '') ddt, coalesce(doc_sale_ref, '') ref, coalesce(as_sale_to, '') sto, coalesce(as_sale_price, 0)::text price from as_asset_detail where as_code = :'fa'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "sdt",
+     "op": "same",
+     "value": ""
+    },
+    {
+     "col": "ddt",
+     "op": "same",
+     "value": ""
+    },
+    {
+     "col": "ref",
+     "op": "same",
+     "value": ""
+    },
+    {
+     "col": "sto",
+     "op": "same",
+     "value": ""
+    },
+    {
+     "col": "price",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "ลบเอกสารขายไม่ลบเอกสารค่าเสื่อม",
+   "do": "db.query",
+   "sql": "select count(*)::text n from as_trans where doc_no = :'dp' and trans_flag = 1801",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "1"
+    }
+   ]
+  },
+  {
+   "title": "ฐานข้อมูล: เอกสารขายสินทรัพย์ที่รายการซ้ายต้องแสดง (นับแถว และเลขเอกสารที่ซ้ำ)",
+   "do": "db.query",
+   "sql": "with l as (select doc_no from as_trans where trans_flag = 1802 and doc_date between date_trunc('year', (now() at time zone 'Asia/Bangkok')::date)::date and (now() at time zone 'Asia/Bangkok')::date order by doc_date desc, doc_no desc limit 500)\n select count(*)::text n, least(count(*), 30)::text shown, (least(count(*), 30) - 1)::text last, count(distinct doc_no)::text docs,\n  coalesce((select string_agg(doc_no || ' x' || c, ', ') from (select doc_no, count(*) c from l group by doc_no having count(*) > 1) d), '') dup from l",
+   "rows": 1,
+   "save": {
+    "shown": "shown",
+    "last": "last"
+   },
+   "expect": [
+    {
+     "col": "n",
+     "op": "gte",
+     "value": "1"
+    }
+   ]
+  },
+  {
+   "title": "รายการซ้ายแสดงครบตามฐานข้อมูล ({{shown}} แถว)",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"sml-datalist-scroll-container\"] tbody tr:has(> td[data-col-key=\"doc_no\"]) >> nth={{last}}"
+  },
+  {
+   "title": "รายการซ้ายไม่มีแถวเกินฐานข้อมูล (ไม่มีแถวค้างจากเอกสารเลขซ้ำ)",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_sale\"] [data-testid=\"sml-datalist-scroll-container\"] tbody tr:has(> td[data-col-key=\"doc_no\"]) >> nth={{shown}}",
+   "visible": false
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบเอกสารขายทดสอบ (ถ้ายังเหลือ)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/workflow/asset-sale",
+   "body": {
+    "op": "delete",
+    "menuName": "menu_asset_sale",
+    "docNo": "{{sd}}"
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ลบเอกสารขายที่สอง (ถ้ามี)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/workflow/asset-sale",
+   "body": {
+    "op": "delete",
+    "menuName": "menu_asset_sale",
+    "docNo": "{{sx}}"
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ลบเอกสารค่าเสื่อมทดสอบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/workflow/fa-depreciation",
+   "body": {
+    "menuName": "menu_asset_transfers",
+    "docNo": "{{dp}}",
+    "delete": true
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ลบสินทรัพย์ทดสอบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/master-detail/delete",
+   "body": {
+    "menuKey": "menu_asset_lists",
+    "key": "{{fa}}"
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือเศษสินทรัพย์/เอกสารขาย/ค่าเสื่อม/GL/ภาษีขาย ทดสอบใน smldemo",
+   "do": "db.query",
+   "sql": "select (select count(*) from as_asset where code = :'fa') + (select count(*) from as_asset_detail where as_code = :'fa') + (select count(*) from as_asset_result where as_code = :'fa')\n + (select count(*) from as_trans_detail where item_code = :'fa') + (select count(*) from as_trans where doc_no like :'pfx') + (select count(*) from as_trans_detail where doc_no like :'pfx') + (select count(*) from gl_journal where doc_no like :'pfx') + (select count(*) from gl_journal_detail where doc_no like :'pfx') + (select count(*) from gl_journal_vat_sale where doc_no like :'pfx') + (select count(*) from cb_trans where doc_no like :'pfx') + (select count(*) from gl_wht_list where doc_no like :'pfx') as left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}

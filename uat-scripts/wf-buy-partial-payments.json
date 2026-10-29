@@ -1,0 +1,670 @@
+{
+  "id": "wf-buy-partial-payments",
+  "title": "จ่ายชำระบิลซื้อเป็นงวด 2 ครั้ง: ยอดคงเหลือถูกเป๊ะ จ่ายเกินคงเหลือถูกปฏิเสธ จ่ายงวดสุดท้ายแล้วหนี้หมด",
+  "module": "purchase",
+  "lens": "api",
+  "severityOnFail": "S1",
+  "description": "ทำงานแบบผู้ใช้ Demo ผ่าน API ตัวเดียวกับหน้าจอ: สินค้า หน่วย คลัง ที่เก็บ ราคา อัตราภาษี อ่านจากบิลซื้อจริงใน smldemo ตอนรัน (สินค้าลำดับที่ 6 เรียงตามรหัส) เจ้าหนี้จริงที่ไม่มีเอกสารค้าง ยอดเงินคำนวณใน SQL · ซื้อเชื่อ 10 หน่วย → จ่ายงวด 1 = 40% ของยอดบิล (เงินสด) ตรวจรายการจ่าย เงินสดจ่าย GL เดบิตเจ้าหนี้ และยอดคงเหลือ → จ่ายงวด 2 = 35% ตรวจยอดคงเหลือ → จ่ายเกินคงเหลือ 0.01 ต้องถูกปฏิเสธและไม่ถูกบันทึก → จ่ายส่วนที่เหลือพอดี หนี้ของบิลต้องหมด และยอดจ่ายรวม 3 ใบ = ยอดบิล · ลบเอกสารทั้งหมดผ่าน API และพิสูจน์ว่าไม่เหลือแถวใด",
+  "steps": [
+    {
+      "title": "กำหนดเลขบิลซื้อทดสอบ",
+      "do": "set",
+      "name": "pu",
+      "value": "UAT-{{run.short}}-PU"
+    },
+    {
+      "title": "กำหนดเลขใบจ่ายชำระงวดที่ 1",
+      "do": "set",
+      "name": "de1",
+      "value": "UAT-{{run.short}}-DE1"
+    },
+    {
+      "title": "กำหนดเลขใบจ่ายชำระงวดที่ 2",
+      "do": "set",
+      "name": "de2",
+      "value": "UAT-{{run.short}}-DE2"
+    },
+    {
+      "title": "กำหนดเลขใบจ่ายชำระที่จ่ายเกิน",
+      "do": "set",
+      "name": "dex",
+      "value": "UAT-{{run.short}}-DEX"
+    },
+    {
+      "title": "กำหนดเลขใบจ่ายชำระงวดสุดท้าย",
+      "do": "set",
+      "name": "de3",
+      "value": "UAT-{{run.short}}-DE3"
+    },
+    {
+      "title": "กำหนดจำนวนที่ซื้อ",
+      "do": "set",
+      "name": "q_pu",
+      "value": "10"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เลือกสินค้าจริงลำดับที่ 6 (เรียงตามรหัส) ที่มีหน่วยนับ 1:1 คลังและที่เก็บจริง พร้อมราคาซื้อและอัตราภาษีจากบิลซื้อจริงล่าสุดของสินค้านั้น",
+      "do": "db.query",
+      "sql": "select x.item, x.unit, x.wh, x.shelf, x.stand, x.divide, x.price, x.rate, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today from (select distinct on (d.item_code) d.item_code as item, d.unit_code as unit, d.wh_code as wh, d.shelf_code as shelf, d.stand_value::text as stand, d.divide_value::text as divide, d.price::text as price, t.vat_rate::text as rate from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag join ic_inventory i on i.code = d.item_code join ic_unit_use u on u.ic_code = d.item_code and u.code = d.unit_code and u.stand_value = 1 and u.divide_value = 1 join ic_warehouse w on w.code = d.wh_code join ic_shelf sh on sh.code = d.shelf_code and coalesce(nullif(sh.whcode, ''), sh.wh_code) = d.wh_code where t.trans_flag = 12 and t.inquiry_type = 0 and t.vat_type = 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 and d.price > 0 and coalesce(d.discount, '') = '' and d.stand_value = 1 and d.divide_value = 1 and coalesce(d.tax_type, 0) = 0 and coalesce(d.is_permium, 0) = 0 and coalesce(i.item_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0 order by d.item_code, t.doc_date desc, t.roworder desc) x order by x.item offset 5 limit 1",
+      "rows": 1,
+      "save": {
+        "item": "item",
+        "unit": "unit",
+        "wh": "wh",
+        "shelf": "shelf",
+        "stand": "stand",
+        "divide": "divide",
+        "price": "price",
+        "rate": "rate",
+        "today": "today"
+      }
+    },
+    {
+      "title": "เลือกเจ้าหนี้จริงที่ยังไม่มีหนี้ค้าง/เอกสารเจ้าหนี้ค้างอยู่ในระบบ (เพื่อให้รายการหนี้ค้างที่ระบบแสดงมีเฉพาะเอกสารทดสอบนี้)",
+      "do": "db.query",
+      "sql": "select code as supp from (select s.code, row_number() over (order by s.code) as rn, count(*) over () as n from ap_supplier s where coalesce(s.status, 0) = 0 and not exists (select 1 from ic_trans t where t.cust_code = s.code and coalesce(t.last_status, 0) = 0 and t.trans_flag in (10, 11, 12, 14, 16, 20, 25, 81, 83, 85, 87, 89, 91, 260, 262, 264, 310, 315, 316, 317)) and not exists (select 1 from ap_ar_trans a where a.cust_code = s.code and coalesce(a.last_status, 0) = 0)) x where rn = (5 % n) + 1",
+      "rows": 1,
+      "save": {
+        "supp": "supp"
+      }
+    },
+    {
+      "title": "คำนวณยอดบิลซื้อ ยอดจ่ายแต่ละงวด และยอดคงเหลือ จากราคาและอัตราภาษีจริง",
+      "do": "db.query",
+      "sql": "with m as (select round(:'q_pu'::numeric * :'price'::numeric, 2)::text as pu_sum, round(round(:'q_pu'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as pu_vat, (round(:'q_pu'::numeric * :'price'::numeric, 2) + round(round(:'q_pu'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as pu_total), a as (select *, round(pu_total::numeric * 0.4, 2) as p1, round(pu_total::numeric * 0.35, 2) as p2 from m) select pu_sum, pu_vat, pu_total, p1::text as p1, (pu_total::numeric - p1)::text as bal1, p2::text as p2, (pu_total::numeric - p1 - p2)::text as bal2, (pu_total::numeric - p1 - p2 + 0.01)::text as over from a",
+      "rows": 1,
+      "save": {
+        "pu_sum": "pu_sum",
+        "pu_vat": "pu_vat",
+        "pu_total": "pu_total",
+        "p1": "p1",
+        "bal1": "bal1",
+        "p2": "p2",
+        "bal2": "bal2",
+        "over": "over"
+      }
+    },
+    {
+      "title": "บันทึกซื้อเชื่อ (บิลซื้อ ภาษีแยกนอก)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{pu}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 12,
+        "inquiryType": 0,
+        "custCode": "{{supp}}",
+        "docFormatCode": "PU",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "{{stand}}",
+            "divideValue": "{{divide}}",
+            "qty": "{{q_pu}}",
+            "price": "{{price}}",
+            "sumAmount": "{{pu_sum}}",
+            "taxType": 0
+          }
+        ],
+        "taxDocNo": "{{pu}}",
+        "taxDocDate": "{{today}}"
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{pu}}"
+        }
+      ]
+    },
+    {
+      "title": "หัวบิลซื้อ: ฐาน ภาษี รวม ตรงที่คำนวณ",
+      "do": "db.query",
+      "sql": "select total_before_vat, total_vat_value, total_amount, vat_rate from ic_trans where doc_no = :'pu' and trans_flag = 12",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{pu_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{pu_vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{pu_total}}"
+        },
+        {
+          "col": "vat_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        }
+      ]
+    },
+    {
+      "title": "อ่านบัญชีเจ้าหนี้และบัญชีภาษีซื้อที่บิลซื้อทดสอบนี้ลงไว้จริง (ใช้เทียบกับเอกสารถัดไป)",
+      "do": "db.query",
+      "sql": "select (select account_code from gl_journal_detail where doc_no = :'pu' and credit = :'pu_total'::numeric order by account_code limit 1) as ap_acct, (select account_code from gl_journal_detail where doc_no = :'pu' and debit = :'pu_vat'::numeric order by account_code limit 1) as vat_acct",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "ap_acct",
+          "op": "exists",
+          "value": ""
+        },
+        {
+          "col": "vat_acct",
+          "op": "exists",
+          "value": ""
+        }
+      ],
+      "save": {
+        "ap_acct": "ap_acct",
+        "vat_acct": "vat_acct"
+      }
+    },
+    {
+      "title": "หนี้ค้างก่อนจ่าย: บิลซื้อเต็มยอด",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/bills",
+      "body": {
+        "transFlag": 19,
+        "custCode": "{{supp}}",
+        "docDate": "{{today}}",
+        "docNo": ""
+      },
+      "expect": [
+        {
+          "path": "data.length",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "path": "data.0.billingNo",
+          "op": "eq",
+          "value": "{{pu}}"
+        },
+        {
+          "path": "data.0.balanceRef",
+          "op": "eq",
+          "value": "{{pu_total}}"
+        }
+      ]
+    },
+    {
+      "title": "จ่ายชำระงวดที่ 1 (40% เงินสด)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/save",
+      "body": {
+        "kind": "ap_ar_trans",
+        "isNew": true,
+        "docNo": "{{de1}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 19,
+        "custCode": "{{supp}}",
+        "docFormatCode": "DE",
+        "remark": "{{run.tag}}",
+        "bills": [
+          {
+            "billingNo": "{{pu}}",
+            "billingDate": "{{today}}",
+            "billType": 12,
+            "sumDebtAmount": "{{pu_total}}",
+            "balanceRef": "{{pu_total}}",
+            "sumPayMoney": "{{p1}}"
+          }
+        ],
+        "pay": {
+          "cash": "{{p1}}"
+        }
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{de1}}"
+        }
+      ]
+    },
+    {
+      "title": "รายการจ่ายงวด 1: อ้างบิลซื้อ ยอดจ่ายตรง",
+      "do": "db.query",
+      "sql": "select billing_no, bill_type, sum_pay_money from ap_ar_trans_detail where doc_no = :'de1' and trans_flag = 19",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "billing_no",
+          "op": "eq",
+          "value": "{{pu}}"
+        },
+        {
+          "col": "bill_type",
+          "op": "eq",
+          "value": "12"
+        },
+        {
+          "col": "sum_pay_money",
+          "op": "eq",
+          "value": "{{p1}}"
+        }
+      ]
+    },
+    {
+      "title": "เงินสดจ่ายงวด 1 ตรงยอดจ่าย",
+      "do": "db.query",
+      "sql": "select coalesce(cash_amount, 0) as cash_amount from cb_trans where doc_no = :'de1' and trans_flag = 19",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cash_amount",
+          "op": "eq",
+          "value": "{{p1}}"
+        }
+      ]
+    },
+    {
+      "title": "GL งวด 1: สมดุล และเดบิตบัญชีเจ้าหนี้ (บัญชีเดียวกับบิลซื้อ) = ยอดจ่าย",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit) filter (where account_code = :'ap_acct'), 0) as ap_debit from gl_journal_detail where doc_no = :'de1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "ap_debit",
+          "op": "eq",
+          "value": "{{p1}}"
+        }
+      ]
+    },
+    {
+      "title": "หนี้คงเหลือหลังงวด 1 = ยอดบิล − งวด 1",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/bills",
+      "body": {
+        "transFlag": 19,
+        "custCode": "{{supp}}",
+        "docDate": "{{today}}",
+        "docNo": ""
+      },
+      "expect": [
+        {
+          "path": "data.length",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "path": "data.0.billingNo",
+          "op": "eq",
+          "value": "{{pu}}"
+        },
+        {
+          "path": "data.0.balanceRef",
+          "op": "eq",
+          "value": "{{bal1}}"
+        }
+      ]
+    },
+    {
+      "title": "จ่ายชำระงวดที่ 2 (35% เงินสด)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/save",
+      "body": {
+        "kind": "ap_ar_trans",
+        "isNew": true,
+        "docNo": "{{de2}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 19,
+        "custCode": "{{supp}}",
+        "docFormatCode": "DE",
+        "remark": "{{run.tag}}",
+        "bills": [
+          {
+            "billingNo": "{{pu}}",
+            "billingDate": "{{today}}",
+            "billType": 12,
+            "sumDebtAmount": "{{pu_total}}",
+            "balanceRef": "{{bal1}}",
+            "sumPayMoney": "{{p2}}"
+          }
+        ],
+        "pay": {
+          "cash": "{{p2}}"
+        }
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{de2}}"
+        }
+      ]
+    },
+    {
+      "title": "รายการจ่ายงวด 2: ยอดจ่ายตรง",
+      "do": "db.query",
+      "sql": "select sum_pay_money from ap_ar_trans_detail where doc_no = :'de2' and trans_flag = 19",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "sum_pay_money",
+          "op": "eq",
+          "value": "{{p2}}"
+        }
+      ]
+    },
+    {
+      "title": "GL งวด 2: สมดุล และเดบิตบัญชีเจ้าหนี้ = ยอดจ่าย",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit) filter (where account_code = :'ap_acct'), 0) as ap_debit from gl_journal_detail where doc_no = :'de2'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "ap_debit",
+          "op": "eq",
+          "value": "{{p2}}"
+        }
+      ]
+    },
+    {
+      "title": "หนี้คงเหลือหลังงวด 2 = ยอดบิล − งวด 1 − งวด 2",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/bills",
+      "body": {
+        "transFlag": 19,
+        "custCode": "{{supp}}",
+        "docDate": "{{today}}",
+        "docNo": ""
+      },
+      "expect": [
+        {
+          "path": "data.length",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "path": "data.0.balanceRef",
+          "op": "eq",
+          "value": "{{bal2}}"
+        }
+      ]
+    },
+    {
+      "title": "จ่ายเกินยอดคงเหลือ 0.01 ต้องถูกปฏิเสธ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/save",
+      "body": {
+        "kind": "ap_ar_trans",
+        "isNew": true,
+        "docNo": "{{dex}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 19,
+        "custCode": "{{supp}}",
+        "docFormatCode": "DE",
+        "remark": "{{run.tag}}",
+        "bills": [
+          {
+            "billingNo": "{{pu}}",
+            "billingDate": "{{today}}",
+            "billType": 12,
+            "sumDebtAmount": "{{pu_total}}",
+            "balanceRef": "{{bal2}}",
+            "sumPayMoney": "{{over}}"
+          }
+        ],
+        "pay": {
+          "cash": "{{over}}"
+        }
+      },
+      "expectStatus": [
+        400,
+        409,
+        422
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ใบจ่ายที่จ่ายเกินต้องไม่ถูกบันทึก",
+      "do": "db.query",
+      "sql": "select count(*) as n from ap_ar_trans where doc_no = :'dex'",
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "หนี้คงเหลือยังเท่าเดิมหลังถูกปฏิเสธ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/bills",
+      "body": {
+        "transFlag": 19,
+        "custCode": "{{supp}}",
+        "docDate": "{{today}}",
+        "docNo": ""
+      },
+      "expect": [
+        {
+          "path": "data.length",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "path": "data.0.balanceRef",
+          "op": "eq",
+          "value": "{{bal2}}"
+        }
+      ]
+    },
+    {
+      "title": "จ่ายชำระงวดสุดท้าย เท่ายอดคงเหลือพอดี",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/save",
+      "body": {
+        "kind": "ap_ar_trans",
+        "isNew": true,
+        "docNo": "{{de3}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 19,
+        "custCode": "{{supp}}",
+        "docFormatCode": "DE",
+        "remark": "{{run.tag}}",
+        "bills": [
+          {
+            "billingNo": "{{pu}}",
+            "billingDate": "{{today}}",
+            "billType": 12,
+            "sumDebtAmount": "{{pu_total}}",
+            "balanceRef": "{{bal2}}",
+            "sumPayMoney": "{{bal2}}"
+          }
+        ],
+        "pay": {
+          "cash": "{{bal2}}"
+        }
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{de3}}"
+        }
+      ]
+    },
+    {
+      "title": "ยอดจ่ายรวม 3 งวด = ยอดบิลซื้อ",
+      "do": "db.query",
+      "sql": "select coalesce(sum(sum_pay_money), 0) as paid from ap_ar_trans_detail where billing_no = :'pu' and trans_flag = 19 and doc_no in (:'de1', :'de2', :'de3')",
+      "expect": [
+        {
+          "col": "paid",
+          "op": "eq",
+          "value": "{{pu_total}}"
+        }
+      ]
+    },
+    {
+      "title": "หนี้ค้างหลังจ่ายครบ: ไม่มีบิลค้าง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/bills",
+      "body": {
+        "transFlag": 19,
+        "custCode": "{{supp}}",
+        "docDate": "{{today}}",
+        "docNo": ""
+      },
+      "expect": [
+        {
+          "path": "data.length",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบใบจ่ายงวดสุดท้าย",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/delete",
+      "body": {
+        "kind": "ap_ar_trans",
+        "docNo": "{{de3}}",
+        "transFlag": 19
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบจ่ายที่จ่ายเกิน (ถ้าระบบรับไว้)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/delete",
+      "body": {
+        "kind": "ap_ar_trans",
+        "docNo": "{{dex}}",
+        "transFlag": 19
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบจ่ายงวด 2",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/delete",
+      "body": {
+        "kind": "ap_ar_trans",
+        "docNo": "{{de2}}",
+        "transFlag": 19
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบจ่ายงวด 1",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/delete",
+      "body": {
+        "kind": "ap_ar_trans",
+        "docNo": "{{de1}}",
+        "transFlag": 19
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบบิลซื้อทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{pu}}",
+        "transFlag": 12
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo (หัว รายการ เจ้าหนี้ จ่ายชำระ มัดจำ GL ภาษีซื้อ หัก ณ ที่จ่าย)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'pu', :'de1', :'de2', :'dex', :'de3')) + (select count(*) from ic_trans_detail where doc_no in (:'pu', :'de1', :'de2', :'dex', :'de3')) + (select count(*) from ap_ar_trans where doc_no in (:'pu', :'de1', :'de2', :'dex', :'de3')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'pu', :'de1', :'de2', :'dex', :'de3')) + (select count(*) from cb_trans where doc_no in (:'pu', :'de1', :'de2', :'dex', :'de3')) + (select count(*) from cb_trans_detail where doc_no in (:'pu', :'de1', :'de2', :'dex', :'de3')) + (select count(*) from gl_journal where doc_no in (:'pu', :'de1', :'de2', :'dex', :'de3')) + (select count(*) from gl_journal_detail where doc_no in (:'pu', :'de1', :'de2', :'dex', :'de3')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'pu', :'de1', :'de2', :'dex', :'de3')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'pu', :'de1', :'de2', :'dex', :'de3')) + (select count(*) from gl_wht_list where doc_no in (:'pu', :'de1', :'de2', :'dex', :'de3')) + (select count(*) from gl_wht_list_detail where doc_no in (:'pu', :'de1', :'de2', :'dex', :'de3')) as left_rows",
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

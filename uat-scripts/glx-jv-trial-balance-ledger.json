@@ -1,0 +1,429 @@
+{
+ "id": "glx-jv-trial-balance-ledger",
+ "title": "สมุดรายวันทั่วไป: บันทึกรายการสมดุลแล้วยอดขึ้นงบทดลองและบัญชีแยกประเภทตรงเป๊ะ รายการไม่สมดุลต้องถูกปฏิเสธ",
+ "module": "gl",
+ "lens": "api",
+ "severityOnFail": "S1",
+ "description": "ทำงานผ่าน API เดียวกับหน้าจอสมุดรายวันทั่วไป (menu_gl_journal → POST /api/process/doc/save kind gl_journal) · เลือกวันที่ว่าง (ไม่มีรายการ GL เลย, งวดบัญชีเปิด, ย้อนหลัง ≥3 วัน) บัญชีค่าใช้จ่ายระดับย่อยที่ใช้บ่อยที่สุดจริง บัญชีเจ้าหนี้ตามกฎเดียวกับ ERP (resolveChartAccount 2111/2110/2100, service.go:1504) ยอดเงิน = ยอดเดบิตล่าสุดจริงของบัญชีค่าใช้จ่าย สมุดรายวันเล่มแรกจริง (ไม่ใช้ค่าว่างเพราะ B10-007) · บันทึก UAT-<รอบ>-JV เดบิตค่าใช้จ่าย/เครดิตหนี้สิน → ตรวจ gl_journal/gl_journal_detail ยอดตรง → รายงานงบทดลอง (menu_gl_report_trial_balance) ช่วงบัญชีละ 1 รหัส ยอดประจำงวดตรงเป๊ะ → บัญชีแยกประเภท (menu_gl_report_sheet) กรองเลขเอกสาร ยอดตรง · บันทึก UAT-<รอบ>-JVX เดบิต≠เครดิต ต้องได้ 400 และไม่มีแถวใน DB · cleanup ลบผ่าน /api/process/doc/delete แล้วตรวจว่าไม่เหลือแถว",
+ "timeoutMs": 300000,
+ "steps": [
+  {
+   "title": "กำหนดเลขเอกสารรายวันทดสอบ (สมดุล)",
+   "do": "set",
+   "name": "jv",
+   "value": "UAT-{{run.short}}-JV"
+  },
+  {
+   "title": "กำหนดเลขเอกสารรายวันทดสอบ (ไม่สมดุล)",
+   "do": "set",
+   "name": "jvx",
+   "value": "UAT-{{run.short}}-JVX"
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "เลือกวันที่ว่าง บัญชีค่าใช้จ่าย/หนี้สิน ยอดเงิน และสมุดรายวันจากข้อมูลจริง",
+   "do": "db.query",
+   "sql": "with qd as (\n select g::date as qd from generate_series((now() at time zone 'Asia/Bangkok')::date - 40, (now() at time zone 'Asia/Bangkok')::date - 3, interval '1 day') g\n where not exists (select 1 from gl_journal_detail x where x.doc_date = g::date)\n   and exists (select 1 from erp_account_period p where g::date between p.date_start and p.date_end and coalesce(p.status, 0) = 0)\n order by g desc limit 1),\nleaf as (select c.code, coalesce(c.name_1, '') nm, c.account_type t from gl_chart_of_account c where not exists (select 1 from gl_chart_of_account k where k.main_code = c.code)),\nused as (select l.code, l.nm, l.t, count(*) n, (array_agg(d.debit order by d.doc_date desc, d.roworder desc) filter (where d.debit > 0))[1] lastdr\n from leaf l join gl_journal_detail d on d.account_code = l.code and d.doc_no not like 'UAT%' group by 1, 2, 3)\nselect to_char(q.qd, 'YYYY-MM-DD') qd, e.code exp, e.nm expname, a.code liab, a.nm liabname, round(e.lastdr, 2)::text amt, (round(e.lastdr, 2) + 1)::text bad, b.code book\nfrom qd q,\n (select * from used where t = 4 and lastdr > 0 order by n desc, code limit 1) e,\n (select code, coalesce(name_1, '') nm from gl_chart_of_account, (values (0, '2111'), (1, '2110'), (2, '2100')) p(o, c)\n where code = p.c or code like p.c || '-%' order by p.o, (code = p.c) desc, code limit 1) a,\n (select code from gl_journal_book order by code limit 1) b",
+   "rows": 1,
+   "save": {
+    "qd": "qd",
+    "exp": "exp",
+    "expname": "expname",
+    "liab": "liab",
+    "liabname": "liabname",
+    "amt": "amt",
+    "bad": "bad",
+    "book": "book"
+   }
+  },
+  {
+   "title": "บันทึกรายการรายวันที่เดบิต = เครดิต",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/save",
+   "body": {
+    "kind": "gl_journal",
+    "isNew": true,
+    "docNo": "{{jv}}",
+    "docDate": "{{qd}}",
+    "transFlag": 0,
+    "bookCode": "{{book}}",
+    "docFormatCode": "JV",
+    "remark": "{{run.tag}}",
+    "glLines": [
+     {
+      "accountCode": "{{exp}}",
+      "accountName": "{{expname}}",
+      "debit": "{{amt}}",
+      "credit": "0",
+      "remark": "{{run.tag}}"
+     },
+     {
+      "accountCode": "{{liab}}",
+      "accountName": "{{liabname}}",
+      "debit": "0",
+      "credit": "{{amt}}",
+      "remark": "{{run.tag}}"
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    }
+   ]
+  },
+  {
+   "title": "หัวรายวันในฐานข้อมูล: เดบิต = เครดิต = ยอดที่บันทึก และใช้สมุดรายวันที่เลือก",
+   "do": "db.query",
+   "sql": "select debit::text dr, credit::text cr, book_code, to_char(doc_date, 'YYYY-MM-DD') dd from gl_journal where doc_no = :'jv'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "dr",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "col": "cr",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "col": "book_code",
+     "op": "eq",
+     "value": "{{book}}"
+    },
+    {
+     "col": "dd",
+     "op": "eq",
+     "value": "{{qd}}"
+    }
+   ]
+  },
+  {
+   "title": "รายวันที่บันทึกมือต้องมี trans_direct = 1 (ไม่ถูกประมวลผลบัญชีใหม่ลบทิ้ง) — ต้องใช้ backend ≥ 3ca3b07b (docs.go:292)",
+   "do": "db.query",
+   "sql": "select coalesce(trans_direct, 0)::text direct from gl_journal where doc_no = :'jv'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "direct",
+     "op": "eq",
+     "value": "1"
+    }
+   ]
+  },
+  {
+   "title": "รายละเอียดรายวัน: เดบิตบัญชีค่าใช้จ่ายและเครดิตบัญชีหนี้สินตรงยอด",
+   "do": "db.query",
+   "sql": "select coalesce(sum(debit) filter (where account_code = :'exp'), 0)::text dr_exp, coalesce(sum(credit) filter (where account_code = :'liab'), 0)::text cr_liab, sum(debit)::text dr, sum(credit)::text cr, count(*)::text n from gl_journal_detail where doc_no = :'jv'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "dr_exp",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "col": "cr_liab",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "col": "dr",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "col": "cr",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "2"
+    }
+   ]
+  },
+  {
+   "title": "วันที่ทดสอบยังมีแค่รายการของเราใน GL (กันเอกสารอื่นปน)",
+   "do": "db.query",
+   "sql": "select count(distinct doc_no)::text docs from gl_journal_detail where doc_date = :'qd'::date",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "docs",
+     "op": "eq",
+     "value": "1"
+    }
+   ]
+  },
+  {
+   "title": "งบทดลอง: บัญชีค่าใช้จ่าย ยอดประจำงวดเดบิต = ยอดที่บันทึก",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/report/run",
+   "body": {
+    "menuKey": "menu_gl_report_trial_balance",
+    "mode": "summary",
+    "dateFrom": "{{qd}}",
+    "dateTo": "{{qd}}",
+    "fromCode": "{{exp}}",
+    "toCode": "{{exp}}",
+    "orderBy": "",
+    "keyword": "",
+    "viewDetail": false
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    },
+    {
+     "path": "data.rows.0.เลขที่บัญชี",
+     "op": "eq",
+     "value": "{{exp}}"
+    },
+    {
+     "path": "data.totals.ยอดประจำงวด เดบิต",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.totals.ยอดประจำงวด เครดิต",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "งบทดลอง: บัญชีหนี้สิน ยอดประจำงวดเครดิต = ยอดที่บันทึก",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/report/run",
+   "body": {
+    "menuKey": "menu_gl_report_trial_balance",
+    "mode": "summary",
+    "dateFrom": "{{qd}}",
+    "dateTo": "{{qd}}",
+    "fromCode": "{{liab}}",
+    "toCode": "{{liab}}",
+    "orderBy": "",
+    "keyword": "",
+    "viewDetail": false
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    },
+    {
+     "path": "data.rows.0.เลขที่บัญชี",
+     "op": "eq",
+     "value": "{{liab}}"
+    },
+    {
+     "path": "data.totals.ยอดประจำงวด เครดิต",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.totals.ยอดประจำงวด เดบิต",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "บัญชีแยกประเภท: บัญชีค่าใช้จ่ายมีบรรทัดเอกสารของเรา เดบิตตรงยอด",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/report/run",
+   "body": {
+    "menuKey": "menu_gl_report_sheet",
+    "mode": "summary",
+    "dateFrom": "{{qd}}",
+    "dateTo": "{{qd}}",
+    "fromCode": "{{exp}}",
+    "toCode": "{{exp}}",
+    "orderBy": "",
+    "keyword": "{{jv}}",
+    "viewDetail": false
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    },
+    {
+     "path": "data.rows.2.เอกสาร",
+     "op": "eq",
+     "value": "{{jv}}"
+    },
+    {
+     "path": "data.rows.2.เดบิต",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.totals.เดบิต",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.totals.เครดิต",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "บัญชีแยกประเภท: บัญชีหนี้สินมีบรรทัดเอกสารของเรา เครดิตตรงยอด",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/report/run",
+   "body": {
+    "menuKey": "menu_gl_report_sheet",
+    "mode": "summary",
+    "dateFrom": "{{qd}}",
+    "dateTo": "{{qd}}",
+    "fromCode": "{{liab}}",
+    "toCode": "{{liab}}",
+    "orderBy": "",
+    "keyword": "{{jv}}",
+    "viewDetail": false
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    },
+    {
+     "path": "data.rows.2.เอกสาร",
+     "op": "eq",
+     "value": "{{jv}}"
+    },
+    {
+     "path": "data.rows.2.เครดิต",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.totals.เครดิต",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.totals.เดบิต",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "บันทึกรายการเดบิต ≠ เครดิต ต้องถูกปฏิเสธ (400)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/save",
+   "body": {
+    "kind": "gl_journal",
+    "isNew": true,
+    "docNo": "{{jvx}}",
+    "docDate": "{{qd}}",
+    "transFlag": 0,
+    "bookCode": "{{book}}",
+    "docFormatCode": "JV",
+    "remark": "{{run.tag}}",
+    "glLines": [
+     {
+      "accountCode": "{{exp}}",
+      "accountName": "{{expname}}",
+      "debit": "{{amt}}",
+      "credit": "0",
+      "remark": "{{run.tag}}"
+     },
+     {
+      "accountCode": "{{liab}}",
+      "accountName": "{{liabname}}",
+      "debit": "0",
+      "credit": "{{bad}}",
+      "remark": "{{run.tag}}"
+     }
+    ]
+   },
+   "expectStatus": 400
+  },
+  {
+   "title": "รายการไม่สมดุลต้องไม่ถูกบันทึกลงฐานข้อมูล",
+   "do": "db.query",
+   "sql": "select ((select count(*) from gl_journal where doc_no = :'jvx') + (select count(*) from gl_journal_detail where doc_no = :'jvx'))::text n",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบรายการรายวันทดสอบ (สมดุล)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/delete",
+   "body": {
+    "kind": "gl_journal",
+    "docNo": "{{jv}}"
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ลบรายการรายวันทดสอบ (ไม่สมดุล ถ้าหลุดเข้าไป)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/delete",
+   "body": {
+    "kind": "gl_journal",
+    "docNo": "{{jvx}}"
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo",
+   "do": "db.query",
+   "sql": "select (select count(*) from gl_journal where doc_no in (:'jv', :'jvx')) + (select count(*) from gl_journal_detail where doc_no in (:'jv', :'jvx')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'jv', :'jvx')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'jv', :'jvx')) + (select count(*) from gl_wht_list where doc_no in (:'jv', :'jvx')) + (select count(*) from gl_wht_list_detail where doc_no in (:'jv', :'jvx')) as left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}

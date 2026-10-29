@@ -1,0 +1,325 @@
+{
+  "id": "ui-prc-gl-close-preview",
+  "title": "หน้าจอปิดงวดบัญชี: ดูตัวอย่างรายการปิดงวดของวันทดสอบ (ไม่กดบันทึกปิดงวด)",
+  "module": "gl",
+  "lens": "screen",
+  "severityOnFail": "S1",
+  "description": "สร้างใบสำคัญค่าใช้จ่ายทดสอบ 1 ใบในวันที่ไม่มีรายการ GL อื่น แล้วใช้หน้าจอ menu_gl_end_of_period กรอกช่วงวันที่ = วันนั้น + บัญชีปิดเข้า กดประมวลผล (ดูตัวอย่าง save=false อ่านอย่างเดียว workflow.go:824-832) ตรวจบรรทัดปิดบัญชี/ขาดทุนสุทธิ/รวมเดบิต/รวมเครดิต ตรงยอดที่คำนวณจาก SQL ตรวจข้อความเตือน (งวดที่ไม่มี, ช่วงวันที่กลับด้าน, บันทึกโดยไม่ระบุเลขที่/สมุด ซึ่งถูกปฏิเสธก่อนเปิด transaction workflow.go:834) และยืนยันว่าไม่มีเอกสารปิดงวดเกิดขึ้น ห้ามกดบันทึกปิดงวดจริง",
+  "timeoutMs": 300000,
+  "steps": [
+    {
+      "title": "กำหนดเลขใบสำคัญทดสอบ",
+      "do": "set",
+      "name": "jc",
+      "value": "UAT-{{run.short}}-GC"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เลือกวันที่ว่างในงวดที่ยังเปิด บัญชีค่าใช้จ่าย/คู่บัญชี/บัญชีปิดเข้า ยอดเงิน และสมุดรายวันจากข้อมูลจริง",
+      "do": "db.query",
+      "sql": "with qd as (\n select g::date as qd from generate_series((now() at time zone 'Asia/Bangkok')::date - 75, (now() at time zone 'Asia/Bangkok')::date - 45, interval '1 day') g\n where not exists (select 1 from gl_journal_detail x where x.doc_date = g::date)\n   and not exists (select 1 from gl_journal x where x.doc_date = g::date)\n   and exists (select 1 from erp_account_period p where g::date between p.date_start and p.date_end and coalesce(p.status, 0) = 0)\n order by g desc limit 1),\nleaf as (select c.code, coalesce(c.name_1, '') nm, c.account_type t from gl_chart_of_account c where coalesce(c.status, 0) = 0 and not exists (select 1 from gl_chart_of_account k where k.main_code = c.code)),\nused as (select l.code, l.nm, l.t, count(*) n, (array_agg(d.debit order by d.doc_date desc, d.roworder desc) filter (where d.debit > 0))[1] lastdr\n from leaf l join gl_journal_detail d on d.account_code = l.code and d.doc_no not like 'UAT%' group by 1, 2, 3)\nselect to_char(q.qd, 'YYYY-MM-DD') qd, to_char(q.qd, 'DD/MM/YYYY') qdmy, to_char(q.qd + 1, 'DD/MM/YYYY') qdnext, e.code exp, e.nm expname, a.code liab, a.nm liabname, round(e.lastdr, 2)::text amt, to_char(round(e.lastdr, 2), 'FM999,999,999,990.00') amtfmt, b.code book, eq.code eqacc\nfrom qd q,\n (select * from used where t = 4 and lastdr > 0 order by n desc, code limit 1) e,\n (select * from used where t in (0, 1) order by n desc, code limit 1) a,\n (select code from gl_journal_book order by code limit 1) b,\n (select c.code from gl_chart_of_account c where c.account_type = 2 and coalesce(c.status, 0) = 0 and coalesce(c.main_code, '') <> '' and not exists (select 1 from gl_chart_of_account k where k.main_code = c.code) order by c.code desc limit 1) eq",
+      "rows": 1,
+      "save": {
+        "qd": "qd",
+        "qdmy": "qdmy",
+        "qdnext": "qdnext",
+        "exp": "exp",
+        "expname": "expname",
+        "liab": "liab",
+        "liabname": "liabname",
+        "amt": "amt",
+        "amtfmt": "amtfmt",
+        "book": "book",
+        "eqacc": "eqacc"
+      }
+    },
+    {
+      "title": "บันทึกใบสำคัญค่าใช้จ่ายทดสอบผ่าน API",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/save",
+      "body": {
+        "kind": "gl_journal",
+        "isNew": true,
+        "docNo": "{{jc}}",
+        "docDate": "{{qd}}",
+        "transFlag": 0,
+        "bookCode": "{{book}}",
+        "docFormatCode": "JV",
+        "remark": "{{run.tag}}",
+        "glLines": [
+          {
+            "accountCode": "{{exp}}",
+            "accountName": "{{expname}}",
+            "debit": "{{amt}}",
+            "credit": "0",
+            "remark": "{{run.tag}}"
+          },
+          {
+            "accountCode": "{{liab}}",
+            "accountName": "{{liabname}}",
+            "debit": "0",
+            "credit": "{{amt}}",
+            "remark": "{{run.tag}}"
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        }
+      ]
+    },
+    {
+      "title": "วันที่ทดสอบมีแค่ใบสำคัญของเราใน GL",
+      "do": "db.query",
+      "sql": "select count(distinct doc_no)::text docs, max(doc_no) doc from gl_journal_detail where doc_date = :'qd'::date",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "docs",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "doc",
+          "op": "eq",
+          "value": "{{jc}}"
+        }
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอปิดงวดบัญชี",
+      "do": "ui.openMenu",
+      "key": "menu_gl_end_of_period"
+    },
+    {
+      "title": "ก่อนประมวลผล ปุ่มบันทึกต้องกดไม่ได้",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] button:has-text(\"บันทึก\"):not(:has-text(\"JSON\"))[disabled]"
+    },
+    {
+      "title": "กรอกงวดบัญชีที่ไม่มีอยู่ (999)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> label:text-is(\"งวดบัญชีที่ปิดงวด\")) input",
+      "value": "999"
+    },
+    {
+      "title": "กดประมวลผล (ดูตัวอย่าง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] button:has(span:text-is(\"ประมวลผล\"))"
+    },
+    {
+      "title": "ต้องแจ้งว่าไม่พบงวดบัญชีที่ 999",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div.bg-rose-50",
+      "text": "ไม่พบงวดบัญชีที่ 999"
+    },
+    {
+      "title": "ล้างช่องงวดบัญชี",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> label:text-is(\"งวดบัญชีที่ปิดงวด\")) input",
+      "value": ""
+    },
+    {
+      "title": "กรอกจากวันที่ (วันถัดไป)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> label:text-is(\"จากวันที่\")) input[type=\"text\"]",
+      "value": "{{qdnext}}"
+    },
+    {
+      "title": "ออกจากช่องจากวันที่",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> label:text-is(\"จากวันที่\")) input[type=\"text\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกถึงวันที่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> label:text-is(\"ถึงวันที่\")) input[type=\"text\"]",
+      "value": "{{qdmy}}"
+    },
+    {
+      "title": "ออกจากช่องถึงวันที่",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> label:text-is(\"ถึงวันที่\")) input[type=\"text\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกบัญชีปิดเข้ากำไรขาดทุนสุทธิ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> label:text-is(\"ปิดเข้าบัญชีกำไรขาดทุนสุทธิ\")) input",
+      "value": "{{eqacc}}"
+    },
+    {
+      "title": "จากวันที่มากกว่าถึงวันที่ แล้วกดประมวลผล",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] button:has(span:text-is(\"ประมวลผล\"))"
+    },
+    {
+      "title": "ต้องแจ้งให้ระบุช่วงวันที่ให้ถูกต้อง",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div.bg-rose-50",
+      "text": "ช่วงวันที่ให้ถูกต้อง"
+    },
+    {
+      "title": "กรอกจากวันที่ = วันทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> label:text-is(\"จากวันที่\")) input[type=\"text\"]",
+      "value": "{{qdmy}}"
+    },
+    {
+      "title": "ออกจากช่องจากวันที่ = วันทดสอบ",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> label:text-is(\"จากวันที่\")) input[type=\"text\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "กดประมวลผล (ดูตัวอย่างเท่านั้น)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] button:has(span:text-is(\"ประมวลผล\"))"
+    },
+    {
+      "title": "ตารางตัวอย่างมี 2 บรรทัด (ค่าใช้จ่ายของเรา + บัญชีปิดเข้า)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] span:has-text(\"รายการ (\")",
+      "text": "รายการ (2 แถว)",
+      "op": "eq"
+    },
+    {
+      "title": "บรรทัดค่าใช้จ่ายถูกกลับยอดด้วยยอดเงินตรงเป๊ะ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] tbody tr:has(td:text-is(\"{{exp}}\"))",
+      "text": "{{amtfmt}}"
+    },
+    {
+      "title": "บรรทัดบัญชีปิดเข้าแสดงยอดเงินตรงเป๊ะ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] tbody tr:has(td:text-is(\"{{eqacc}}\"))",
+      "text": "{{amtfmt}}"
+    },
+    {
+      "title": "สรุปช่วงวันที่ = วันทดสอบ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> span:text-is(\"ช่วงวันที่\"))",
+      "text": "{{qd}} ถึง {{qd}}"
+    },
+    {
+      "title": "สรุปขาดทุนสุทธิ = ยอดค่าใช้จ่ายของเรา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> span:text-is(\"ขาดทุนสุทธิ\"))",
+      "text": "{{amtfmt}}"
+    },
+    {
+      "title": "สรุปรวมเดบิต = ยอดของเรา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> span:text-is(\"รวมเดบิต\"))",
+      "text": "{{amtfmt}}"
+    },
+    {
+      "title": "สรุปรวมเครดิต = ยอดของเรา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> span:text-is(\"รวมเครดิต\"))",
+      "text": "{{amtfmt}}"
+    },
+    {
+      "title": "หลังดูตัวอย่าง ปุ่มบันทึกกดได้ (แต่สคริปต์นี้ไม่กดบันทึกปิดงวดจริง)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] button:has-text(\"บันทึก\"):not(:has-text(\"JSON\")):not([disabled])"
+    },
+    {
+      "title": "ดูตัวอย่างแล้วไม่มีเอกสารปิดงวดเกิดขึ้น และไม่มีรายการ GL อื่นในวันทดสอบ",
+      "do": "db.query",
+      "sql": "select ((select count(*) from gl_journal where doc_date = :'qd'::date and trans_flag in (1998, 1999)) + (select count(*) from gl_journal_detail where doc_date = :'qd'::date and doc_no <> :'jc') + (select count(*) from gl_trans where doc_date = :'qd'::date and trans_flag in (1998, 1999)))::text n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ล้างสมุดรายวันปิดงวด (ว่าง)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> label:text-is(\"สมุดรายวันปิดงวด\")) input",
+      "value": ""
+    },
+    {
+      "title": "ล้างเลขที่เอกสารปิดงวด (ว่าง)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div:has(> label:text-is(\"เลขที่เอกสารปิดงวดบัญชี\")) input",
+      "value": ""
+    },
+    {
+      "title": "กดบันทึกโดยไม่ระบุเลขที่เอกสาร/สมุด (ระบบต้องปฏิเสธก่อนบันทึก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] button:has-text(\"บันทึก\"):not(:has-text(\"JSON\"))"
+    },
+    {
+      "title": "ต้องแจ้งให้ระบุเลขที่เอกสาร สมุดรายวัน และบัญชีที่ปิดเข้า",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_end_of_period\"] div.bg-rose-50",
+      "text": "ต้องระบุเลขที่เอกสาร"
+    },
+    {
+      "title": "ถูกปฏิเสธแล้วไม่มีเอกสารปิดงวดเกิดขึ้น",
+      "do": "db.query",
+      "sql": "select ((select count(*) from gl_journal where doc_date = :'qd'::date and trans_flag in (1998, 1999)) + (select count(*) from gl_journal_detail where doc_date = :'qd'::date and doc_no <> :'jc') + (select count(*) from gl_trans where doc_date = :'qd'::date and trans_flag in (1998, 1999)))::text n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ตรวจหน้าจอไม่มีข้อผิดพลาดแฝง (ยกเว้น 400 จากกรณีที่ตั้งใจให้ถูกปฏิเสธ)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "gl-close",
+        "status of 400"
+      ]
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบใบสำคัญทดสอบผ่าน API",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/delete",
+      "body": {
+        "kind": "gl_journal",
+        "docNo": "{{jc}}"
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษใบสำคัญทดสอบหรือเอกสารปิดงวดใน smldemo",
+      "do": "db.query",
+      "sql": "select ((select count(*) from gl_journal where doc_no = :'jc') + (select count(*) from gl_journal_detail where doc_no = :'jc') + (select count(*) from gl_journal_vat_buy where doc_no = :'jc') + (select count(*) from gl_journal_vat_sale where doc_no = :'jc'))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

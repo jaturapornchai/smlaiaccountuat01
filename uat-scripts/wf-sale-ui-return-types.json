@@ -1,0 +1,155 @@
+{
+  "id": "wf-sale-ui-return-types",
+  "title": "หน้าจอรับคืน/ลดหนี้ขาย และเพิ่มหนี้ขาย: ช่องประเภทรายการต้องมีตัวเลือกตาม C# (ไม่ใช่ ขายเชื่อ/ขายสด)",
+  "module": "sales",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "เปิดหน้าจอรับคืนสินค้า/ลดหนี้ขาย (48) และเพิ่มหนี้ขาย (46) กดเพิ่มใหม่ แล้วตรวจว่าช่องประเภทแสดงชื่อและตัวเลือกตาม C# (_icTransScreenTopControl.cs:1712 ประเภทการรับคืน 6 แบบ, :1779 ประเภทการเพิ่มหนี้ 3 แบบ) ซึ่ง backend ใช้ inquiry_type 0-5 / 0-2 คำนวณสต๊อกอยู่แล้ว ไม่บันทึกเอกสารใด ๆ",
+  "timeoutMs": 600000,
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เปิดหน้าจอรับคืนสินค้า/ลดหนี้ขาย",
+      "do": "ui.openMenu",
+      "key": "menu_so_credit_note"
+    },
+    {
+      "title": "กดปุ่มเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] button:text-is(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "อยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "ภาพหน้าจอหัวเอกสารรับคืนสินค้า/ลดหนี้ขาย (ช่องประเภท)",
+      "do": "ui.screenshot",
+      "name": "types-menu_so_credit_note"
+    },
+    {
+      "title": "ชื่อช่องประเภทตาม C#: ประเภทการรับคืน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"]",
+      "text": "ประเภทการรับคืน",
+      "op": "contains",
+      "continueOnFail": true,
+      "timeout": 3000
+    },
+    {
+      "title": "ตัวเลือกประเภทที่ 0 ตาม C#: รับคืนจากขายเงินเชื่อ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"]",
+      "text": "รับคืนจากขายเงินเชื่อ",
+      "op": "contains",
+      "continueOnFail": true,
+      "timeout": 3000
+    },
+    {
+      "title": "ตัวเลือกประเภทที่ 1 ตาม C#: รับคืนจากขายเงินสด",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"]",
+      "text": "รับคืนจากขายเงินสด",
+      "op": "contains",
+      "continueOnFail": true,
+      "timeout": 3000
+    },
+    {
+      "title": "ตัวเลือกประเภทที่ 2 ตาม C#: ลดหนี้จากขายเงินเชื่อ (ไม่กระทบสต๊อก)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"]",
+      "text": "ลดหนี้จากขายเงินเชื่อ (ไม่กระทบสต๊อก)",
+      "op": "contains",
+      "continueOnFail": true,
+      "timeout": 3000
+    },
+    {
+      "title": "ตัวเลือกประเภทที่ 3 ตาม C#: ลดหนี้จากขายเงินสด (ไม่กระทบสต๊อก)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"]",
+      "text": "ลดหนี้จากขายเงินสด (ไม่กระทบสต๊อก)",
+      "op": "contains",
+      "continueOnFail": true,
+      "timeout": 3000
+    },
+    {
+      "title": "ตัวเลือกประเภทที่ 4 ตาม C#: รับคืนจากขายสินค้าเงินเชื่อ (สินค้าบริการ)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"]",
+      "text": "รับคืนจากขายสินค้าเงินเชื่อ (สินค้าบริการ)",
+      "op": "contains",
+      "continueOnFail": true,
+      "timeout": 3000
+    },
+    {
+      "title": "ตัวเลือกประเภทที่ 5 ตาม C#: รับคืนจากขายสินค้าเงินสด (สินค้าบริการ)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"]",
+      "text": "รับคืนจากขายสินค้าเงินสด (สินค้าบริการ)",
+      "op": "contains",
+      "continueOnFail": true,
+      "timeout": 3000
+    },
+    {
+      "title": "เปิดหน้าจอเพิ่มหนี้ขาย/ราคาผิด",
+      "do": "ui.openMenu",
+      "key": "menu_so_invoice_add"
+    },
+    {
+      "title": "กดปุ่มเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice_add\"] button:text-is(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "อยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice_add\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "ภาพหน้าจอหัวเอกสารเพิ่มหนี้ขาย/ราคาผิด (ช่องประเภท)",
+      "do": "ui.screenshot",
+      "name": "types-menu_so_invoice_add"
+    },
+    {
+      "title": "ชื่อช่องประเภทตาม C#: ประเภทการเพิ่มหนี้",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice_add\"]",
+      "text": "ประเภทการเพิ่มหนี้",
+      "op": "contains",
+      "continueOnFail": true,
+      "timeout": 3000
+    },
+    {
+      "title": "ตัวเลือกประเภทที่ 0 ตาม C#: เพิ่มหนี้จากการขายเงินเชื่อ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice_add\"]",
+      "text": "เพิ่มหนี้จากการขายเงินเชื่อ",
+      "op": "contains",
+      "continueOnFail": true,
+      "timeout": 3000
+    },
+    {
+      "title": "ตัวเลือกประเภทที่ 1 ตาม C#: เพิ่มหนี้จากการขายเงินเชื่อ (ไม่กระทบสต๊อก)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice_add\"]",
+      "text": "เพิ่มหนี้จากการขายเงินเชื่อ (ไม่กระทบสต๊อก)",
+      "op": "contains",
+      "continueOnFail": true,
+      "timeout": 3000
+    },
+    {
+      "title": "ตัวเลือกประเภทที่ 2 ตาม C#: เพิ่มหนี้จากการขายสินค้าเงินเชื่อ (สินค้าบริการ)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice_add\"]",
+      "text": "เพิ่มหนี้จากการขายสินค้าเงินเชื่อ (สินค้าบริการ)",
+      "op": "contains",
+      "continueOnFail": true,
+      "timeout": 3000
+    }
+  ],
+  "cleanup": []
+}

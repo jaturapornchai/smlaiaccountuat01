@@ -1,0 +1,972 @@
+{
+  "id": "wf-sale-ui-credit-note",
+  "title": "หน้าจอรับคืนสินค้า/ลดหนี้ขาย: ดึงบิลขายผ่านหน้าจอ รับคืนบางส่วน ตรวจภาษีขาย/GL คงเหลือให้คืน ผังเอกสาร และลบผ่านหน้าจอ",
+  "module": "sales",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "บิลขายเชื่อ 5 ชิ้นเตรียมผ่าน API จากข้อมูลจริง แล้วใช้หน้าจอรับคืนสินค้า/ลดหนี้ขาย: เลือกลูกหนี้ ภาษีแยกนอก กดดึงเอกสารเลือกบิลขาย ตรวจแถว/คลัง/ราคา แก้จำนวนคืน 2 ยอดตรง กรอกสาเหตุ บันทึกแล้วตรวจฐานข้อมูล (หัว/บรรทัด/ภาษีขายกลับรายการ/GL สมดุล/บิลถูกอ้าง); ใบที่ 2 ดึงบิลเดิมได้คงเหลือ 3 แล้วปิดไม่บันทึก; เปิดจากรายการ ดู Document Flow; ลบผ่านหน้าจอพิสูจน์ 0 แถว",
+  "timeoutMs": 600000,
+  "steps": [
+    {
+      "title": "กำหนดเลขบิลขายทดสอบ",
+      "do": "set",
+      "name": "si",
+      "value": "UAT-{{run.short}}-CSI"
+    },
+    {
+      "title": "กำหนดเลขใบลดหนี้ทดสอบ",
+      "do": "set",
+      "name": "cn",
+      "value": "UAT-{{run.short}}-CN"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เลือกลูกค้าจริงแบบเดียวกับใบเสนอราคา + เครดิตเปิดอยู่ ไม่มีวงเงิน (ไม่ติดตรวจวงเงิน) และระบบไม่เปิดตรวจวงเงินใบสั่งขาย",
+      "do": "db.query",
+      "sql": "with c as (select distinct t.cust_code as code from ic_trans t where t.trans_flag in (30, 36, 44) and t.doc_no not like 'UAT%' and coalesce(t.last_status, 0) = 0 and coalesce(t.cust_code, '') <> ''),\ncand as (select a.code, a.name_1, substr(a.name_1, 2) as frag, coalesce(trim(d.sale_code), '') as dsale,\n  coalesce((select u.name_1 from erp_user u where u.code = trim(d.sale_code) limit 1), '') as dsale_name\n  from c join ar_customer a on a.code = c.code join ar_customer_detail d on d.ar_code = a.code\n  where length(coalesce(a.name_1, '')) >= 6 and coalesce(d.set_tax_type, 0) = 0 and coalesce(d.sale_type, 0) <> 1 and a.code ~ '^[A-Z0-9-]+$' and coalesce(a.status, 0) = 0 and coalesce(d.credit_status, 0) = 0 and coalesce(d.credit_money, 0) = 0 and coalesce((select o.check_credit_sale_reserve_sale_order from erp_option o limit 1), 0) <> 1\n  order by a.code limit 40)\nselect code as cust, name_1 as cname, frag as cfrag, dsale, dsale_name, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today, to_char((now() at time zone 'Asia/Bangkok')::date, 'DD/MM/') || (extract(year from (now() at time zone 'Asia/Bangkok')::date)::int + 543)::text as today_be,\n  to_char((now() at time zone 'Asia/Bangkok')::date + 15, 'DD/MM/') || (extract(year from (now() at time zone 'Asia/Bangkok')::date + 15)::int + 543)::text as exp_be, to_char((now() at time zone 'Asia/Bangkok')::date + 7, 'DD/MM/') || (extract(year from (now() at time zone 'Asia/Bangkok')::date + 7)::int + 543)::text as send_be\nfrom cand where (select count(*) from ar_customer x where x.name_1 ilike '%' || replace(replace(cand.frag, '%', '\\%'), '_', '\\_') || '%') = 1\norder by code limit 1",
+      "rows": 1,
+      "save": {
+        "cust": "cust",
+        "cname": "cname",
+        "cfrag": "cfrag",
+        "dsale": "dsale",
+        "dsale_name": "dsale_name",
+        "today": "today",
+        "today_be": "today_be",
+        "exp_be": "exp_be",
+        "send_be": "send_be"
+      }
+    },
+    {
+      "title": "อัตราภาษีขายจากบิลขายจริงล่าสุด (ภาษีแยกนอก)",
+      "do": "db.query",
+      "sql": "select vat_rate::text as rate from ic_trans where trans_flag = 44 and vat_type = 0 and vat_rate > 0 and doc_no not like 'UAT%' and coalesce(last_status, 0) = 0 order by doc_date desc, roworder desc limit 1",
+      "rows": 1,
+      "save": {
+        "rate": "rate"
+      }
+    },
+    {
+      "title": "เลือกสินค้าจริงตัวแรกตามรหัส หน่วยนับ 1:1 คลัง/ที่เก็บ/ราคาจากบิลขายจริงล่าสุด สต๊อกพอ ≥ 10 และไม่ห้ามขาย",
+      "do": "db.query",
+      "sql": "select i.code as item, i.name_1 as iname, i.unit_standard as unit, p.wh_code as wh, p.shelf_code as shelf, p.price::text as price from ic_inventory i join ic_unit_use u on u.ic_code = i.code and u.code = i.unit_standard and u.stand_value = 1 and u.divide_value = 1 cross join lateral (select d.price, d.wh_code, d.shelf_code from ic_trans_detail d join ic_trans t on t.doc_no = d.doc_no and t.trans_flag = d.trans_flag where d.item_code = i.code and d.trans_flag = 44 and t.doc_no not like 'UAT%' and t.last_status = 0 and coalesce(t.is_cancel, 0) = 0 and d.unit_code = i.unit_standard and d.stand_value = 1 and d.divide_value = 1 and d.price > 0 and coalesce(d.discount, '') = '' and coalesce(d.tax_type, 0) = 0 and coalesce(d.wh_code, '') <> '' and coalesce(d.shelf_code, '') <> '' order by t.doc_date desc, t.roworder desc, d.line_number limit 1) p join ic_warehouse w on w.code = p.wh_code join ic_shelf s on s.whcode = p.wh_code and s.code = p.shelf_code cross join lateral (select coalesce(sum(d.qty * d.calc_flag * coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1)), 0) as bal from ic_trans_detail d where d.item_code = i.code and d.wh_code = p.wh_code and d.shelf_code = p.shelf_code and d.doc_no not like 'UAT-%' and coalesce(d.last_status, 0) = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12, 310, 14, 311, 16, 44, 46, 48, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 521, 522, 523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14, 16, 311) and coalesce(d.inquiry_type, 0) in (1, 3))) b where coalesce(i.item_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0 and coalesce(i.tax_type, 0) = 0 and b.bal >= 10 and p.wh_code = upper(p.wh_code) and p.shelf_code = upper(p.shelf_code) and not exists (select 1 from ic_inventory_detail hd where hd.ic_code = i.code and coalesce(hd.is_hold_sale, 0) <> 0) order by i.code asc limit 1",
+      "rows": 1,
+      "save": {
+        "item": "item",
+        "iname": "iname",
+        "unit": "unit",
+        "wh": "wh",
+        "shelf": "shelf",
+        "price": "price"
+      }
+    },
+    {
+      "title": "คำนวณยอดที่คาดหวังของจำนวน 5 (ราคา × จำนวน, ภาษีแยกนอกตามอัตราจริง)",
+      "do": "db.query",
+      "sql": "select round(5 * :'price'::numeric, 2)::text as q5_sum, round(round(5 * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as q5_vat, (round(5 * :'price'::numeric, 2) + round(round(5 * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as q5_total, to_char(round(5 * :'price'::numeric, 2) + round(round(5 * :'price'::numeric, 2) * :'rate'::numeric / 100, 2), 'FM999,999,999,990.00') as q5_total_fmt, to_char(round(5 * :'price'::numeric, 2), 'FM999,999,999,990.00') as q5_sum_fmt",
+      "rows": 1,
+      "save": {
+        "q5_sum": "q5_sum",
+        "q5_vat": "q5_vat",
+        "q5_total": "q5_total",
+        "q5_total_fmt": "q5_total_fmt",
+        "q5_sum_fmt": "q5_sum_fmt"
+      }
+    },
+    {
+      "title": "คำนวณยอดที่คาดหวังของจำนวน 2 (ราคา × จำนวน, ภาษีแยกนอกตามอัตราจริง)",
+      "do": "db.query",
+      "sql": "select round(2 * :'price'::numeric, 2)::text as q2_sum, round(round(2 * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as q2_vat, (round(2 * :'price'::numeric, 2) + round(round(2 * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as q2_total, to_char(round(2 * :'price'::numeric, 2) + round(round(2 * :'price'::numeric, 2) * :'rate'::numeric / 100, 2), 'FM999,999,999,990.00') as q2_total_fmt, to_char(round(2 * :'price'::numeric, 2), 'FM999,999,999,990.00') as q2_sum_fmt",
+      "rows": 1,
+      "save": {
+        "q2_sum": "q2_sum",
+        "q2_vat": "q2_vat",
+        "q2_total": "q2_total",
+        "q2_total_fmt": "q2_total_fmt",
+        "q2_sum_fmt": "q2_sum_fmt"
+      }
+    },
+    {
+      "title": "เตรียมบิลขายเชื่อ 5 ชิ้นผ่าน API (ภาษีแยกนอก คลัง/ที่เก็บจริง)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{si}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 44,
+        "inquiryType": 0,
+        "custCode": "{{cust}}",
+        "docFormatCode": "SI",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "taxDocNo": "{{si}}",
+        "taxDocDate": "{{today}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "1",
+            "divideValue": "1",
+            "qty": "5",
+            "price": "{{price}}",
+            "sumAmount": "{{q5_sum}}",
+            "taxType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{si}}"
+        }
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอรับคืนสินค้า/ลดหนี้ขาย",
+      "do": "ui.openMenu",
+      "key": "menu_so_credit_note"
+    },
+    {
+      "title": "กดปุ่มเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] button:text-is(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "อยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "กรอกเลขที่ใบลดหนี้ทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{cn}}"
+    },
+    {
+      "title": "เลขที่เอกสารตามที่กรอก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{cn}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาลูกหนี้ (ด้วยชื่อบางส่วน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] button[title=\"ค้นหา\"]"
+    },
+    {
+      "title": "หน้าต่างค้นหาลูกหนี้ (ด้วยชื่อบางส่วน)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาลูกหนี้ (ด้วยชื่อบางส่วน): {{cfrag}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{cfrag}}"
+    },
+    {
+      "title": "ผลค้นหามีแถวรหัส {{cust}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{cust}}\"))"
+    },
+    {
+      "title": "คลิกเลือกแถวรหัส {{cust}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{cust}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาลูกหนี้ (ด้วยชื่อบางส่วน)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสลูกหนี้ = รหัสที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{cust}}",
+      "op": "eq"
+    },
+    {
+      "title": "เลือกประเภทภาษี: แยกนอก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] [role=\"radiogroup\"] span:has-text(\"0: แยกนอก\")"
+    },
+    {
+      "title": "ประเภทภาษี แยกนอก ถูกเลือก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] [role=\"radiogroup\"] span:has-text(\"0: แยกนอก\") input:checked"
+    },
+    {
+      "title": "ชื่อลูกหนี้เติมอัตโนมัติ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] textarea[placeholder=\"ชื่อเจ้าหนี้ / ลูกหนี้...\"]",
+      "value": "{{cname}}",
+      "op": "eq"
+    },
+    {
+      "title": "เลขที่ใบกำกับภาษีตามเลขที่เอกสาร",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] input[placeholder=\"เลขที่ใบกำกับภาษี...\"]",
+      "value": "{{cn}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปุ่ม ดึงเอกสาร (เลือกบิลขายอ้างอิง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] button[title=\"ค้นหาและดึงรายการจากเอกสารอ้างอิง\"]"
+    },
+    {
+      "title": "หน้าต่างเลือกเอกสารอ้างอิงเปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\"))"
+    },
+    {
+      "title": "ค้นหาเลขที่บิลขายในหน้าต่างอ้างอิง",
+      "do": "ui.fill",
+      "selector": "[data-testid=\"ref-doc-search\"]",
+      "value": "{{si}}"
+    },
+    {
+      "title": "รายการอ้างอิงมีบิลขาย {{si}} (กรองตามลูกหนี้/ประเภทภาษีของหน้าจอ)",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) button:has(div:text-is(\"{{si}}\"))"
+    },
+    {
+      "title": "คลิกเลือกบิลขาย {{si}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) button:has(div:text-is(\"{{si}}\"))"
+    },
+    {
+      "title": "หน้าต่างอ้างอิงปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\"))",
+      "visible": false
+    },
+    {
+      "title": "ช่องเอกสารอ้างอิงบนหัวเอกสาร = {{si}}",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] input[placeholder=\"เลขที่เอกสารอ้างอิง...\"]",
+      "value": "{{si}}",
+      "op": "eq"
+    },
+    {
+      "title": "แถว 1 รหัสสินค้าตามเอกสารอ้างอิง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_credit_note\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"] and thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//input",
+      "value": "{{item}}",
+      "op": "eq"
+    },
+    {
+      "title": "แถว 1 หน่วยนับตามเอกสารอ้างอิง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_credit_note\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"] and thead//th[normalize-space()=\"หน่วยนับ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"หน่วยนับ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{unit}}",
+      "op": "eq"
+    },
+    {
+      "title": "แถว 1 จำนวนคงเหลือให้ดึง = 5",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_credit_note\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"] and thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "5",
+      "op": "eq"
+    },
+    {
+      "title": "แถว 1 ราคาตามเอกสารอ้างอิง",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_credit_note\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"] and thead//th[normalize-space()=\"ราคา/หน่วย\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ราคา/หน่วย\"]/preceding-sibling::th)+1]//input",
+      "value": "{{price}}",
+      "op": "eq"
+    },
+    {
+      "title": "แถว 1 คอลัมน์เอกสารอ้างอิง = {{si}}",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_credit_note\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"] and thead//th[normalize-space()=\"เอกสารอ้างอิง\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"เอกสารอ้างอิง\"]/preceding-sibling::th)+1]",
+      "text": "{{si}}",
+      "op": "contains"
+    },
+    {
+      "title": "ดึงมาแค่ 1 บรรทัด (ไม่มีแถวสินค้าที่ 2)",
+      "do": "ui.expectVisible",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_credit_note\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"] and thead//th[normalize-space()=\"รหัสสินค้า\"]]/tbody/tr[2]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสสินค้า\"]/preceding-sibling::th)+1]//input",
+      "visible": false,
+      "timeout": 3000
+    },
+    {
+      "title": "ภาพหน้าจอใบลดหนี้หลังดึงบิลขาย",
+      "do": "ui.screenshot",
+      "name": "cn-pulled"
+    },
+    {
+      "title": "คลังแถว 1 = คลังในบิลขาย",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_credit_note\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"] and thead//th[normalize-space()=\"คลัง\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"คลัง\"]/preceding-sibling::th)+1]//input",
+      "value": "{{wh}}",
+      "op": "eq"
+    },
+    {
+      "title": "ที่เก็บแถว 1 = ที่เก็บในบิลขาย",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_credit_note\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"] and thead//th[normalize-space()=\"ที่เก็บ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ที่เก็บ\"]/preceding-sibling::th)+1]//input",
+      "value": "{{shelf}}",
+      "op": "eq"
+    },
+    {
+      "title": "รับคืนบางส่วน: แก้จำนวนเป็น 2",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_credit_note\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"] and thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "2"
+    },
+    {
+      "title": "Enter ยืนยันจำนวน",
+      "do": "ui.press",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_credit_note\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"] and thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "key": "Enter"
+    },
+    {
+      "title": "แถวอ้างอิงเปลี่ยนจำนวนแล้วราคาคงเดิม (ราคาตามบิลขาย)",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_credit_note\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"] and thead//th[normalize-space()=\"ราคา/หน่วย\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ราคา/หน่วย\"]/preceding-sibling::th)+1]//input",
+      "value": "{{price}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: รวมมูลค่าสินค้า = ราคา × จำนวน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] label:text-is(\"รวมมูลค่าสินค้า:\") + div",
+      "text": "{{q2_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: ยอดเงินก่อนภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] label:text-is(\"ยอดเงินก่อนภาษี:\") + div",
+      "text": "{{q2_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: ยอดภาษีมูลค่าเพิ่ม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] label:text-is(\"ยอดภาษีมูลค่าเพิ่ม:\") + div",
+      "text": "{{q2_vat}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: มูลค่าหลังคิดภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] label:text-is(\"มูลค่าหลังคิดภาษี:\") + div",
+      "text": "{{q2_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "กรอกสาเหตุการลดหนี้",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] input[placeholder=\"สาเหตุการเพิ่ม/ลดหนี้...\"]",
+      "value": "{{run.tag}}"
+    },
+    {
+      "title": "กรอกหมายเหตุเอกสาร",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}}"
+    },
+    {
+      "title": "กดปุ่มบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] button:text-is(\"บันทึก\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งบันทึกเอกสาร {{cn}} เรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] span.whitespace-pre-line",
+      "text": "บันทึกเอกสาร {{cn}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "หน้าต่างถามพิมพ์ฟอร์ม: กด ยังไม่พิมพ์",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")"
+    },
+    {
+      "title": "ปิดหน้าต่างถามพิมพ์แล้ว",
+      "do": "ui.expectVisible",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+      "visible": false
+    },
+    {
+      "title": "หลังบันทึกเป็นโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "ฐานข้อมูล: หัวเอกสาร cn ตรงหน้าจอ (ลูกหนี้/อ้างอิง/ประเภท/ภาษี/ยอด)",
+      "do": "db.query",
+      "sql": "select trans_flag::text, cust_code, coalesce(doc_ref, '') as doc_ref, coalesce(inquiry_type, 0)::text as inquiry_type, coalesce(vat_type, 0)::text as vat_type, vat_rate::text,\n      total_before_vat::text, total_vat_value::text, total_amount::text, coalesce(tax_doc_no, '') as tax_doc_no, coalesce(doc_reason, '') as doc_reason from ic_trans where doc_no = :'cn'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "trans_flag",
+          "op": "eq",
+          "value": "48"
+        },
+        {
+          "col": "cust_code",
+          "op": "eq",
+          "value": "{{cust}}"
+        },
+        {
+          "col": "inquiry_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "vat_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "vat_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{q2_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{q2_vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{q2_total}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "eq",
+          "value": "{{si}}"
+        },
+        {
+          "col": "tax_doc_no",
+          "op": "eq",
+          "value": "{{cn}}"
+        },
+        {
+          "col": "doc_reason",
+          "op": "eq",
+          "value": "{{run.tag}}"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: บรรทัดเดียวของใบลดหนี้ อ้างบิลขายบรรทัดที่ 1 จำนวน 2 ราคาเดิม คลัง/ที่เก็บเดิม และรับของคืนเข้าสต๊อก (calc_flag = 1)",
+      "do": "db.query",
+      "sql": "select item_code, unit_code, qty::text, price::text, sum_amount::text, coalesce(ref_doc_no, '') as ref_doc_no, coalesce(ref_row, 0)::text as ref_row,\n        coalesce(wh_code, '') as wh_code, coalesce(shelf_code, '') as shelf_code, calc_flag::text from ic_trans_detail where doc_no = :'cn' order by line_number",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "item_code",
+          "op": "eq",
+          "value": "{{item}}"
+        },
+        {
+          "col": "unit_code",
+          "op": "eq",
+          "value": "{{unit}}"
+        },
+        {
+          "col": "qty",
+          "op": "eq",
+          "value": "2"
+        },
+        {
+          "col": "price",
+          "op": "eq",
+          "value": "{{price}}"
+        },
+        {
+          "col": "sum_amount",
+          "op": "eq",
+          "value": "{{q2_sum}}"
+        },
+        {
+          "col": "ref_doc_no",
+          "op": "eq",
+          "value": "{{si}}"
+        },
+        {
+          "col": "ref_row",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "wh_code",
+          "op": "eq",
+          "value": "{{wh}}"
+        },
+        {
+          "col": "shelf_code",
+          "op": "eq",
+          "value": "{{shelf}}"
+        },
+        {
+          "col": "calc_flag",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: ภาษีขายของใบลดหนี้ 1 แถว ฐาน/ภาษีตรง เป็นรายการกลับ (vat_calc = -1)",
+      "do": "db.query",
+      "sql": "select base_caltax_amount::text, amount::text, tax_rate::text, vat_calc::text from gl_journal_vat_sale where doc_no = :'cn'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "base_caltax_amount",
+          "op": "eq",
+          "value": "{{q2_sum}}"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{q2_vat}}"
+        },
+        {
+          "col": "tax_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "vat_calc",
+          "op": "eq",
+          "value": "-1"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: GL ใบลดหนี้ เดบิต = เครดิต = ยอดรวมหลังภาษี",
+      "do": "db.query",
+      "sql": "select (coalesce(sum(debit), 0) - coalesce(sum(credit), 0))::text as diff, coalesce(sum(debit), 0)::text as debit from gl_journal_detail where doc_no = :'cn'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "debit",
+          "op": "eq",
+          "value": "{{q2_total}}"
+        }
+      ]
+    },
+    {
+      "title": "ฐานข้อมูล: บิลขายถูกใบลดหนี้อ้างอิงแล้ว (used_status=1)",
+      "do": "db.query",
+      "sql": "select coalesce(used_status, 0)::text as used_status from ic_trans where doc_no = :'si' and trans_flag = 44",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "หน้าจอใบลดหนี้ไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "กดปุ่มเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] button:text-is(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "อยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาลูกหนี้ (ด้วยชื่อบางส่วน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] button[title=\"ค้นหา\"]"
+    },
+    {
+      "title": "หน้าต่างค้นหาลูกหนี้ (ด้วยชื่อบางส่วน)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาลูกหนี้ (ด้วยชื่อบางส่วน): {{cfrag}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{cfrag}}"
+    },
+    {
+      "title": "ผลค้นหามีแถวรหัส {{cust}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{cust}}\"))"
+    },
+    {
+      "title": "คลิกเลือกแถวรหัส {{cust}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{cust}}\"))"
+    },
+    {
+      "title": "หน้าต่างค้นหาลูกหนี้ (ด้วยชื่อบางส่วน)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสลูกหนี้ = รหัสที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{cust}}",
+      "op": "eq"
+    },
+    {
+      "title": "เลือกประเภทภาษี: แยกนอก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] [role=\"radiogroup\"] span:has-text(\"0: แยกนอก\")"
+    },
+    {
+      "title": "ประเภทภาษี แยกนอก ถูกเลือก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] [role=\"radiogroup\"] span:has-text(\"0: แยกนอก\") input:checked"
+    },
+    {
+      "title": "กดปุ่ม ดึงเอกสาร (เลือกบิลขายอ้างอิง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] button[title=\"ค้นหาและดึงรายการจากเอกสารอ้างอิง\"]"
+    },
+    {
+      "title": "หน้าต่างเลือกเอกสารอ้างอิงเปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\"))"
+    },
+    {
+      "title": "ค้นหาเลขที่บิลขายในหน้าต่างอ้างอิง",
+      "do": "ui.fill",
+      "selector": "[data-testid=\"ref-doc-search\"]",
+      "value": "{{si}}"
+    },
+    {
+      "title": "รายการอ้างอิงมีบิลขาย {{si}} (กรองตามลูกหนี้/ประเภทภาษีของหน้าจอ)",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) button:has(div:text-is(\"{{si}}\"))"
+    },
+    {
+      "title": "คลิกเลือกบิลขาย {{si}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\")) button:has(div:text-is(\"{{si}}\"))"
+    },
+    {
+      "title": "หน้าต่างอ้างอิงปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h3:has-text(\"เลือกเอกสารอ้างอิงเพื่อดึงรายการสินค้า\"))",
+      "visible": false
+    },
+    {
+      "title": "ช่องเอกสารอ้างอิงบนหัวเอกสาร = {{si}}",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] input[placeholder=\"เลขที่เอกสารอ้างอิง...\"]",
+      "value": "{{si}}",
+      "op": "eq"
+    },
+    {
+      "title": "ดึงบิลเดิมซ้ำ: จำนวนที่ยังคืนได้ = 5 − 2 = 3",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_credit_note\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"] and thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "3",
+      "op": "eq"
+    },
+    {
+      "title": "ปิดแท็บโดยไม่บันทึกใบลดหนี้ใบที่ 2",
+      "do": "ui.click",
+      "selector": "[data-testid=\"workspace-tab-close-menu_so_credit_note\"]"
+    },
+    {
+      "title": "มีหน้าต่างเตือนข้อมูลยังไม่บันทึก",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]"
+    },
+    {
+      "title": "เลือก ปิดโดยไม่บันทึก",
+      "do": "ui.click",
+      "selector": "[data-testid=\"tab-warning-force-close-btn\"]"
+    },
+    {
+      "title": "หน้าต่างเตือนปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "visible": false
+    },
+    {
+      "title": "ฐานข้อมูล: มีใบลดหนี้อ้างบิลนี้แค่ใบเดียว (ใบที่ 2 ไม่ถูกบันทึก)",
+      "do": "db.query",
+      "sql": "select count(*)::text as n from ic_trans where trans_flag = 48 and doc_ref = :'si'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอใหม่ (ล้างแท็บเดิม)",
+      "do": "ui.openMenu",
+      "key": "menu_so_credit_note"
+    },
+    {
+      "title": "ค้นหาในรายการเอกสารด้วยเลขที่ที่ไม่มีอยู่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{cn}}-NONE"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ไม่พบเอกสาร: ตัวนับ 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "แสดงข้อความ ไม่พบข้อมูลที่ค้นหา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] td:has-text(\"ไม่พบข้อมูลที่ค้นหา\")"
+    },
+    {
+      "title": "ค้นหาในรายการเอกสารด้วยเลขที่ {{cn}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{cn}}"
+    },
+    {
+      "title": "กด Enter ค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบเอกสารของเรา 1 ใบ: ตัวนับ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถวเอกสาร {{cn}} ในรายการ (คลิกแถว = เปิดดู, ปุ่มดินสอ = เปิดแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] tr:has(button[title=\"แก้ไขรายการ {{cn}}\"]) td:has-text(\"{{cn}}\")"
+    },
+    {
+      "title": "เปิดในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารที่เปิดตรงกับของเรา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{cn}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: เอกสารอ้างอิง = บิลขาย",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] input[placeholder=\"เลขที่เอกสารอ้างอิง...\"]",
+      "value": "{{si}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: สาเหตุที่บันทึกไว้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] input[placeholder=\"สาเหตุการเพิ่ม/ลดหนี้...\"]",
+      "value": "{{run.tag}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: จำนวน 2",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_so_credit_note\"]//table[thead//th[normalize-space()=\"รหัสสินค้า\"] and thead//th[normalize-space()=\"จำนวน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวน\"]/preceding-sibling::th)+1]//input",
+      "value": "2",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: รวมมูลค่าสินค้า = ราคา × จำนวน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] label:text-is(\"รวมมูลค่าสินค้า:\") + div",
+      "text": "{{q2_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: ยอดเงินก่อนภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] label:text-is(\"ยอดเงินก่อนภาษี:\") + div",
+      "text": "{{q2_sum}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: ยอดภาษีมูลค่าเพิ่ม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] label:text-is(\"ยอดภาษีมูลค่าเพิ่ม:\") + div",
+      "text": "{{q2_vat}}",
+      "op": "eq"
+    },
+    {
+      "title": "หน้าจอ: มูลค่าหลังคิดภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] label:text-is(\"มูลค่าหลังคิดภาษี:\") + div",
+      "text": "{{q2_total}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิด Document Flow ของใบลดหนี้",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] button:has-text(\"Document Flow\")"
+    },
+    {
+      "title": "หน้าต่าง Document Flow เปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))"
+    },
+    {
+      "title": "ผังเอกสารมีบิลขายต้นทาง",
+      "do": "ui.expectText",
+      "selector": "div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))",
+      "text": "{{si}}",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ผังเอกสารมีใบลดหนี้",
+      "do": "ui.expectText",
+      "selector": "div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))",
+      "text": "{{cn}}",
+      "op": "contains"
+    },
+    {
+      "title": "ภาพหน้าจอ Document Flow ของใบลดหนี้",
+      "do": "ui.screenshot",
+      "name": "cn-doc-flow"
+    },
+    {
+      "title": "ปิดหน้าต่าง Document Flow",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\")) button:has-text(\"ปิดหน้าต่าง\")"
+    },
+    {
+      "title": "หน้าต่าง Document Flow ปิด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50:has(h2:has-text(\"ผังเส้นทางเอกสาร\"))",
+      "visible": false
+    },
+    {
+      "title": "กดลบใบลดหนี้ (ยืนยันกล่องถามอัตโนมัติ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] button:text-is(\"ลบ\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งลบใบลดหนี้เรียบร้อย",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_credit_note\"] span.whitespace-pre-line",
+      "text": "ลบเอกสาร {{cn}} เรียบร้อยแล้ว",
+      "op": "contains",
+      "timeout": 30000
+    },
+    {
+      "title": "ฐานข้อมูล: ลบใบลดหนี้แล้วไม่เหลือหัว/บรรทัด/GL/ภาษีขาย",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ic_trans where doc_no = :'cn') + (select count(*) from ic_trans_detail where doc_no = :'cn') + (select count(*) from gl_journal where doc_no = :'cn') + (select count(*) from gl_journal_vat_sale where doc_no = :'cn'))::text as n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "หน้าจอไม่มีข้อผิดพลาดแฝงหลังลบ",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบใบลดหนี้ทดสอบผ่าน API (สำรอง)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{cn}}",
+        "transFlag": 48
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบบิลขายทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{si}}",
+        "transFlag": 44
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo (หัว/บรรทัด/ลูกหนี้/การเงิน/GL/ภาษีขาย)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'si', :'cn')) + (select count(*) from ic_trans_detail where doc_no in (:'si', :'cn')) + (select count(*) from ap_ar_trans where doc_no in (:'si', :'cn')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'si', :'cn')) + (select count(*) from cb_trans where doc_no in (:'si', :'cn')) + (select count(*) from cb_trans_detail where doc_no in (:'si', :'cn')) + (select count(*) from gl_journal where doc_no in (:'si', :'cn')) + (select count(*) from gl_journal_detail where doc_no in (:'si', :'cn')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'si', :'cn')) as left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

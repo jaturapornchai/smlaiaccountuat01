@@ -1,0 +1,517 @@
+{
+  "id": "wf-buy-pr-over-order",
+  "title": "ใบสั่งซื้ออ้างใบอนุมัติขอซื้อ: สั่งครบแล้วปิด สั่งเพิ่มเกินได้ตามโปรแกรมเดิม แต่ยอดคงเหลือต้องติดลบตรง และสถานะใบอนุมัติถูก",
+  "module": "purchase",
+  "lens": "api",
+  "severityOnFail": "S2",
+  "description": "ทำงานแบบผู้ใช้ Demo ผ่าน API ตัวเดียวกับหน้าจอ: สินค้า หน่วย ราคา อัตราภาษี อ่านจากบิลซื้อจริงใน smldemo ตอนรัน (สินค้าลำดับที่ 6 เรียงตามรหัส) · โปรแกรมเดิม (BC/SML C#) ไม่ห้ามใบสั่งซื้อเกินจำนวนที่อนุมัติ ระบบใหม่ทำเหมือนเดิม สคริปต์นี้จึงตรวจสิ่งที่ระบบรับประกัน: (1) ใบขอซื้อ 10 อนุมัติเต็ม สั่งซื้อครบ 10 → ใบอนุมัติถูกใช้และปิด ยอดคงเหลือให้ดึง = 0 (2) สั่งซื้อเพิ่มอีก 1 อ้างใบอนุมัติเดิม → บันทึกได้ ยอดเงินถูก ยอดคงเหลือให้ดึงต้องเป็น −1 ตรง (เห็นว่าสั่งเกิน) และใบอนุมัติกลับเป็นยังไม่ปิด (กติกาเดิม: ปิดเมื่อสั่งเท่าจำนวนอนุมัติพอดี) · ลบเอกสารทั้งหมดผ่าน API และพิสูจน์ว่าไม่เหลือแถวใด",
+  "steps": [
+    {
+      "title": "กำหนดเลขใบขอซื้อทดสอบ",
+      "do": "set",
+      "name": "pr",
+      "value": "UAT-{{run.short}}-PR"
+    },
+    {
+      "title": "ตั้งค่าเริ่มต้นเลขใบอนุมัติ (ระบบจะออกเลขจริงให้ภายหลัง)",
+      "do": "set",
+      "name": "pra",
+      "value": "UAT-{{run.short}}-NOPRA"
+    },
+    {
+      "title": "กำหนดเลขใบสั่งซื้อจำนวนเต็ม",
+      "do": "set",
+      "name": "pob",
+      "value": "UAT-{{run.short}}-PO"
+    },
+    {
+      "title": "กำหนดเลขใบสั่งซื้อที่สั่งเพิ่มหลังสั่งครบ",
+      "do": "set",
+      "name": "poc",
+      "value": "UAT-{{run.short}}-POY"
+    },
+    {
+      "title": "กำหนดเลขใบสั่งซื้อใบใหม่ (ใช้ดูยอดคงเหลือเท่านั้น ไม่บันทึก)",
+      "do": "set",
+      "name": "pnew",
+      "value": "UAT-{{run.short}}-PNEW"
+    },
+    {
+      "title": "กำหนดจำนวนที่ขอซื้อ (อนุมัติเต็มจำนวน)",
+      "do": "set",
+      "name": "q_pr",
+      "value": "10"
+    },
+    {
+      "title": "กำหนดจำนวนที่สั่งเพิ่มหลังสั่งครบ",
+      "do": "set",
+      "name": "q_one",
+      "value": "1"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เลือกสินค้าจริงลำดับที่ 6 (เรียงตามรหัส) ที่มีหน่วยนับ 1:1 คลังและที่เก็บจริง พร้อมราคาซื้อและอัตราภาษีจากบิลซื้อจริงล่าสุดของสินค้านั้น",
+      "do": "db.query",
+      "sql": "select x.item, x.unit, x.wh, x.shelf, x.stand, x.divide, x.price, x.rate, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today from (select distinct on (d.item_code) d.item_code as item, d.unit_code as unit, d.wh_code as wh, d.shelf_code as shelf, d.stand_value::text as stand, d.divide_value::text as divide, d.price::text as price, t.vat_rate::text as rate from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag join ic_inventory i on i.code = d.item_code join ic_unit_use u on u.ic_code = d.item_code and u.code = d.unit_code and u.stand_value = 1 and u.divide_value = 1 join ic_warehouse w on w.code = d.wh_code join ic_shelf sh on sh.code = d.shelf_code and coalesce(nullif(sh.whcode, ''), sh.wh_code) = d.wh_code where t.trans_flag = 12 and t.inquiry_type = 0 and t.vat_type = 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 and d.price > 0 and coalesce(d.discount, '') = '' and d.stand_value = 1 and d.divide_value = 1 and coalesce(d.tax_type, 0) = 0 and coalesce(d.is_permium, 0) = 0 and coalesce(i.item_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0 order by d.item_code, t.doc_date desc, t.roworder desc) x order by x.item offset 5 limit 1",
+      "rows": 1,
+      "save": {
+        "item": "item",
+        "unit": "unit",
+        "wh": "wh",
+        "shelf": "shelf",
+        "stand": "stand",
+        "divide": "divide",
+        "price": "price",
+        "rate": "rate",
+        "today": "today"
+      }
+    },
+    {
+      "title": "เลือกเจ้าหนี้จริงที่ยังไม่มีหนี้ค้าง/เอกสารเจ้าหนี้ค้างอยู่ในระบบ (เพื่อให้รายการหนี้ค้างที่ระบบแสดงมีเฉพาะเอกสารทดสอบนี้)",
+      "do": "db.query",
+      "sql": "select code as supp from (select s.code, row_number() over (order by s.code) as rn, count(*) over () as n from ap_supplier s where coalesce(s.status, 0) = 0 and not exists (select 1 from ic_trans t where t.cust_code = s.code and coalesce(t.last_status, 0) = 0 and t.trans_flag in (10, 11, 12, 14, 16, 20, 25, 81, 83, 85, 87, 89, 91, 260, 262, 264, 310, 315, 316, 317)) and not exists (select 1 from ap_ar_trans a where a.cust_code = s.code and coalesce(a.last_status, 0) = 0)) x where rn = (1 % n) + 1",
+      "rows": 1,
+      "save": {
+        "supp": "supp"
+      }
+    },
+    {
+      "title": "คำนวณยอดเงินจากราคาและอัตราภาษีจริง",
+      "do": "db.query",
+      "sql": "select round(:'q_pr'::numeric * :'price'::numeric, 2)::text as pr_sum, round(:'q_pr'::numeric * :'price'::numeric, 2)::text as pob_sum, round(round(:'q_pr'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as pob_vat, (round(:'q_pr'::numeric * :'price'::numeric, 2) + round(round(:'q_pr'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as pob_total, round(:'q_one'::numeric * :'price'::numeric, 2)::text as poc_sum, round(round(:'q_one'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as poc_vat, (round(:'q_one'::numeric * :'price'::numeric, 2) + round(round(:'q_one'::numeric * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as poc_total",
+      "rows": 1,
+      "save": {
+        "pr_sum": "pr_sum",
+        "pob_sum": "pob_sum",
+        "pob_vat": "pob_vat",
+        "pob_total": "pob_total",
+        "poc_sum": "poc_sum",
+        "poc_vat": "poc_vat",
+        "poc_total": "poc_total"
+      }
+    },
+    {
+      "title": "บันทึกใบขอซื้อ/เสนอซื้อ (PR)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{pr}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 2,
+        "inquiryType": 0,
+        "custCode": "{{supp}}",
+        "docFormatCode": "PR",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "standValue": "{{stand}}",
+            "divideValue": "{{divide}}",
+            "qty": "{{q_pr}}",
+            "price": "{{price}}",
+            "sumAmount": "{{pr_sum}}",
+            "taxType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{pr}}"
+        }
+      ]
+    },
+    {
+      "title": "อนุมัติใบขอซื้อเต็มจำนวน",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/approve",
+      "body": {
+        "flag": 4,
+        "origFlag": 2,
+        "docRef": "{{pr}}",
+        "docFormat": "PRA",
+        "screenCode": "PRA",
+        "docDate": "{{today}}",
+        "remark": "{{run.tag}}",
+        "undo": false,
+        "notApprove": false,
+        "menuName": "menu_purchase_requisition_approval"
+      }
+    },
+    {
+      "title": "หาเลขใบอนุมัติที่ระบบออกให้ (อ้างถึงใบขอซื้อนี้)",
+      "do": "db.query",
+      "sql": "select doc_no as pra from ic_trans where trans_flag = 4 and doc_ref = :'pr' and coalesce(last_status, 0) = 0",
+      "rows": 1,
+      "save": {
+        "pra": "pra"
+      }
+    },
+    {
+      "title": "บันทึกใบสั่งซื้อจำนวนเต็มที่อนุมัติ (10) อ้างใบอนุมัติ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{pob}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 6,
+        "inquiryType": 0,
+        "custCode": "{{supp}}",
+        "docFormatCode": "PO",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "{{stand}}",
+            "divideValue": "{{divide}}",
+            "qty": "{{q_pr}}",
+            "price": "{{price}}",
+            "sumAmount": "{{pob_sum}}",
+            "taxType": 0,
+            "refDocNo": "{{pra}}",
+            "refRow": 1,
+            "docRefType": 0
+          }
+        ],
+        "docRef": "{{pra}}",
+        "docRefDate": "{{today}}"
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{pob}}"
+        }
+      ]
+    },
+    {
+      "title": "หัวใบสั่งซื้อจำนวนเต็ม: ฐาน ภาษี รวม ตรงที่คำนวณ",
+      "do": "db.query",
+      "sql": "select total_before_vat, total_vat_value, total_amount, vat_rate from ic_trans where doc_no = :'pob' and trans_flag = 6",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{pob_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{pob_vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{pob_total}}"
+        },
+        {
+          "col": "vat_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        }
+      ]
+    },
+    {
+      "title": "ใบอนุมัติหลังสั่งครบ: ถูกใช้และปิดแล้ว",
+      "do": "db.query",
+      "sql": "select coalesce(used_status, 0) as used_status, coalesce(doc_success, 0) as doc_success from ic_trans where doc_no = :'pra' and trans_flag = 4",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "doc_success",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "ดึงใบอนุมัติที่สั่งครบแล้ว: ยอดคงเหลือให้สั่ง = 0",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/transgrid/refimport",
+      "body": {
+        "transFlag": 6,
+        "docDate": "{{today}}",
+        "custCode": "{{supp}}",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "inquiryType": 0,
+        "docNo": "{{pnew}}",
+        "refDocs": [
+          {
+            "docNo": "{{pra}}",
+            "transFlag": 4,
+            "docRefType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.lines.0.qty",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "path": "data.lines.1",
+          "op": "empty",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "title": "สั่งซื้อเพิ่มอีก 1 อ้างใบอนุมัติเดิม (โปรแกรมเดิมไม่ห้าม) บันทึกได้",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{poc}}",
+        "docDate": "{{today}}",
+        "transType": 1,
+        "transFlag": 6,
+        "inquiryType": 0,
+        "custCode": "{{supp}}",
+        "docFormatCode": "PO",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "{{stand}}",
+            "divideValue": "{{divide}}",
+            "qty": "{{q_one}}",
+            "price": "{{price}}",
+            "sumAmount": "{{poc_sum}}",
+            "taxType": 0,
+            "refDocNo": "{{pra}}",
+            "refRow": 1,
+            "docRefType": 0
+          }
+        ],
+        "docRef": "{{pra}}",
+        "docRefDate": "{{today}}"
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{poc}}"
+        }
+      ]
+    },
+    {
+      "title": "หัวใบสั่งซื้อที่สั่งเพิ่ม: ฐาน ภาษี รวม ตรงที่คำนวณ",
+      "do": "db.query",
+      "sql": "select total_before_vat, total_vat_value, total_amount, vat_rate from ic_trans where doc_no = :'poc' and trans_flag = 6",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{poc_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{poc_vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{poc_total}}"
+        },
+        {
+          "col": "vat_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        }
+      ]
+    },
+    {
+      "title": "ดึงใบอนุมัติหลังสั่งเกิน: ยอดคงเหลือ = 10 − 11 = −1 ตรง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/transgrid/refimport",
+      "body": {
+        "transFlag": 6,
+        "docDate": "{{today}}",
+        "custCode": "{{supp}}",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "inquiryType": 0,
+        "docNo": "{{pnew}}",
+        "refDocs": [
+          {
+            "docNo": "{{pra}}",
+            "transFlag": 4,
+            "docRefType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.lines.0.qty",
+          "op": "eq",
+          "value": "-1"
+        },
+        {
+          "path": "data.lines.1",
+          "op": "empty",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "title": "ใบอนุมัติหลังสั่งเกิน: ยังถูกใช้ แต่ไม่ปิด (สั่งรวม 11 ไม่เท่าที่อนุมัติ 10)",
+      "do": "db.query",
+      "sql": "select coalesce(used_status, 0) as used_status, coalesce(doc_success, 0) as doc_success from ic_trans where doc_no = :'pra' and trans_flag = 4",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "doc_success",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ไม่มีการเคลื่อนไหวสต๊อกและ GL จากใบสั่งซื้อ",
+      "do": "db.query",
+      "sql": "select (select count(*) from gl_journal_detail where doc_no in (:'pob', :'poc')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'pob', :'poc')) as n",
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบใบสั่งซื้อทดสอบ POC",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{poc}}",
+        "transFlag": 6
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบสั่งซื้อทดสอบ POB",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{pob}}",
+        "transFlag": 6
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ยกเลิกการอนุมัติใบขอซื้อ (ลบใบอนุมัติที่ระบบออก)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/approve",
+      "body": {
+        "flag": 4,
+        "origFlag": 2,
+        "docRef": "{{pr}}",
+        "docFormat": "PRA",
+        "screenCode": "PRA",
+        "docDate": "",
+        "remark": "{{run.tag}}",
+        "undo": true,
+        "notApprove": false,
+        "menuName": "menu_purchase_requisition_approval"
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบขอซื้อทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{pr}}",
+        "transFlag": 2
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo (หัว รายการ เจ้าหนี้ จ่ายชำระ มัดจำ GL ภาษีซื้อ หัก ณ ที่จ่าย)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'pr', :'pra', :'poc', :'pob')) + (select count(*) from ic_trans_detail where doc_no in (:'pr', :'pra', :'poc', :'pob')) + (select count(*) from ap_ar_trans where doc_no in (:'pr', :'pra', :'poc', :'pob')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'pr', :'pra', :'poc', :'pob')) + (select count(*) from cb_trans where doc_no in (:'pr', :'pra', :'poc', :'pob')) + (select count(*) from cb_trans_detail where doc_no in (:'pr', :'pra', :'poc', :'pob')) + (select count(*) from gl_journal where doc_no in (:'pr', :'pra', :'poc', :'pob')) + (select count(*) from gl_journal_detail where doc_no in (:'pr', :'pra', :'poc', :'pob')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'pr', :'pra', :'poc', :'pob')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'pr', :'pra', :'poc', :'pob')) + (select count(*) from gl_wht_list where doc_no in (:'pr', :'pra', :'poc', :'pob')) + (select count(*) from gl_wht_list_detail where doc_no in (:'pr', :'pra', :'poc', :'pob')) + (select count(*) from ic_trans where trans_flag = 4 and doc_ref = :'pr') as left_rows",
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

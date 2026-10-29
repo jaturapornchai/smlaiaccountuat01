@@ -1,0 +1,4894 @@
+{
+  "id": "ui-mst-customer",
+  "module": "master",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "title": "ทะเบียนลูกหนี้: เพิ่มกรอกครบทุกช่อง ค้นหา กรอง เรียง แก้ไข กันลบเมื่อมีเอกสาร ลบพร้อมข้อมูลลูก ตรวจฐานข้อมูลทุกขั้น",
+  "description": "CustomerScreen บนจอ menu_ar_detail (ar_customer + ar_customer_detail): เพิ่มลูกหนี้กรอกครบทุกช่อง (ชื่อ ที่อยู่ จังหวัด อำเภอ ตำบล ประเภท ติดต่อ สถานะ คำนำหน้า ระดับราคา ชื่อ-นามสกุล วันที่ เลขผู้เสียภาษี บัตรประชาชน สาขา หมายเหตุ พิกัด) เลือกจังหวัด/อำเภอ/ตำบล/ประเภทจากหน้าต่างค้นหาที่กรองตามจังหวัดและอำเภอ ตรวจ validation (รหัสว่าง ชื่อว่าง เลขภาษีไม่ครบ 13 หลัก เลขภาษีซ้ำ สาขา 00000/ไม่ครบ 5 หลัก ไม่พบจังหวัด รหัสซ้ำ) ตรวจ DB ทุกคอลัมน์และ master_logs ค้นหา กรอง เรียง เปิดดู แก้ไขผ่านกล่อง Lock และปุ่มดินสอ แก้ค้างแล้วสลับรายการ กันลบเมื่อถูกใช้ใน 4 ตารางเอกสาร ลบพร้อมข้อมูลลูกทุกตารางแล้วตรวจ 0 แถว ใช้เฉพาะแถว UAT ของรอบนี้ จังหวัด/อำเภอ/ตำบล/ประเภทสร้างเป็นแถว UAT เพราะ smldemo ไม่มี",
+  "timeoutMs": 1200000,
+  "steps": [
+    {
+      "title": "เลือกลูกหนี้จริงตัวสุดท้ายของระบบ (ไม่ใช่ UAT) ไว้ทดสอบค้นหาและเปิดดู",
+      "do": "db.query",
+      "sql": "select code as real_code, name_1 as real_name from ar_customer where code !~ '^UAT' and coalesce(name_1,'') <> '' and code !~ '[\"\\\\]' and name_1 !~ '[\"\\\\]' order by code desc limit 1",
+      "rows": 1,
+      "save": {
+        "real_code": "real_code",
+        "real_name": "real_name"
+      },
+      "expect": [
+        {
+          "col": "real_code",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "real_name",
+          "op": "ne",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "รหัสลูกหนี้แรกสุดของรายการ (จอต้องโหลดรายการแรกให้อัตโนมัติ)",
+      "do": "db.query",
+      "sql": "select code as first_code from ar_customer order by code limit 1",
+      "rows": 1,
+      "save": {
+        "first_code": "first_code"
+      },
+      "expect": [
+        {
+          "col": "first_code",
+          "op": "ne",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "สุ่มเลขประจำตัวผู้เสียภาษี 13 หลัก 2 ค่า ที่ยังไม่มีลูกหนี้คนไหนใช้ และเลขบัตรประชาชน 2 ค่า (สุ่มใหม่ทุกรอบ ไม่เขียนไว้ในสคริปต์)",
+      "do": "db.query",
+      "sql": "with c as (select ((random() * 8000000000000)::bigint + 1000000000000)::text as t from generate_series(1, 60)), u as (select distinct t from c where not exists (select 1 from ar_customer_detail d where d.tax_id = c.t) limit 2) select (select t from u order by t limit 1) as tax1, (select t from u order by t desc limit 1) as tax2, ((random() * 8000000000000)::bigint + 1000000000000)::text as card1, ((random() * 8000000000000)::bigint + 1000000000000)::text as card2",
+      "rows": 1,
+      "save": {
+        "tax1": "tax1",
+        "tax2": "tax2",
+        "card1": "card1",
+        "card2": "card2"
+      },
+      "expect": [
+        {
+          "col": "tax1",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "tax2",
+          "op": "ne",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ก่อนเริ่มยังไม่มีลูกหนี้ที่ขึ้นต้น UAT ของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ก่อนเริ่มยังไม่มีจังหวัด อำเภอ ตำบล ประเภทลูกหนี้ UAT ของรอบนี้",
+      "do": "db.query",
+      "sql": "select (select count(*) from erp_province where code like 'UAT' || :'run_short' || '%') as prov, (select count(*) from erp_amper where code like 'UAT' || :'run_short' || '%') as amp, (select count(*) from erp_tambon where code like 'UAT' || :'run_short' || '%') as tam, (select count(*) from ar_type where code like 'UAT' || :'run_short' || '%') as typ",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "prov",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "amp",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "tam",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "typ",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "สร้างจังหวัด UAT ของรอบนี้ 2 รายการ (smldemo ไม่มีจังหวัดให้เลือก)",
+      "do": "db.exec",
+      "sql": "insert into erp_province (code, name_1) values ('UAT' || :'run_short' || 'P1', 'จังหวัดทดสอบหนึ่ง UAT' || :'run_short'), ('UAT' || :'run_short' || 'P2', 'จังหวัดทดสอบสอง UAT' || :'run_short')",
+      "affected": 2
+    },
+    {
+      "title": "สร้างอำเภอ UAT 2 รายการ (A1 อยู่จังหวัด P1, A2 อยู่จังหวัด P2)",
+      "do": "db.exec",
+      "sql": "insert into erp_amper (code, name_1, province) values ('UAT' || :'run_short' || 'A1', 'อำเภอทดสอบหนึ่ง UAT' || :'run_short', 'UAT' || :'run_short' || 'P1'), ('UAT' || :'run_short' || 'A2', 'อำเภอทดสอบสอง UAT' || :'run_short', 'UAT' || :'run_short' || 'P2')",
+      "affected": 2
+    },
+    {
+      "title": "สร้างตำบล UAT 2 รายการ (T1 อยู่ P1/A1, T2 อยู่ P2/A2)",
+      "do": "db.exec",
+      "sql": "insert into erp_tambon (code, name_1, amper, province) values ('UAT' || :'run_short' || 'T1', 'ตำบลทดสอบหนึ่ง UAT' || :'run_short', 'UAT' || :'run_short' || 'A1', 'UAT' || :'run_short' || 'P1'), ('UAT' || :'run_short' || 'T2', 'ตำบลทดสอบสอง UAT' || :'run_short', 'UAT' || :'run_short' || 'A2', 'UAT' || :'run_short' || 'P2')",
+      "affected": 2
+    },
+    {
+      "title": "สร้างประเภทลูกหนี้ UAT 2 รายการ",
+      "do": "db.exec",
+      "sql": "insert into ar_type (code, name_1) values ('UAT' || :'run_short' || 'Y1', 'ประเภทลูกหนี้ทดสอบหนึ่ง UAT' || :'run_short'), ('UAT' || :'run_short' || 'Y2', 'ประเภทลูกหนี้ทดสอบสอง UAT' || :'run_short')",
+      "affected": 2
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true,
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดจอกำหนดลูกหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_ar_detail"
+    },
+    {
+      "title": "เปิดจอแล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/",
+        "ERR_QUIC_PROTOCOL_ERROR",
+        "openstreetmap",
+        "arcgisonline",
+        "unpkg",
+        "leaflet",
+        "cdnjs",
+        "jsdelivr",
+        "nominatim"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นช่องค้นหาและตัวนับรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นปุ่มเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"เพิ่มรายการใหม่\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นหัวข้อ กำหนดลูกหนี้",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1:has-text(\"กำหนดลูกหนี้\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นหัวจอ หน้าจอบันทึก/แก้ไขข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] header:has-text(\"หน้าจอบันทึก/แก้ไขข้อมูล\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "หัวคอลัมน์ รหัสลูกหนี้",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] th[data-col-key=\"code\"]",
+      "text": "รหัสลูกหนี้",
+      "continueOnFail": true
+    },
+    {
+      "title": "หัวคอลัมน์ ชื่อ 1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] th[data-col-key=\"name_1\"]",
+      "text": "ชื่อ 1",
+      "continueOnFail": true
+    },
+    {
+      "title": "หัวคอลัมน์ หมายเลขโทรศัพท์",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] th[data-col-key=\"telephone\"]",
+      "text": "หมายเลขโทรศัพท์",
+      "continueOnFail": true
+    },
+    {
+      "title": "หัวคอลัมน์ เขตการขนส่ง",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] th[data-col-key=\"logistic_area\"]",
+      "text": "เขตการขนส่ง",
+      "continueOnFail": true
+    },
+    {
+      "title": "หัวคอลัมน์ เว็บไซต์",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] th[data-col-key=\"website\"]",
+      "text": "เว็บไซต์",
+      "continueOnFail": true
+    },
+    {
+      "title": "หัวคอลัมน์ ระดับราคา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] th[data-col-key=\"price_level\"]",
+      "text": "ระดับราคา",
+      "continueOnFail": true
+    },
+    {
+      "title": "หัวคอลัมน์ หมายเหตุ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] th[data-col-key=\"remark\"]",
+      "text": "หมายเหตุ",
+      "continueOnFail": true
+    },
+    {
+      "title": "หัวคอลัมน์ ผู้แก้ไขล่าสุด",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] th[data-col-key=\"last_update_by\"]",
+      "text": "ผู้แก้ไขล่าสุด",
+      "continueOnFail": true
+    },
+    {
+      "title": "จอโหลดลูกหนี้รายการแรกให้อัตโนมัติ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{first_code}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องรหัสถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องชื่อ 1 ถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ไม่มีปุ่มบันทึก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู เห็นปุ่มแก้ไขข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"แก้ไขข้อมูล\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู เห็นปุ่มลบรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ลบรายการ\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพจอเริ่มต้น",
+      "do": "ui.screenshot",
+      "name": "cus-open"
+    },
+    {
+      "title": "ค้นหาลูกหนี้จริงด้วยรหัส",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{real_code}}"
+    },
+    {
+      "title": "ค้นหาลูกหนี้จริงด้วยรหัส (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "เห็นแถวลูกหนี้จริงในรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ {{real_code}}\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดูลูกหนี้จริง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ {{real_code}}\"])"
+    },
+    {
+      "title": "ช่องรหัสแสดงรหัสลูกหนี้จริง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{real_code}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องชื่อ 1 แสดงชื่อลูกหนี้จริง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{real_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดูแล้วยังเป็นโหมดดู ปุ่มบันทึกไม่แสดง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"แก้ไขข้อมูล\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ล้างคำค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ล้างคำค้นหา\"]"
+    },
+    {
+      "title": "กดเพิ่มรายการใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"เพิ่มรายการใหม่\"]"
+    },
+    {
+      "title": "หัวจอแสดง เพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] header span:has-text(\"เพิ่มรายการใหม่\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "ปุ่มบันทึกกดไม่ได้เพราะยังไม่มีการแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ประเทศตั้งต้นเป็น ไทย",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเทศ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ไทย",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลขที่สาขาตั้งต้น 00000",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "00000",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลขที่สาขากรอกไม่ได้เพราะเป็นสำนักงานใหญ่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "สถานประกอบการตั้งต้นเป็นสำนักงานใหญ่",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] div[role=radiogroup] span:has(> input:checked)",
+      "text": "1. สำนักงานใหญ่",
+      "continueOnFail": true
+    },
+    {
+      "title": "สถานะตั้งต้นเป็น ใช้งาน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] fieldset:has(legend:text-is(\"สถานะ\")) label:has(input:checked)",
+      "text": "^\\s*ใช้งาน\\s*$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "สถานะลูกหนี้ตั้งต้นเป็น บุคคลธรรมดา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] fieldset:has(legend:text-is(\"สถานะลูกหนี้\")) label:has(input:checked)",
+      "text": "^\\s*บุคคลธรรมดา\\s*$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "ระดับราคาตั้งต้น 0",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ระดับราคาสินค้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "0",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องรหัสพร้อมให้กรอก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][not(@disabled)]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ล้างช่องรหัส",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": ""
+    },
+    {
+      "title": "กดปุ่ม รันรหัสใหม่ (ใส่รหัสถัดไปอัตโนมัติ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ใส่รหัสถัดไปอัตโนมัติ\"]"
+    },
+    {
+      "title": "กดปุ่มรันรหัสใหม่แล้วไม่มีกล่องแจ้งข้อผิดพลาด",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ล้างช่องรหัสอีกครั้ง (เพื่อทดสอบรหัสว่าง)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": ""
+    },
+    {
+      "title": "กรอกเฉพาะชื่อ 1 (เว้นรหัสว่าง)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ทดสอบ ไม่มีรหัส"
+    },
+    {
+      "title": "หัวจอแสดง แก้ไขแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] header span:has-text(\"แก้ไขแล้ว\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "ย้ายเมาส์ออกจากช่องกรอก (ปิดป๊อปอัปคำอธิบายช่อง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1"
+    },
+    {
+      "title": "กดบันทึกทั้งที่ไม่มีรหัส",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบเตือนต้องระบุรหัสลูกหนี้",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "กรุณาระบุ 'รหัสลูกหนี้'",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพเตือนไม่มีรหัส",
+      "do": "ui.screenshot",
+      "name": "cus-warn-code"
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "คำเตือนปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกรหัสตัวพิมพ์เล็ก (ระบบต้องแปลงเป็นตัวพิมพ์ใหญ่)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "uat{{run.short}}c1"
+    },
+    {
+      "title": "ช่องรหัสแสดงตัวพิมพ์ใหญ่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}C1",
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบชื่อ 1 ให้เหลือแต่ช่องว่าง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "   "
+    },
+    {
+      "title": "ย้ายเมาส์ออกจากช่องกรอก (ปิดป๊อปอัปคำอธิบายช่อง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1"
+    },
+    {
+      "title": "กดบันทึกทั้งที่ชื่อ 1 เป็นช่องว่าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบเตือนต้องระบุชื่อ 1",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "กรุณาระบุ 'ชื่อ 1'",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน (ชื่อ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "กรอกชื่อ 1 (มีช่องว่างหน้าหลัง ระบบต้องตัดก่อนบันทึก)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "  ลูกหนี้ทดสอบ ALPHA {{run.short}}  "
+    },
+    {
+      "title": "กรอกเลขผู้เสียภาษีที่มีตัวอักษรปน 13 ตัว (ระบบต้องเก็บเฉพาะตัวเลข)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขประจำตัวผู้เสียภาษี :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "a123456789012"
+    },
+    {
+      "title": "ช่องเลขผู้เสียภาษีเหลือเฉพาะตัวเลข 12 หลัก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขประจำตัวผู้เสียภาษี :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "123456789012",
+      "continueOnFail": true
+    },
+    {
+      "title": "ย้ายเมาส์ออกจากช่องกรอก (ปิดป๊อปอัปคำอธิบายช่อง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1"
+    },
+    {
+      "title": "กดบันทึกทั้งที่เลขผู้เสียภาษีไม่ครบ 13 หลัก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบเตือนเลขผู้เสียภาษีไม่ครบ 13 หลัก",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ไม่ครบ 13 หลัก",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพเตือนเลขผู้เสียภาษีไม่ครบ",
+      "do": "ui.screenshot",
+      "name": "cus-warn-tax"
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน (เลขผู้เสียภาษี)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "กรอกเลขผู้เสียภาษีที่ถูกต้อง 13 หลัก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขประจำตัวผู้เสียภาษี :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{tax1}}"
+    },
+    {
+      "title": "ช่องเลขผู้เสียภาษีแสดง 13 หลัก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขประจำตัวผู้เสียภาษี :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{tax1}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกสถานประกอบการเป็น สาขา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"สถานประกอบการ :\"]/following-sibling::*[1]//input[@type=\"radio\"]",
+      "nth": 1
+    },
+    {
+      "title": "สถานประกอบการเป็น สาขา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] div[role=radiogroup] span:has(> input:checked)",
+      "text": "2. สาขา",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลขที่สาขากรอกได้แล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][not(@disabled)]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ย้ายเมาส์ออกจากช่องกรอก (ปิดป๊อปอัปคำอธิบายช่อง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1"
+    },
+    {
+      "title": "กดบันทึกทั้งที่เลขที่สาขาเป็น 00000",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบเตือนเลขที่สาขาต้องไม่ใช่ 00000",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องไม่ใช่ 00000",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน (สาขา 00000)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "กรอกเลขที่สาขา 3 หลัก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "123"
+    },
+    {
+      "title": "ย้ายเมาส์ออกจากช่องกรอก (ปิดป๊อปอัปคำอธิบายช่อง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1"
+    },
+    {
+      "title": "กดบันทึกทั้งที่เลขที่สาขาไม่ครบ 5 หลัก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบเตือนเลขที่สาขาต้องเป็นตัวเลข 5 หลัก",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "5 หลัก",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพเตือนเลขที่สาขา",
+      "do": "ui.screenshot",
+      "name": "cus-warn-branch"
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน (สาขา 3 หลัก)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "กรอกเลขที่สาขาที่มีตัวอักษรปน 5 ตัว (ระบบต้องเก็บเฉพาะตัวเลข)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "x0012"
+    },
+    {
+      "title": "ช่องเลขที่สาขาเหลือเฉพาะตัวเลข",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "0012",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกเลขที่สาขา 5 หลักที่ถูกต้อง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "00012"
+    },
+    {
+      "title": "DB: การกดบันทึกที่ไม่ครบไม่ทำให้เกิดแถวลูกหนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสจังหวัดที่ไม่มีอยู่จริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"จังหวัด :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ZZNOPROV"
+    },
+    {
+      "title": "ออกจากช่องจังหวัด",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"จังหวัด :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "ระบบเตือนไม่พบจังหวัด",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ไม่พบ : จังหวัด",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน (ไม่พบจังหวัด)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ช่องจังหวัดถูกล้างหลังเตือน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"จังหวัด :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปิดแท็บขณะกำลังเพิ่มรายการ",
+      "do": "ui.click",
+      "selector": "[data-testid=\"workspace-tab-close-menu_ar_detail\"]"
+    },
+    {
+      "title": "ระบบเตือนว่ามีข้อมูลที่ยังไม่บันทึก",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกอยู่ต่อ",
+      "do": "ui.click",
+      "selector": "[data-testid=\"tab-warning-keep-btn\"]"
+    },
+    {
+      "title": "หน้าต่างเตือนปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "รหัสที่กรอกไว้ยังอยู่ครบ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}C1",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก ชื่อ (ภาษาอังกฤษ) 1",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ (ภาษาอังกฤษ) 1 :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT Customer ALPHA {{run.short}}"
+    },
+    {
+      "title": "กรอก ที่อยู่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ที่อยู่ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ TOWERZETA"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา จังหวัด",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"จังหวัด\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง กำหนดจังหวัด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"กำหนดจังหวัด\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา จังหวัด",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "UAT{{run.short}}P1"
+    },
+    {
+      "title": "เลือกรายการ UAT{{run.short}}P1",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}P1\"))"
+    },
+    {
+      "title": "ช่อง จังหวัด แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"จังหวัด :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}P1~จังหวัดทดสอบหนึ่ง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกจังหวัดแล้ว ช่องอำเภอยังว่าง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"อำเภอ/เขต :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา อำเภอ/เขต",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"อำเภอ/เขต\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง กำหนดอำเภอ/เขต",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"กำหนดอำเภอ/เขต\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์คำนำหน้า UAT ของรอบนี้ (อำเภอ/เขต)",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "เห็นแถว UAT{{run.short}}A1 (อยู่ในจังหวัด/อำเภอที่เลือก)",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}A1\"))",
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่เห็นแถว UAT{{run.short}}A2 (คนละจังหวัด/อำเภอ)",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}A2\"))",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกรายการ UAT{{run.short}}A1",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}A1\"))"
+    },
+    {
+      "title": "ช่อง อำเภอ/เขต แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"อำเภอ/เขต :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}A1~อำเภอทดสอบหนึ่ง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา ตำบล/แขวง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ตำบล/แขวง\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง กำหนดตำบล/แขวง",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"กำหนดตำบล/แขวง\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์คำนำหน้า UAT ของรอบนี้ (ตำบล/แขวง)",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "เห็นแถว UAT{{run.short}}T1 (อยู่ในจังหวัด/อำเภอที่เลือก)",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}T1\"))",
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่เห็นแถว UAT{{run.short}}T2 (คนละจังหวัด/อำเภอ)",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}T2\"))",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกรายการ UAT{{run.short}}T1",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}T1\"))"
+    },
+    {
+      "title": "ช่อง ตำบล/แขวง แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ตำบล/แขวง :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}T1~ตำบลทดสอบหนึ่ง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก รหัสไปรษณีย์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัสไปรษณีย์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "10110"
+    },
+    {
+      "title": "แก้ประเทศ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเทศ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "สิงคโปร์"
+    },
+    {
+      "title": "กรอก หมายเลขโทรศัพท์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลขโทรศัพท์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "02-000-0001"
+    },
+    {
+      "title": "กรอก หมายเลขโทรสาร",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลขโทรสาร :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "02-000-0002"
+    },
+    {
+      "title": "กรอก หมายเลข SMS",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลข SMS :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "0800000001"
+    },
+    {
+      "title": "กรอก อีเมล์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"อีเมล์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "alpha{{run.short}}@example.com"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา ประเภทลูกหนี้",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ประเภทลูกหนี้\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง กำหนดประเภทลูกหนี้",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"กำหนดประเภทลูกหนี้\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา ประเภทลูกหนี้",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "UAT{{run.short}}Y1"
+    },
+    {
+      "title": "เลือกรายการ UAT{{run.short}}Y1",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}Y1\"))"
+    },
+    {
+      "title": "ช่อง ประเภทลูกหนี้ แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเภทลูกหนี้ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}Y1~ประเภทลูกหนี้ทดสอบหนึ่ง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก เว็บไซต์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เว็บไซต์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "www.alpha-{{run.short}}.example.com"
+    },
+    {
+      "title": "เลือกสถานะลูกหนี้ นิติบุคคล",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] input[name=\"ar_status\"]",
+      "nth": 1
+    },
+    {
+      "title": "สถานะลูกหนี้เป็น นิติบุคคล",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] fieldset:has(legend:text-is(\"สถานะลูกหนี้\")) label:has(input:checked)",
+      "text": "^\\s*นิติบุคคล\\s*$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก คำนำหน้า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"คำนำหน้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "บริษัท"
+    },
+    {
+      "title": "เลือกระดับราคาสินค้า 3: ราคาขาย1",
+      "do": "ui.select",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ระดับราคาสินค้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "3"
+    },
+    {
+      "title": "ระดับราคาสินค้าเป็น 3",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ระดับราคาสินค้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "3",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก ชื่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ทดสอบ"
+    },
+    {
+      "title": "กรอก นามสกุล",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"นามสกุล :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ระบบ{{run.short}}"
+    },
+    {
+      "title": "กรอก วันเกิด/วันจดทะเบียน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันเกิด/วันจดทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "15/03/1990"
+    },
+    {
+      "title": "ออกจากช่อง วันเกิด/วันจดทะเบียน",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันเกิด/วันจดทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "วันเกิด/วันจดทะเบียน แสดงวันที่ที่กรอก (ค.ศ. หรือ พ.ศ. ตามตั้งค่าระบบ)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันเกิด/วันจดทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "^15/03/(1990|2533)$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก วันลงทะเบียน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันลงทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "01/07/2020"
+    },
+    {
+      "title": "ออกจากช่อง วันลงทะเบียน",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันลงทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "วันลงทะเบียน แสดงวันที่ที่กรอก (ค.ศ. หรือ พ.ศ. ตามตั้งค่าระบบ)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันลงทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "^01/07/(2020|2563)$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก เลขที่บัตรประชาชน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่บัตรประชาชน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{card1}}"
+    },
+    {
+      "title": "กรอก หมายเหตุ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเหตุ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "หมายเหตุลูกหนี้ ALPHA {{run.short}}"
+    },
+    {
+      "title": "กรอกละติจูด",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ละติจูด (Latitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "13.756331"
+    },
+    {
+      "title": "ออกจากช่องละติจูด",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ละติจูด (Latitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกลองจิจูด",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ลองจิจูด (Longitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "100.501765"
+    },
+    {
+      "title": "ออกจากช่องลองจิจูด",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ลองจิจูด (Longitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "ช่องละติจูดแสดงค่าที่กรอก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ละติจูด (Latitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "13.756331",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องลองจิจูดแสดงค่าที่กรอก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ลองจิจูด (Longitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "100.501765",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพก่อนบันทึก A",
+      "do": "ui.screenshot",
+      "name": "cus-before-save-a"
+    },
+    {
+      "title": "ย้ายเมาส์ออกจากช่องกรอก (ปิดป๊อปอัปคำอธิบายช่อง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1"
+    },
+    {
+      "title": "กดบันทึก A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบแจ้งบันทึกสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "บันทึกข้อมูลลูกหนี้เสร็จเรียบร้อย",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "หัวจอแสดง บันทึกล่าสุด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] header span:has-text(\"บันทึกล่าสุด\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "บันทึก A แล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/",
+        "ERR_QUIC_PROTOCOL_ERROR",
+        "openstreetmap",
+        "arcgisonline",
+        "unpkg",
+        "leaflet",
+        "cdnjs",
+        "jsdelivr",
+        "nominatim"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: A ครบทุกคอลัมน์ ชื่อถูกตัดช่องว่าง ที่อยู่/จังหวัด/อำเภอ/ตำบล/ประเภท/วันที่/พิกัด/ภาษี/สาขาตรงที่กรอก",
+      "do": "db.query",
+      "sql": "select c.code as code, coalesce(c.name_1,'') as name_1, coalesce(c.name_eng_1,'') as name_eng_1, coalesce(c.address,'') as address, coalesce(c.province,'') as province, coalesce(c.amper,'') as amper, coalesce(c.tambon,'') as tambon, coalesce(c.zip_code,'') as zip_code, coalesce(c.country,'') as country, coalesce(c.telephone,'') as telephone, coalesce(c.fax,'') as fax, coalesce(c.sms_phonenumber,'') as sms_phonenumber, coalesce(c.email,'') as email, coalesce(c.ar_type,'') as ar_type, coalesce(c.website,'') as website, coalesce(c.prefixname,'') as prefixname, coalesce(c.first_name,'') as first_name, coalesce(c.last_name,'') as last_name, coalesce(c.remark,'') as remark, coalesce(c.ar_status,0) as ar_status, coalesce(c.status,0) as status, coalesce(c.price_level,0) as price_level, coalesce(c.birth_day::text,'') as birth_day, coalesce(c.register_date::text,'') as register_date, coalesce(d.tax_id,'') as tax_id, coalesce(d.card_id,'') as card_id, coalesce(d.branch_type,0) as branch_type, coalesce(d.branch_code,'') as branch_code, round(coalesce(d.latitude,0),6)::text as latitude, round(coalesce(d.longitude,0),6)::text as longitude, (c.create_datetime is not null and coalesce(c.create_code,'') <> '')::text as has_create from ar_customer c left join ar_customer_detail d on d.ar_code = c.code where c.code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}C1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "ลูกหนี้ทดสอบ ALPHA {{run.short}}"
+        },
+        {
+          "col": "name_eng_1",
+          "op": "eq",
+          "value": "UAT Customer ALPHA {{run.short}}"
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ TOWERZETA"
+        },
+        {
+          "col": "zip_code",
+          "op": "eq",
+          "value": "10110"
+        },
+        {
+          "col": "country",
+          "op": "eq",
+          "value": "สิงคโปร์"
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": "02-000-0001"
+        },
+        {
+          "col": "fax",
+          "op": "eq",
+          "value": "02-000-0002"
+        },
+        {
+          "col": "sms_phonenumber",
+          "op": "eq",
+          "value": "0800000001"
+        },
+        {
+          "col": "email",
+          "op": "eq",
+          "value": "alpha{{run.short}}@example.com"
+        },
+        {
+          "col": "website",
+          "op": "eq",
+          "value": "www.alpha-{{run.short}}.example.com"
+        },
+        {
+          "col": "prefixname",
+          "op": "eq",
+          "value": "บริษัท"
+        },
+        {
+          "col": "first_name",
+          "op": "eq",
+          "value": "ทดสอบ"
+        },
+        {
+          "col": "last_name",
+          "op": "eq",
+          "value": "ระบบ{{run.short}}"
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "หมายเหตุลูกหนี้ ALPHA {{run.short}}"
+        },
+        {
+          "col": "province",
+          "op": "eq",
+          "value": "UAT{{run.short}}P1"
+        },
+        {
+          "col": "amper",
+          "op": "eq",
+          "value": "UAT{{run.short}}A1"
+        },
+        {
+          "col": "tambon",
+          "op": "eq",
+          "value": "UAT{{run.short}}T1"
+        },
+        {
+          "col": "ar_type",
+          "op": "eq",
+          "value": "UAT{{run.short}}Y1"
+        },
+        {
+          "col": "ar_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level",
+          "op": "eq",
+          "value": "3"
+        },
+        {
+          "col": "birth_day",
+          "op": "eq",
+          "value": "1990-03-15"
+        },
+        {
+          "col": "register_date",
+          "op": "eq",
+          "value": "2020-07-01"
+        },
+        {
+          "col": "tax_id",
+          "op": "eq",
+          "value": "{{tax1}}"
+        },
+        {
+          "col": "card_id",
+          "op": "eq",
+          "value": "{{card1}}"
+        },
+        {
+          "col": "branch_type",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": "00012"
+        },
+        {
+          "col": "latitude",
+          "op": "eq",
+          "value": "13.756331"
+        },
+        {
+          "col": "longitude",
+          "op": "eq",
+          "value": "100.501765"
+        },
+        {
+          "col": "has_create",
+          "op": "eq",
+          "value": "true"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: บันทึกประวัติ master_logs ว่าเพิ่ม A 1 ครั้ง",
+      "do": "db.query",
+      "sql": "select count(*) filter (where function_code = 1) as n_new, count(*) filter (where function_code = 2) as n_edit, count(*) filter (where function_code = 3) as n_del from master_logs where menu_name = 'menu_ar' and code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n_new",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "n_edit",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "n_del",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกเป็นโหมดดู ช่องรหัสถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องชื่อ 1 หลังบันทึกไม่มีช่องว่างหน้าหลัง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ลูกหนี้ทดสอบ ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดเพิ่มรายการใหม่ (ทดสอบรหัสซ้ำ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"เพิ่มรายการใหม่\"]"
+    },
+    {
+      "title": "กรอกรหัสซ้ำกับ A",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}C1"
+    },
+    {
+      "title": "กรอกชื่อ 1",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ลูกหนี้สอง ทดสอบ BETA {{run.short}}"
+    },
+    {
+      "title": "ย้ายเมาส์ออกจากช่องกรอก (ปิดป๊อปอัปคำอธิบายช่อง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบแจ้งว่ารหัสมีอยู่ในระบบแล้ว",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "มีอยู่ในระบบแล้ว",
+      "continueOnFail": true
+    },
+    {
+      "title": "ข้อความบอกรหัส A",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "UAT{{run.short}}C1",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพแจ้งรหัสซ้ำ",
+      "do": "ui.screenshot",
+      "name": "cus-warn-dup"
+    },
+    {
+      "title": "เลือก ไม่ (ไม่เปลี่ยนเป็นรหัสใหม่)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ไม่\")"
+    },
+    {
+      "title": "กล่องถามปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: รหัสซ้ำไม่ทำให้ชื่อ A ถูกทับและไม่เกิดแถวใหม่",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: ชื่อ A ยังเป็นเดิม",
+      "do": "db.query",
+      "sql": "select c.code as code, coalesce(c.name_1,'') as name_1, coalesce(c.name_eng_1,'') as name_eng_1, coalesce(c.address,'') as address, coalesce(c.province,'') as province, coalesce(c.amper,'') as amper, coalesce(c.tambon,'') as tambon, coalesce(c.zip_code,'') as zip_code, coalesce(c.country,'') as country, coalesce(c.telephone,'') as telephone, coalesce(c.fax,'') as fax, coalesce(c.sms_phonenumber,'') as sms_phonenumber, coalesce(c.email,'') as email, coalesce(c.ar_type,'') as ar_type, coalesce(c.website,'') as website, coalesce(c.prefixname,'') as prefixname, coalesce(c.first_name,'') as first_name, coalesce(c.last_name,'') as last_name, coalesce(c.remark,'') as remark, coalesce(c.ar_status,0) as ar_status, coalesce(c.status,0) as status, coalesce(c.price_level,0) as price_level, coalesce(c.birth_day::text,'') as birth_day, coalesce(c.register_date::text,'') as register_date, coalesce(d.tax_id,'') as tax_id, coalesce(d.card_id,'') as card_id, coalesce(d.branch_type,0) as branch_type, coalesce(d.branch_code,'') as branch_code, round(coalesce(d.latitude,0),6)::text as latitude, round(coalesce(d.longitude,0),6)::text as longitude, (c.create_datetime is not null and coalesce(c.create_code,'') <> '')::text as has_create from ar_customer c left join ar_customer_detail d on d.ar_code = c.code where c.code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "ลูกหนี้ทดสอบ ALPHA {{run.short}}"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปลี่ยนเป็นรหัส B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}C2"
+    },
+    {
+      "title": "กรอกเลขผู้เสียภาษีซ้ำกับ A",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขประจำตัวผู้เสียภาษี :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{tax1}}"
+    },
+    {
+      "title": "เลือกสถานประกอบการ สาขา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"สถานประกอบการ :\"]/following-sibling::*[1]//input[@type=\"radio\"]",
+      "nth": 1
+    },
+    {
+      "title": "กรอกเลขที่สาขาเดียวกับ A",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "00012"
+    },
+    {
+      "title": "ย้ายเมาส์ออกจากช่องกรอก (ปิดป๊อปอัปคำอธิบายช่อง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1"
+    },
+    {
+      "title": "กดบันทึก B ที่เลขผู้เสียภาษีและสาขาซ้ำกับ A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบเตือนเลขผู้เสียภาษีซ้ำกับลูกหนี้ A",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ซ้ำกับลูกหนี้รหัส 'UAT{{run.short}}C1'",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพเตือนเลขผู้เสียภาษีซ้ำ",
+      "do": "ui.screenshot",
+      "name": "cus-warn-duptax"
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: B ยังไม่ถูกบันทึก",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ล้างเลขผู้เสียภาษีของ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขประจำตัวผู้เสียภาษี :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": ""
+    },
+    {
+      "title": "เลือกสถานประกอบการ สำนักงานใหญ่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"สถานประกอบการ :\"]/following-sibling::*[1]//input[@type=\"radio\"]",
+      "nth": 0
+    },
+    {
+      "title": "เลือกสำนักงานใหญ่แล้วเลขที่สาขากลับเป็น 00000",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "00000",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลขที่สาขากรอกไม่ได้อีก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกสถานะ ไม่ใช้งาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] input[name=\"status\"]",
+      "nth": 1
+    },
+    {
+      "title": "สถานะเป็น ไม่ใช้งาน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] fieldset:has(legend:text-is(\"สถานะ\")) label:has(input:checked)",
+      "text": "^\\s*ไม่ใช้งาน\\s*$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "ย้ายเมาส์ออกจากช่องกรอก (ปิดป๊อปอัปคำอธิบายช่อง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1"
+    },
+    {
+      "title": "กดบันทึก B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง (บันทึก B)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: B มีเฉพาะรหัสกับชื่อ สถานะไม่ใช้งาน ที่เหลือว่าง/ค่าตั้งต้น",
+      "do": "db.query",
+      "sql": "select c.code as code, coalesce(c.name_1,'') as name_1, coalesce(c.name_eng_1,'') as name_eng_1, coalesce(c.address,'') as address, coalesce(c.province,'') as province, coalesce(c.amper,'') as amper, coalesce(c.tambon,'') as tambon, coalesce(c.zip_code,'') as zip_code, coalesce(c.country,'') as country, coalesce(c.telephone,'') as telephone, coalesce(c.fax,'') as fax, coalesce(c.sms_phonenumber,'') as sms_phonenumber, coalesce(c.email,'') as email, coalesce(c.ar_type,'') as ar_type, coalesce(c.website,'') as website, coalesce(c.prefixname,'') as prefixname, coalesce(c.first_name,'') as first_name, coalesce(c.last_name,'') as last_name, coalesce(c.remark,'') as remark, coalesce(c.ar_status,0) as ar_status, coalesce(c.status,0) as status, coalesce(c.price_level,0) as price_level, coalesce(c.birth_day::text,'') as birth_day, coalesce(c.register_date::text,'') as register_date, coalesce(d.tax_id,'') as tax_id, coalesce(d.card_id,'') as card_id, coalesce(d.branch_type,0) as branch_type, coalesce(d.branch_code,'') as branch_code, round(coalesce(d.latitude,0),6)::text as latitude, round(coalesce(d.longitude,0),6)::text as longitude, (c.create_datetime is not null and coalesce(c.create_code,'') <> '')::text as has_create from ar_customer c left join ar_customer_detail d on d.ar_code = c.code where c.code = 'UAT' || :'run_short' || 'C2'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}C2"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "ลูกหนี้สอง ทดสอบ BETA {{run.short}}"
+        },
+        {
+          "col": "name_eng_1",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "zip_code",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "country",
+          "op": "eq",
+          "value": "ไทย"
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "fax",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "sms_phonenumber",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "email",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "website",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "prefixname",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "first_name",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "last_name",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "province",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "amper",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "tambon",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "ar_type",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "ar_status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "price_level",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "birth_day",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "register_date",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "tax_id",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "card_id",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "branch_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": "00000"
+        },
+        {
+          "col": "latitude",
+          "op": "eq",
+          "value": "0.000000"
+        },
+        {
+          "col": "longitude",
+          "op": "eq",
+          "value": "0.000000"
+        },
+        {
+          "col": "has_create",
+          "op": "eq",
+          "value": "true"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: มี 2 รายการของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "2"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "กดเพิ่มรายการใหม่ (C)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"เพิ่มรายการใหม่\"]"
+    },
+    {
+      "title": "กรอกรหัส C",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}C3"
+    },
+    {
+      "title": "กรอกชื่อ 1 ของ C",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ลูกหนี้สาม ทดสอบ GAMMA {{run.short}}"
+    },
+    {
+      "title": "ย้ายเมาส์ออกจากช่องกรอก (ปิดป๊อปอัปคำอธิบายช่อง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1"
+    },
+    {
+      "title": "กดบันทึก C",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง (บันทึก C)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: C มีเฉพาะรหัสกับชื่อ ที่เหลือเป็นค่าตั้งต้น",
+      "do": "db.query",
+      "sql": "select c.code as code, coalesce(c.name_1,'') as name_1, coalesce(c.name_eng_1,'') as name_eng_1, coalesce(c.address,'') as address, coalesce(c.province,'') as province, coalesce(c.amper,'') as amper, coalesce(c.tambon,'') as tambon, coalesce(c.zip_code,'') as zip_code, coalesce(c.country,'') as country, coalesce(c.telephone,'') as telephone, coalesce(c.fax,'') as fax, coalesce(c.sms_phonenumber,'') as sms_phonenumber, coalesce(c.email,'') as email, coalesce(c.ar_type,'') as ar_type, coalesce(c.website,'') as website, coalesce(c.prefixname,'') as prefixname, coalesce(c.first_name,'') as first_name, coalesce(c.last_name,'') as last_name, coalesce(c.remark,'') as remark, coalesce(c.ar_status,0) as ar_status, coalesce(c.status,0) as status, coalesce(c.price_level,0) as price_level, coalesce(c.birth_day::text,'') as birth_day, coalesce(c.register_date::text,'') as register_date, coalesce(d.tax_id,'') as tax_id, coalesce(d.card_id,'') as card_id, coalesce(d.branch_type,0) as branch_type, coalesce(d.branch_code,'') as branch_code, round(coalesce(d.latitude,0),6)::text as latitude, round(coalesce(d.longitude,0),6)::text as longitude, (c.create_datetime is not null and coalesce(c.create_code,'') <> '')::text as has_create from ar_customer c left join ar_customer_detail d on d.ar_code = c.code where c.code = 'UAT' || :'run_short' || 'C3'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}C3"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "ลูกหนี้สาม ทดสอบ GAMMA {{run.short}}"
+        },
+        {
+          "col": "name_eng_1",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "zip_code",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "country",
+          "op": "eq",
+          "value": "ไทย"
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "fax",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "sms_phonenumber",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "email",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "website",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "prefixname",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "first_name",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "last_name",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "province",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "amper",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "tambon",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "ar_type",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "ar_status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "birth_day",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "register_date",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "tax_id",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "card_id",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "branch_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": "00000"
+        },
+        {
+          "col": "latitude",
+          "op": "eq",
+          "value": "0.000000"
+        },
+        {
+          "col": "longitude",
+          "op": "eq",
+          "value": "0.000000"
+        },
+        {
+          "col": "has_create",
+          "op": "eq",
+          "value": "true"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: มี 3 รายการของรอบนี้ และมีรายละเอียด 3 แถว",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer_detail where ar_code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "3"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยตัวนำหน้ารหัส UAT ของรอบนี้",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "ค้นหาด้วยตัวนำหน้ารหัส UAT ของรอบนี้ (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ตัวนับรายการเป็น 3/3",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "3/3",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว A",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว B",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว C",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C3\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยชื่อ ALPHA",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "ALPHA {{run.short}}"
+    },
+    {
+      "title": "ค้นหาด้วยชื่อ ALPHA (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ตัวนับเป็น 1/1 (ชื่อ ALPHA)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว A (ค้นจากชื่อ)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยคำภาษาอังกฤษที่มีเฉพาะในที่อยู่ของ A (ตัดคำไทยไม่แม่น จึงใช้คำอังกฤษ)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "TOWERZETA"
+    },
+    {
+      "title": "ค้นหาด้วยคำภาษาอังกฤษที่มีเฉพาะในที่อยู่ของ A (ตัดคำไทยไม่แม่น จึงใช้คำอังกฤษ) (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ตัวนับเป็น 1/1 (ค้นจากที่อยู่)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว A (ค้นจากที่อยู่)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยชื่อไทยของ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "ลูกหนี้สอง ทดสอบ BETA"
+    },
+    {
+      "title": "ค้นหาด้วยชื่อไทยของ B (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "เห็นแถว B (ค้นจากชื่อไทย)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่เห็นแถว A (ค้นจากชื่อไทยของ B)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาคำที่ไม่มีอยู่จริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "ZZNOHITXYZ"
+    },
+    {
+      "title": "ค้นหาคำที่ไม่มีอยู่จริง (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "แสดงข้อความ ไม่พบข้อมูลที่ค้นหา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> text=ไม่พบข้อมูลที่ค้นหา",
+      "continueOnFail": true
+    },
+    {
+      "title": "ตัวนับเป็น 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปุ่มล้างคำค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ล้างคำค้นหา\"]"
+    },
+    {
+      "title": "ค้นหาใหม่ด้วย UAT ของรอบนี้",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "ค้นหาใหม่ด้วย UAT ของรอบนี้ (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "กลับมาเห็น 3/3",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "3/3",
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกหัวคอลัมน์รหัส (น้อยไปมาก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "แถวแรกเป็น A",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr td[data-col-key=\"code\"]",
+      "text": "UAT{{run.short}}C1",
+      "nth": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกหัวคอลัมน์รหัสอีกครั้ง (มากไปน้อย)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "แถวแรกเป็น C",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr td[data-col-key=\"code\"]",
+      "text": "UAT{{run.short}}C3",
+      "nth": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกครั้งที่สามเพื่อยกเลิกการเรียง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "ช่วงรหัสจาก = B",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP01\"]",
+      "value": "UAT{{run.short}}C2"
+    },
+    {
+      "title": "ช่วงรหัสถึง = B",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP99\"]",
+      "value": "UAT{{run.short}}C2"
+    },
+    {
+      "title": "กดกรองข้อมูล",
+      "do": "ui.click",
+      "selector": "button:has-text(\"กรองข้อมูล\")"
+    },
+    {
+      "title": "กรองช่วงรหัสแล้วเหลือ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เหลือเฉพาะแถว B",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว A ถูกกรองออก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูงเพื่อล้าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "กดล้างตัวกรอง",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ล้างตัวกรอง\")"
+    },
+    {
+      "title": "ล้างตัวกรองแล้วกลับเป็น 3/3",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "3/3",
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกแถว A เพื่อเปิดดู",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C1\"])"
+    },
+    {
+      "title": "เปิดดู A: รหัส",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}C1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ชื่อ 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ลูกหนี้ทดสอบ ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ชื่อ (ภาษาอังกฤษ) 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ (ภาษาอังกฤษ) 1 :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT Customer ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ที่อยู่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ที่อยู่ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ TOWERZETA",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: รหัสไปรษณีย์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัสไปรษณีย์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "10110",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ประเทศ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเทศ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "สิงคโปร์",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: หมายเลขโทรศัพท์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลขโทรศัพท์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "02-000-0001",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: หมายเลขโทรสาร",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลขโทรสาร :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "02-000-0002",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: หมายเลข SMS",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลข SMS :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "0800000001",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: อีเมล์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"อีเมล์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "alpha{{run.short}}@example.com",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: เว็บไซต์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เว็บไซต์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "www.alpha-{{run.short}}.example.com",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: คำนำหน้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"คำนำหน้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "บริษัท",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ทดสอบ",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: นามสกุล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"นามสกุล :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ระบบ{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: หมายเหตุ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเหตุ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "หมายเหตุลูกหนี้ ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: เลขประจำตัวผู้เสียภาษี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขประจำตัวผู้เสียภาษี :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{tax1}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: เลขที่บัตรประชาชน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่บัตรประชาชน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{card1}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: เลขที่สาขา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "00012",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: จังหวัด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"จังหวัด :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}P1~จังหวัดทดสอบหนึ่ง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: อำเภอ/เขต",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"อำเภอ/เขต :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}A1~อำเภอทดสอบหนึ่ง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ตำบล/แขวง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ตำบล/แขวง :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}T1~ตำบลทดสอบหนึ่ง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ประเภทลูกหนี้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเภทลูกหนี้ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}Y1~ประเภทลูกหนี้ทดสอบหนึ่ง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ระดับราคาสินค้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ระดับราคาสินค้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "3",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สถานะลูกหนี้",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] fieldset:has(legend:text-is(\"สถานะลูกหนี้\")) label:has(input:checked)",
+      "text": "^\\s*นิติบุคคล\\s*$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สถานะ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] fieldset:has(legend:text-is(\"สถานะ\")) label:has(input:checked)",
+      "text": "^\\s*ใช้งาน\\s*$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: สถานประกอบการ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] div[role=radiogroup] span:has(> input:checked)",
+      "text": "2. สาขา",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: วันเกิด/วันจดทะเบียน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันเกิด/วันจดทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "^15/03/(1990|2533)$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: วันลงทะเบียน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันลงทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "^01/07/(2020|2563)$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ละติจูด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ละติจูด (Latitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "13.756331",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดู A: ลองจิจูด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ลองจิจูด (Longitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "100.501765",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องชื่อ 1 ถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องระดับราคาถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ระดับราคาสินค้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ปุ่มค้นหาจังหวัดถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"จังหวัด\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องพิกัดถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ละติจูด (Latitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพเปิดดู A",
+      "do": "ui.screenshot",
+      "name": "cus-view-a"
+    },
+    {
+      "title": "กดแก้ไขข้อมูล A (ทดสอบกล่อง Lock ก่อน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "กล่อง Lock ถามก่อนแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการแก้ไขข้อมูลหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กล่อง Lock มีตัวเลือกแสดงหน้าจอนี้อีก",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการแสดงหน้าจอนี้อีกในครั้งต่อไป",
+      "continueOnFail": true
+    },
+    {
+      "title": "ตัวเลือกแสดงอีกติ๊กอยู่ตั้งต้น",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog] input[type=checkbox]:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "เอาติ๊กตัวเลือกแสดงอีกออก",
+      "do": "ui.click",
+      "selector": "[role=dialog] input[type=checkbox]"
+    },
+    {
+      "title": "ตัวเลือกไม่ติ๊กแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog] input[type=checkbox]:checked",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ติ๊กตัวเลือกกลับคืน (ไม่ให้กระทบรอบอื่น)",
+      "do": "ui.click",
+      "selector": "[role=dialog] input[type=checkbox]"
+    },
+    {
+      "title": "ตัวเลือกกลับมาติ๊กอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog] input[type=checkbox]:checked",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพกล่อง Lock ก่อนแก้ไข",
+      "do": "ui.screenshot",
+      "name": "cus-lock-dialog"
+    },
+    {
+      "title": "กดยกเลิกในกล่อง Lock",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ยกเลิก\")"
+    },
+    {
+      "title": "กล่อง Lock ปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ยกเลิกแล้วยังเป็นโหมดดู ช่องชื่อ 1 ถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดแก้ไขข้อมูล A อีกครั้งแล้วยืนยัน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "ระบบถามว่าต้องการแก้ไขข้อมูลหรือไม่ (กล่อง Lock)",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการแก้ไขข้อมูลหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงเข้าโหมดแก้ไข",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ช่องชื่อ 1 พร้อมแก้ไข (ไม่ถูกล็อก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][not(@disabled)]",
+      "continueOnFail": true
+    },
+    {
+      "title": "รหัสแก้ไขไม่ได้ในโหมดแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "หัวจอแสดง โหมดแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] header span:has-text(\"โหมดแก้ไข\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "ปุ่มบันทึกข้อมูลกดไม่ได้จนกว่าจะแก้",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "แก้ชื่อ 1",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ลูกหนี้ทดสอบ ALPHA {{run.short}} แก้ไข"
+    },
+    {
+      "title": "กรอก ชื่อ (ภาษาอังกฤษ) 1",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ (ภาษาอังกฤษ) 1 :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT Customer ALPHA {{run.short}} EDIT"
+    },
+    {
+      "title": "กรอก ที่อยู่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ที่อยู่ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ TOWERZETA แก้ไข"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา จังหวัด",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"จังหวัด\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง กำหนดจังหวัด",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"กำหนดจังหวัด\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา จังหวัด",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "UAT{{run.short}}P2"
+    },
+    {
+      "title": "เลือกรายการ UAT{{run.short}}P2",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}P2\"))"
+    },
+    {
+      "title": "ช่อง จังหวัด แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"จังหวัด :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}P2~จังหวัดทดสอบสอง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปลี่ยนจังหวัดแล้วช่องอำเภอถูกล้าง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"อำเภอ/เขต :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปลี่ยนจังหวัดแล้วช่องตำบลถูกล้าง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ตำบล/แขวง :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา อำเภอ/เขต",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"อำเภอ/เขต\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง กำหนดอำเภอ/เขต",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"กำหนดอำเภอ/เขต\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์คำนำหน้า UAT ของรอบนี้ (อำเภอ/เขต)",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "เห็นแถว UAT{{run.short}}A2 (อยู่ในจังหวัด/อำเภอที่เลือก)",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}A2\"))",
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่เห็นแถว UAT{{run.short}}A1 (คนละจังหวัด/อำเภอ)",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}A1\"))",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกรายการ UAT{{run.short}}A2",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}A2\"))"
+    },
+    {
+      "title": "ช่อง อำเภอ/เขต แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"อำเภอ/เขต :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}A2~อำเภอทดสอบสอง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา ตำบล/แขวง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ตำบล/แขวง\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง กำหนดตำบล/แขวง",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"กำหนดตำบล/แขวง\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์คำนำหน้า UAT ของรอบนี้ (ตำบล/แขวง)",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "เห็นแถว UAT{{run.short}}T2 (อยู่ในจังหวัด/อำเภอที่เลือก)",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}T2\"))",
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่เห็นแถว UAT{{run.short}}T1 (คนละจังหวัด/อำเภอ)",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}T1\"))",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกรายการ UAT{{run.short}}T2",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}T2\"))"
+    },
+    {
+      "title": "ช่อง ตำบล/แขวง แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ตำบล/แขวง :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}T2~ตำบลทดสอบสอง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก รหัสไปรษณีย์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัสไปรษณีย์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "20150"
+    },
+    {
+      "title": "แก้ประเทศ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเทศ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ญี่ปุ่น"
+    },
+    {
+      "title": "กรอก หมายเลขโทรศัพท์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลขโทรศัพท์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "02-000-1001"
+    },
+    {
+      "title": "กรอก หมายเลขโทรสาร",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลขโทรสาร :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "02-000-1002"
+    },
+    {
+      "title": "กรอก หมายเลข SMS",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลข SMS :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "0811111111"
+    },
+    {
+      "title": "กรอก อีเมล์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"อีเมล์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "alpha-edit{{run.short}}@example.com"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา ประเภทลูกหนี้",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ประเภทลูกหนี้\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง กำหนดประเภทลูกหนี้",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"กำหนดประเภทลูกหนี้\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา ประเภทลูกหนี้",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "UAT{{run.short}}Y2"
+    },
+    {
+      "title": "เลือกรายการ UAT{{run.short}}Y2",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"UAT{{run.short}}Y2\"))"
+    },
+    {
+      "title": "ช่อง ประเภทลูกหนี้ แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเภทลูกหนี้ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}Y2~ประเภทลูกหนี้ทดสอบสอง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก เว็บไซต์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เว็บไซต์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "www.alpha-edit-{{run.short}}.example.com"
+    },
+    {
+      "title": "เลือกสถานะลูกหนี้ บุคคลธรรมดา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] input[name=\"ar_status\"]",
+      "nth": 0
+    },
+    {
+      "title": "เลือกสถานะ ไม่ใช้งาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] input[name=\"status\"]",
+      "nth": 1
+    },
+    {
+      "title": "กรอก คำนำหน้า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"คำนำหน้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "คุณ"
+    },
+    {
+      "title": "เลือกระดับราคาสินค้า 7: ราคาขาย5",
+      "do": "ui.select",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ระดับราคาสินค้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "7"
+    },
+    {
+      "title": "กรอก ชื่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ทดสอบแก้"
+    },
+    {
+      "title": "กรอก นามสกุล",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"นามสกุล :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ระบบแก้{{run.short}}"
+    },
+    {
+      "title": "กรอก วันเกิด/วันจดทะเบียน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันเกิด/วันจดทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "20/12/1985"
+    },
+    {
+      "title": "ออกจากช่อง วันเกิด/วันจดทะเบียน",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันเกิด/วันจดทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "วันเกิด/วันจดทะเบียน แสดงวันที่ที่กรอก (ค.ศ. หรือ พ.ศ. ตามตั้งค่าระบบ)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันเกิด/วันจดทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "^20/12/(1985|2528)$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก วันลงทะเบียน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันลงทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "15/08/2021"
+    },
+    {
+      "title": "ออกจากช่อง วันลงทะเบียน",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันลงทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "วันลงทะเบียน แสดงวันที่ที่กรอก (ค.ศ. หรือ พ.ศ. ตามตั้งค่าระบบ)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันลงทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "^15/08/(2021|2564)$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก เลขประจำตัวผู้เสียภาษี",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขประจำตัวผู้เสียภาษี :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{tax2}}"
+    },
+    {
+      "title": "กรอก เลขที่บัตรประชาชน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่บัตรประชาชน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{card2}}"
+    },
+    {
+      "title": "เปลี่ยนสถานประกอบการเป็น สำนักงานใหญ่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"สถานประกอบการ :\"]/following-sibling::*[1]//input[@type=\"radio\"]",
+      "nth": 0
+    },
+    {
+      "title": "สำนักงานใหญ่ ทำให้เลขที่สาขากลับเป็น 00000",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "00000",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลขที่สาขาถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก หมายเหตุ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเหตุ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "หมายเหตุลูกหนี้ ALPHA {{run.short}} แก้ไข"
+    },
+    {
+      "title": "กรอกละติจูด",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ละติจูด (Latitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "13.700001"
+    },
+    {
+      "title": "ออกจากช่องละติจูด",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ละติจูด (Latitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกลองจิจูด",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ลองจิจูด (Longitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "100.600001"
+    },
+    {
+      "title": "ออกจากช่องลองจิจูด",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ลองจิจูด (Longitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "ช่องละติจูดแสดงค่าที่กรอก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ละติจูด (Latitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "13.700001",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องลองจิจูดแสดงค่าที่กรอก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ลองจิจูด (Longitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "100.600001",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพก่อนบันทึกแก้ไข A",
+      "do": "ui.screenshot",
+      "name": "cus-before-edit-a"
+    },
+    {
+      "title": "ย้ายเมาส์ออกจากช่องกรอก (ปิดป๊อปอัปคำอธิบายช่อง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1"
+    },
+    {
+      "title": "กดบันทึกการแก้ไข",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบแจ้งบันทึกสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "บันทึกข้อมูลลูกหนี้เสร็จเรียบร้อย",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง (บันทึกการแก้ไข)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: A เปลี่ยนตามที่แก้ครบทุกคอลัมน์",
+      "do": "db.query",
+      "sql": "select c.code as code, coalesce(c.name_1,'') as name_1, coalesce(c.name_eng_1,'') as name_eng_1, coalesce(c.address,'') as address, coalesce(c.province,'') as province, coalesce(c.amper,'') as amper, coalesce(c.tambon,'') as tambon, coalesce(c.zip_code,'') as zip_code, coalesce(c.country,'') as country, coalesce(c.telephone,'') as telephone, coalesce(c.fax,'') as fax, coalesce(c.sms_phonenumber,'') as sms_phonenumber, coalesce(c.email,'') as email, coalesce(c.ar_type,'') as ar_type, coalesce(c.website,'') as website, coalesce(c.prefixname,'') as prefixname, coalesce(c.first_name,'') as first_name, coalesce(c.last_name,'') as last_name, coalesce(c.remark,'') as remark, coalesce(c.ar_status,0) as ar_status, coalesce(c.status,0) as status, coalesce(c.price_level,0) as price_level, coalesce(c.birth_day::text,'') as birth_day, coalesce(c.register_date::text,'') as register_date, coalesce(d.tax_id,'') as tax_id, coalesce(d.card_id,'') as card_id, coalesce(d.branch_type,0) as branch_type, coalesce(d.branch_code,'') as branch_code, round(coalesce(d.latitude,0),6)::text as latitude, round(coalesce(d.longitude,0),6)::text as longitude, (c.create_datetime is not null and coalesce(c.create_code,'') <> '')::text as has_create from ar_customer c left join ar_customer_detail d on d.ar_code = c.code where c.code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}C1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "ลูกหนี้ทดสอบ ALPHA {{run.short}} แก้ไข"
+        },
+        {
+          "col": "name_eng_1",
+          "op": "eq",
+          "value": "UAT Customer ALPHA {{run.short}} EDIT"
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ TOWERZETA แก้ไข"
+        },
+        {
+          "col": "zip_code",
+          "op": "eq",
+          "value": "20150"
+        },
+        {
+          "col": "country",
+          "op": "eq",
+          "value": "ญี่ปุ่น"
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": "02-000-1001"
+        },
+        {
+          "col": "fax",
+          "op": "eq",
+          "value": "02-000-1002"
+        },
+        {
+          "col": "sms_phonenumber",
+          "op": "eq",
+          "value": "0811111111"
+        },
+        {
+          "col": "email",
+          "op": "eq",
+          "value": "alpha-edit{{run.short}}@example.com"
+        },
+        {
+          "col": "website",
+          "op": "eq",
+          "value": "www.alpha-edit-{{run.short}}.example.com"
+        },
+        {
+          "col": "prefixname",
+          "op": "eq",
+          "value": "คุณ"
+        },
+        {
+          "col": "first_name",
+          "op": "eq",
+          "value": "ทดสอบแก้"
+        },
+        {
+          "col": "last_name",
+          "op": "eq",
+          "value": "ระบบแก้{{run.short}}"
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "หมายเหตุลูกหนี้ ALPHA {{run.short}} แก้ไข"
+        },
+        {
+          "col": "province",
+          "op": "eq",
+          "value": "UAT{{run.short}}P2"
+        },
+        {
+          "col": "amper",
+          "op": "eq",
+          "value": "UAT{{run.short}}A2"
+        },
+        {
+          "col": "tambon",
+          "op": "eq",
+          "value": "UAT{{run.short}}T2"
+        },
+        {
+          "col": "ar_type",
+          "op": "eq",
+          "value": "UAT{{run.short}}Y2"
+        },
+        {
+          "col": "ar_status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "price_level",
+          "op": "eq",
+          "value": "7"
+        },
+        {
+          "col": "birth_day",
+          "op": "eq",
+          "value": "1985-12-20"
+        },
+        {
+          "col": "register_date",
+          "op": "eq",
+          "value": "2021-08-15"
+        },
+        {
+          "col": "tax_id",
+          "op": "eq",
+          "value": "{{tax2}}"
+        },
+        {
+          "col": "card_id",
+          "op": "eq",
+          "value": "{{card2}}"
+        },
+        {
+          "col": "branch_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": "00000"
+        },
+        {
+          "col": "latitude",
+          "op": "eq",
+          "value": "13.700001"
+        },
+        {
+          "col": "longitude",
+          "op": "eq",
+          "value": "100.600001"
+        },
+        {
+          "col": "has_create",
+          "op": "eq",
+          "value": "true"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: A มีเวลาแก้ไขล่าสุดใหม่กว่าเวลาสร้าง",
+      "do": "db.query",
+      "sql": "select (last_update_date_time > create_datetime)::text as upd_later, (coalesce(last_update_code,'') <> '')::text as has_upd_code from ar_customer where code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "upd_later",
+          "op": "eq",
+          "value": "true"
+        },
+        {
+          "col": "has_upd_code",
+          "op": "eq",
+          "value": "true"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: master_logs บันทึกการแก้ไข A 1 ครั้ง",
+      "do": "db.query",
+      "sql": "select count(*) filter (where function_code = 1) as n_new, count(*) filter (where function_code = 2) as n_edit, count(*) filter (where function_code = 3) as n_del from master_logs where menu_name = 'menu_ar' and code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n_new",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "n_edit",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "n_del",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: รหัส",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}C1",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ชื่อ 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ลูกหนี้ทดสอบ ALPHA {{run.short}} แก้ไข",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ชื่อ (ภาษาอังกฤษ) 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ (ภาษาอังกฤษ) 1 :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT Customer ALPHA {{run.short}} EDIT",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ที่อยู่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ที่อยู่ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ TOWERZETA แก้ไข",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: รหัสไปรษณีย์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัสไปรษณีย์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "20150",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ประเทศ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเทศ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ญี่ปุ่น",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: หมายเลขโทรศัพท์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลขโทรศัพท์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "02-000-1001",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: หมายเลขโทรสาร",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลขโทรสาร :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "02-000-1002",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: หมายเลข SMS",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลข SMS :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "0811111111",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: อีเมล์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"อีเมล์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "alpha-edit{{run.short}}@example.com",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: เว็บไซต์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เว็บไซต์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "www.alpha-edit-{{run.short}}.example.com",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: คำนำหน้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"คำนำหน้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "คุณ",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ทดสอบแก้",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: นามสกุล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"นามสกุล :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ระบบแก้{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: หมายเหตุ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเหตุ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "หมายเหตุลูกหนี้ ALPHA {{run.short}} แก้ไข",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: เลขประจำตัวผู้เสียภาษี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขประจำตัวผู้เสียภาษี :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{tax2}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: เลขที่บัตรประชาชน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่บัตรประชาชน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{card2}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: เลขที่สาขา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "00000",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: จังหวัด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"จังหวัด :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}P2~จังหวัดทดสอบสอง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: อำเภอ/เขต",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"อำเภอ/เขต :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}A2~อำเภอทดสอบสอง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ตำบล/แขวง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ตำบล/แขวง :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}T2~ตำบลทดสอบสอง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ประเภทลูกหนี้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเภทลูกหนี้ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}Y2~ประเภทลูกหนี้ทดสอบสอง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ระดับราคาสินค้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ระดับราคาสินค้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "7",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สถานะลูกหนี้",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] fieldset:has(legend:text-is(\"สถานะลูกหนี้\")) label:has(input:checked)",
+      "text": "^\\s*บุคคลธรรมดา\\s*$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สถานะ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] fieldset:has(legend:text-is(\"สถานะ\")) label:has(input:checked)",
+      "text": "^\\s*ไม่ใช้งาน\\s*$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: สถานประกอบการ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] div[role=radiogroup] span:has(> input:checked)",
+      "text": "1. สำนักงานใหญ่",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: วันเกิด/วันจดทะเบียน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันเกิด/วันจดทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "^20/12/(1985|2528)$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: วันลงทะเบียน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันลงทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "^15/08/(2021|2564)$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ละติจูด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ละติจูด (Latitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "13.700001",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข A: ลองจิจูด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ลองจิจูด (Longitude) :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "100.600001",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดแก้ไขข้อมูล A อีกรอบ (แก้หมายเหตุอย่างเดียว)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "ระบบถามว่าต้องการแก้ไขข้อมูลหรือไม่ (กล่อง Lock)",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการแก้ไขข้อมูลหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงเข้าโหมดแก้ไข",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ช่องชื่อ 1 พร้อมแก้ไข (ไม่ถูกล็อก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][not(@disabled)]",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก หมายเหตุ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเหตุ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "แก้หมายเหตุรอบสอง {{run.short}}"
+    },
+    {
+      "title": "ย้ายเมาส์ออกจากช่องกรอก (ปิดป๊อปอัปคำอธิบายช่อง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "บันทึกผ่านโดยไม่ถูกเตือนเลขผู้เสียภาษีซ้ำกับตัวเอง",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "บันทึกข้อมูลลูกหนี้เสร็จเรียบร้อย",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: หมายเหตุเปลี่ยน ช่องอื่นไม่เปลี่ยน",
+      "do": "db.query",
+      "sql": "select c.code as code, coalesce(c.name_1,'') as name_1, coalesce(c.name_eng_1,'') as name_eng_1, coalesce(c.address,'') as address, coalesce(c.province,'') as province, coalesce(c.amper,'') as amper, coalesce(c.tambon,'') as tambon, coalesce(c.zip_code,'') as zip_code, coalesce(c.country,'') as country, coalesce(c.telephone,'') as telephone, coalesce(c.fax,'') as fax, coalesce(c.sms_phonenumber,'') as sms_phonenumber, coalesce(c.email,'') as email, coalesce(c.ar_type,'') as ar_type, coalesce(c.website,'') as website, coalesce(c.prefixname,'') as prefixname, coalesce(c.first_name,'') as first_name, coalesce(c.last_name,'') as last_name, coalesce(c.remark,'') as remark, coalesce(c.ar_status,0) as ar_status, coalesce(c.status,0) as status, coalesce(c.price_level,0) as price_level, coalesce(c.birth_day::text,'') as birth_day, coalesce(c.register_date::text,'') as register_date, coalesce(d.tax_id,'') as tax_id, coalesce(d.card_id,'') as card_id, coalesce(d.branch_type,0) as branch_type, coalesce(d.branch_code,'') as branch_code, round(coalesce(d.latitude,0),6)::text as latitude, round(coalesce(d.longitude,0),6)::text as longitude, (c.create_datetime is not null and coalesce(c.create_code,'') <> '')::text as has_create from ar_customer c left join ar_customer_detail d on d.ar_code = c.code where c.code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}C1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "ลูกหนี้ทดสอบ ALPHA {{run.short}} แก้ไข"
+        },
+        {
+          "col": "name_eng_1",
+          "op": "eq",
+          "value": "UAT Customer ALPHA {{run.short}} EDIT"
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": "99/9 อาคารทดสอบ {{run.short}} ถนนทดสอบ แขวงทดสอบ เขตทดสอบ TOWERZETA แก้ไข"
+        },
+        {
+          "col": "zip_code",
+          "op": "eq",
+          "value": "20150"
+        },
+        {
+          "col": "country",
+          "op": "eq",
+          "value": "ญี่ปุ่น"
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": "02-000-1001"
+        },
+        {
+          "col": "fax",
+          "op": "eq",
+          "value": "02-000-1002"
+        },
+        {
+          "col": "sms_phonenumber",
+          "op": "eq",
+          "value": "0811111111"
+        },
+        {
+          "col": "email",
+          "op": "eq",
+          "value": "alpha-edit{{run.short}}@example.com"
+        },
+        {
+          "col": "website",
+          "op": "eq",
+          "value": "www.alpha-edit-{{run.short}}.example.com"
+        },
+        {
+          "col": "prefixname",
+          "op": "eq",
+          "value": "คุณ"
+        },
+        {
+          "col": "first_name",
+          "op": "eq",
+          "value": "ทดสอบแก้"
+        },
+        {
+          "col": "last_name",
+          "op": "eq",
+          "value": "ระบบแก้{{run.short}}"
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "แก้หมายเหตุรอบสอง {{run.short}}"
+        },
+        {
+          "col": "province",
+          "op": "eq",
+          "value": "UAT{{run.short}}P2"
+        },
+        {
+          "col": "amper",
+          "op": "eq",
+          "value": "UAT{{run.short}}A2"
+        },
+        {
+          "col": "tambon",
+          "op": "eq",
+          "value": "UAT{{run.short}}T2"
+        },
+        {
+          "col": "ar_type",
+          "op": "eq",
+          "value": "UAT{{run.short}}Y2"
+        },
+        {
+          "col": "ar_status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "price_level",
+          "op": "eq",
+          "value": "7"
+        },
+        {
+          "col": "birth_day",
+          "op": "eq",
+          "value": "1985-12-20"
+        },
+        {
+          "col": "register_date",
+          "op": "eq",
+          "value": "2021-08-15"
+        },
+        {
+          "col": "tax_id",
+          "op": "eq",
+          "value": "{{tax2}}"
+        },
+        {
+          "col": "card_id",
+          "op": "eq",
+          "value": "{{card2}}"
+        },
+        {
+          "col": "branch_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": "00000"
+        },
+        {
+          "col": "latitude",
+          "op": "eq",
+          "value": "13.700001"
+        },
+        {
+          "col": "longitude",
+          "op": "eq",
+          "value": "100.600001"
+        },
+        {
+          "col": "has_create",
+          "op": "eq",
+          "value": "true"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: master_logs บันทึกการแก้ไข A รวม 2 ครั้ง",
+      "do": "db.query",
+      "sql": "select count(*) filter (where function_code = 1) as n_new, count(*) filter (where function_code = 2) as n_edit, count(*) filter (where function_code = 3) as n_del from master_logs where menu_name = 'menu_ar' and code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n_new",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "n_edit",
+          "op": "eq",
+          "value": "2"
+        },
+        {
+          "col": "n_del",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปุ่มดินสอแก้ไขแถว B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"แก้ไขรายการ UAT{{run.short}}C2\"]"
+    },
+    {
+      "title": "หน้าจอโหลดข้อมูล B",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}C2",
+      "continueOnFail": true
+    },
+    {
+      "title": "เข้าโหมดแก้ไขทันที ช่องชื่อ 1 พร้อมแก้",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][not(@disabled)]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ปุ่มดินสอไม่มีกล่อง Lock",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอก หมายเลขโทรศัพท์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลขโทรศัพท์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "02-000-2001"
+    },
+    {
+      "title": "กรอก หมายเหตุ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเหตุ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "แก้ B ผ่านปุ่มดินสอ {{run.short}}"
+    },
+    {
+      "title": "พิมพ์รหัสประเภทลูกหนี้ตรงๆ (ไม่เปิดหน้าต่างค้นหา)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเภทลูกหนี้ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}Y1"
+    },
+    {
+      "title": "ออกจากช่องประเภทลูกหนี้",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเภทลูกหนี้ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "ช่องประเภทลูกหนี้ค้นชื่อมาแสดงเอง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเภทลูกหนี้ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}Y1~ประเภทลูกหนี้ทดสอบหนึ่ง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกสถานะลูกหนี้ นิติบุคคล",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] input[name=\"ar_status\"]",
+      "nth": 1
+    },
+    {
+      "title": "เลือกสถานะ ใช้งาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] input[name=\"status\"]",
+      "nth": 0
+    },
+    {
+      "title": "เลือกระดับราคาสินค้า 9: ราคาขาย7",
+      "do": "ui.select",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ระดับราคาสินค้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "9"
+    },
+    {
+      "title": "ย้ายเมาส์ออกจากช่องกรอก (ปิดป๊อปอัปคำอธิบายช่อง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] h1"
+    },
+    {
+      "title": "กดบันทึก B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง (บันทึก B)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: B เปลี่ยนโทรศัพท์ หมายเหตุ ประเภท สถานะ ระดับราคา ที่เหลือคงเดิม",
+      "do": "db.query",
+      "sql": "select c.code as code, coalesce(c.name_1,'') as name_1, coalesce(c.name_eng_1,'') as name_eng_1, coalesce(c.address,'') as address, coalesce(c.province,'') as province, coalesce(c.amper,'') as amper, coalesce(c.tambon,'') as tambon, coalesce(c.zip_code,'') as zip_code, coalesce(c.country,'') as country, coalesce(c.telephone,'') as telephone, coalesce(c.fax,'') as fax, coalesce(c.sms_phonenumber,'') as sms_phonenumber, coalesce(c.email,'') as email, coalesce(c.ar_type,'') as ar_type, coalesce(c.website,'') as website, coalesce(c.prefixname,'') as prefixname, coalesce(c.first_name,'') as first_name, coalesce(c.last_name,'') as last_name, coalesce(c.remark,'') as remark, coalesce(c.ar_status,0) as ar_status, coalesce(c.status,0) as status, coalesce(c.price_level,0) as price_level, coalesce(c.birth_day::text,'') as birth_day, coalesce(c.register_date::text,'') as register_date, coalesce(d.tax_id,'') as tax_id, coalesce(d.card_id,'') as card_id, coalesce(d.branch_type,0) as branch_type, coalesce(d.branch_code,'') as branch_code, round(coalesce(d.latitude,0),6)::text as latitude, round(coalesce(d.longitude,0),6)::text as longitude, (c.create_datetime is not null and coalesce(c.create_code,'') <> '')::text as has_create from ar_customer c left join ar_customer_detail d on d.ar_code = c.code where c.code = 'UAT' || :'run_short' || 'C2'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}C2"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "ลูกหนี้สอง ทดสอบ BETA {{run.short}}"
+        },
+        {
+          "col": "name_eng_1",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "zip_code",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "country",
+          "op": "eq",
+          "value": "ไทย"
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": "02-000-2001"
+        },
+        {
+          "col": "fax",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "sms_phonenumber",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "email",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "website",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "prefixname",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "first_name",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "last_name",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "แก้ B ผ่านปุ่มดินสอ {{run.short}}"
+        },
+        {
+          "col": "province",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "amper",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "tambon",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "ar_type",
+          "op": "eq",
+          "value": "UAT{{run.short}}Y1"
+        },
+        {
+          "col": "ar_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "price_level",
+          "op": "eq",
+          "value": "9"
+        },
+        {
+          "col": "birth_day",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "register_date",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "tax_id",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "card_id",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "branch_type",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": "00000"
+        },
+        {
+          "col": "latitude",
+          "op": "eq",
+          "value": "0.000000"
+        },
+        {
+          "col": "longitude",
+          "op": "eq",
+          "value": "0.000000"
+        },
+        {
+          "col": "has_create",
+          "op": "eq",
+          "value": "true"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: รหัส",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}C2",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: ชื่อ 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ลูกหนี้สอง ทดสอบ BETA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: ชื่อ (ภาษาอังกฤษ) 1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ (ภาษาอังกฤษ) 1 :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: ที่อยู่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ที่อยู่ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: รหัสไปรษณีย์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัสไปรษณีย์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: ประเทศ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเทศ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ไทย",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: หมายเลขโทรศัพท์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลขโทรศัพท์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "02-000-2001",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: หมายเลขโทรสาร",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลขโทรสาร :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: หมายเลข SMS",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเลข SMS :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: อีเมล์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"อีเมล์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: เว็บไซต์",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เว็บไซต์ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: คำนำหน้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"คำนำหน้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: ชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: นามสกุล",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"นามสกุล :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: หมายเหตุ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเหตุ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "แก้ B ผ่านปุ่มดินสอ {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: เลขประจำตัวผู้เสียภาษี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขประจำตัวผู้เสียภาษี :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: เลขที่บัตรประชาชน",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่บัตรประชาชน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: เลขที่สาขา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"เลขที่สาขา :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "00000",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: จังหวัด",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"จังหวัด :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: อำเภอ/เขต",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"อำเภอ/เขต :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: ตำบล/แขวง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ตำบล/แขวง :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: ประเภทลูกหนี้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ประเภทลูกหนี้ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}Y1~ประเภทลูกหนี้ทดสอบหนึ่ง UAT{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: ระดับราคาสินค้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ระดับราคาสินค้า :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "9",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: สถานะลูกหนี้",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] fieldset:has(legend:text-is(\"สถานะลูกหนี้\")) label:has(input:checked)",
+      "text": "^\\s*นิติบุคคล\\s*$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: สถานะ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] fieldset:has(legend:text-is(\"สถานะ\")) label:has(input:checked)",
+      "text": "^\\s*ใช้งาน\\s*$",
+      "op": "matches",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: สถานประกอบการ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] div[role=radiogroup] span:has(> input:checked)",
+      "text": "1. สำนักงานใหญ่",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: วันเกิด/วันจดทะเบียน ว่าง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันเกิด/วันจดทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกแก้ไข B: วันลงทะเบียน ว่าง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"วันลงทะเบียน :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "",
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกแถว A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C1\"])"
+    },
+    {
+      "title": "กดแก้ไขข้อมูล A เพื่อทดสอบแก้ค้าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "ระบบถามว่าต้องการแก้ไขข้อมูลหรือไม่ (กล่อง Lock)",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการแก้ไขข้อมูลหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงเข้าโหมดแก้ไข",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ช่องชื่อ 1 พร้อมแก้ไข (ไม่ถูกล็อก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][not(@disabled)]",
+      "continueOnFail": true
+    },
+    {
+      "title": "แก้หมายเหตุแต่ยังไม่บันทึก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเหตุ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ต้องไม่ถูกบันทึก"
+    },
+    {
+      "title": "คลิกแถว B ขณะมีข้อมูลค้าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C2\"])"
+    },
+    {
+      "title": "ระบบถามก่อนละทิ้งการแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการละทิ้งการแก้ไขหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือก กลับไปแก้ไขต่อ",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"กลับไปแก้ไขต่อ\")"
+    },
+    {
+      "title": "ข้อความที่แก้ค้างไว้ยังอยู่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเหตุ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "ต้องไม่ถูกบันทึก",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปิดหน้าจอ (ยกเลิกการแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ปิดหน้าจอ / ยกเลิกการแก้ไข (Esc)\"]"
+    },
+    {
+      "title": "ระบบถามก่อนละทิ้งการแก้ไข (ปิดหน้าจอ)",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการละทิ้งการแก้ไขหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือก ละทิ้ง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ละทิ้ง\")"
+    },
+    {
+      "title": "หมายเหตุกลับเป็นค่าที่บันทึกไว้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"หมายเหตุ :\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "แก้หมายเหตุรอบสอง {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กลับเป็นโหมดดู ช่องชื่อ 1 ถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"ชื่อ 1 : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: หมายเหตุของ A ไม่ถูกเปลี่ยนโดยการแก้ค้าง",
+      "do": "db.query",
+      "sql": "select c.code as code, coalesce(c.name_1,'') as name_1, coalesce(c.name_eng_1,'') as name_eng_1, coalesce(c.address,'') as address, coalesce(c.province,'') as province, coalesce(c.amper,'') as amper, coalesce(c.tambon,'') as tambon, coalesce(c.zip_code,'') as zip_code, coalesce(c.country,'') as country, coalesce(c.telephone,'') as telephone, coalesce(c.fax,'') as fax, coalesce(c.sms_phonenumber,'') as sms_phonenumber, coalesce(c.email,'') as email, coalesce(c.ar_type,'') as ar_type, coalesce(c.website,'') as website, coalesce(c.prefixname,'') as prefixname, coalesce(c.first_name,'') as first_name, coalesce(c.last_name,'') as last_name, coalesce(c.remark,'') as remark, coalesce(c.ar_status,0) as ar_status, coalesce(c.status,0) as status, coalesce(c.price_level,0) as price_level, coalesce(c.birth_day::text,'') as birth_day, coalesce(c.register_date::text,'') as register_date, coalesce(d.tax_id,'') as tax_id, coalesce(d.card_id,'') as card_id, coalesce(d.branch_type,0) as branch_type, coalesce(d.branch_code,'') as branch_code, round(coalesce(d.latitude,0),6)::text as latitude, round(coalesce(d.longitude,0),6)::text as longitude, (c.create_datetime is not null and coalesce(c.create_code,'') <> '')::text as has_create from ar_customer c left join ar_customer_detail d on d.ar_code = c.code where c.code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "แก้หมายเหตุรอบสอง {{run.short}}"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปุ่มดินสอแก้ไขแถว C",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"แก้ไขรายการ UAT{{run.short}}C3\"]"
+    },
+    {
+      "title": "หน้าจอโหลดข้อมูล C",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] >> xpath=.//label[normalize-space(.)=\"รหัส : *\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "UAT{{run.short}}C3",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปุ่มค้นหาคำนำหน้า",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ค้นหาคำนำหน้า\"]"
+    },
+    {
+      "title": "เห็นหัวหน้าต่าง กำหนดคำนำหน้าชื่อ",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"กำหนดคำนำหน้าชื่อ\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "หน้าต่างคำนำหน้าต้องมีรายการให้เลือก (ไม่ใช่ ไม่พบข้อมูล)",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 >> text=ไม่พบข้อมูล",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพหน้าต่างค้นหาคำนำหน้า",
+      "do": "ui.screenshot",
+      "name": "cus-prefix-modal"
+    },
+    {
+      "title": "ปิดหน้าต่างค้นหาคำนำหน้า",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 button[title=\"ปิดหน้าต่าง (Esc)\"]"
+    },
+    {
+      "title": "หน้าต่างค้นหาปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 span:has-text(\"กำหนดคำนำหน้าชื่อ\")",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปิดหน้าจอ (ไม่ได้แก้อะไร)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ปิดหน้าจอ / ยกเลิกการแก้ไข (Esc)\"]"
+    },
+    {
+      "title": "ไม่มีกล่องถามเพราะไม่ได้แก้อะไร",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ขั้นตอนค้นหาคำนำหน้าแล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/",
+        "ERR_QUIC_PROTOCOL_ERROR",
+        "openstreetmap",
+        "arcgisonline",
+        "unpkg",
+        "leaflet",
+        "cdnjs",
+        "jsdelivr",
+        "nominatim"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกแถว A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C1\"])"
+    },
+    {
+      "title": "สร้างแถวทดสอบใน ic_trans (เลขที่ UAT ของรอบนี้) ที่อ้างลูกหนี้ A",
+      "do": "db.exec",
+      "sql": "insert into ic_trans (doc_no, doc_date, cust_code) values ('UAT' || :'run_short' || 'CD', current_date, 'UAT' || :'run_short' || 'C1')",
+      "affected": 1
+    },
+    {
+      "title": "กดลบรายการ A ที่ถูกใช้ในใบเอกสารขาย/ซื้อ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "ระบบไม่ให้ลบเพราะถูกอ้างอิงในใบเอกสารขาย/ซื้อ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ไม่สามารถลบได้",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: A ยังอยู่หลังถูกกันลบ (ic_trans)",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer where code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบแถวทดสอบใน ic_trans",
+      "do": "db.exec",
+      "sql": "delete from ic_trans where doc_no = 'UAT' || :'run_short' || 'CD'",
+      "affected": 1
+    },
+    {
+      "title": "สร้างแถวทดสอบใน ic_trans_detail (เลขที่ UAT ของรอบนี้) ที่อ้างลูกหนี้ A",
+      "do": "db.exec",
+      "sql": "insert into ic_trans_detail (doc_no, doc_date, cust_code) values ('UAT' || :'run_short' || 'CD', current_date, 'UAT' || :'run_short' || 'C1')",
+      "affected": 1
+    },
+    {
+      "title": "กดลบรายการ A ที่ถูกใช้ในรายละเอียดเอกสาร",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "ระบบไม่ให้ลบเพราะถูกอ้างอิงในรายละเอียดเอกสาร",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ไม่สามารถลบได้",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: A ยังอยู่หลังถูกกันลบ (ic_trans_detail)",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer where code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบแถวทดสอบใน ic_trans_detail",
+      "do": "db.exec",
+      "sql": "delete from ic_trans_detail where doc_no = 'UAT' || :'run_short' || 'CD'",
+      "affected": 1
+    },
+    {
+      "title": "สร้างแถวทดสอบใน ap_ar_trans (เลขที่ UAT ของรอบนี้) ที่อ้างลูกหนี้ A",
+      "do": "db.exec",
+      "sql": "insert into ap_ar_trans (doc_no, doc_date, cust_code) values ('UAT' || :'run_short' || 'CD', current_date, 'UAT' || :'run_short' || 'C1')",
+      "affected": 1
+    },
+    {
+      "title": "กดลบรายการ A ที่ถูกใช้ในเอกสารลูกหนี้/เจ้าหนี้",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "ระบบไม่ให้ลบเพราะถูกอ้างอิงในเอกสารลูกหนี้/เจ้าหนี้",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ไม่สามารถลบได้",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: A ยังอยู่หลังถูกกันลบ (ap_ar_trans)",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer where code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบแถวทดสอบใน ap_ar_trans",
+      "do": "db.exec",
+      "sql": "delete from ap_ar_trans where doc_no = 'UAT' || :'run_short' || 'CD'",
+      "affected": 1
+    },
+    {
+      "title": "สร้างแถวทดสอบใน ap_ar_trans_detail (เลขที่ UAT ของรอบนี้) ที่อ้างลูกหนี้ A",
+      "do": "db.exec",
+      "sql": "insert into ap_ar_trans_detail (doc_no, doc_date, cust_code) values ('UAT' || :'run_short' || 'CD', current_date, 'UAT' || :'run_short' || 'C1')",
+      "affected": 1
+    },
+    {
+      "title": "กดลบรายการ A ที่ถูกใช้ในรายละเอียดเอกสารลูกหนี้/เจ้าหนี้",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "ระบบไม่ให้ลบเพราะถูกอ้างอิงในรายละเอียดเอกสารลูกหนี้/เจ้าหนี้",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ไม่สามารถลบได้",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: A ยังอยู่หลังถูกกันลบ (ap_ar_trans_detail)",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer where code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบแถวทดสอบใน ap_ar_trans_detail",
+      "do": "db.exec",
+      "sql": "delete from ap_ar_trans_detail where doc_no = 'UAT' || :'run_short' || 'CD'",
+      "affected": 1
+    },
+    {
+      "title": "ภาพกันลบลูกหนี้ที่ถูกใช้",
+      "do": "ui.screenshot",
+      "name": "cus-delete-blocked"
+    },
+    {
+      "title": "สร้างผู้ติดต่อของ A",
+      "do": "db.exec",
+      "sql": "insert into ar_contactor (ar_code) values ('UAT' || :'run_short' || 'C1')",
+      "affected": 1
+    },
+    {
+      "title": "สร้างสมาชิกของ A",
+      "do": "db.exec",
+      "sql": "insert into ar_dealer (code, ar_code) values ('UAT' || :'run_short' || 'D1', 'UAT' || :'run_short' || 'C1')",
+      "affected": 1
+    },
+    {
+      "title": "สร้างรายการสินค้าตามลูกค้าของ A",
+      "do": "db.exec",
+      "sql": "insert into ar_item_by_customer (ar_code) values ('UAT' || :'run_short' || 'C1')",
+      "affected": 1
+    },
+    {
+      "title": "สร้างแคชเชียร์ของ A",
+      "do": "db.exec",
+      "sql": "insert into ar_customer_cashier_list (ar_code, sale_code, line_number) values ('UAT' || :'run_short' || 'C1', 'UAT' || :'run_short', 1)",
+      "affected": 1
+    },
+    {
+      "title": "สร้างรูปสัญญาของ A",
+      "do": "db.exec",
+      "sql": "insert into images (image_id) values ('CONTRACT' || 'UAT' || :'run_short' || 'C1')",
+      "affected": 1
+    },
+    {
+      "title": "DB: A มีข้อมูลลูกครบทุกตาราง",
+      "do": "db.query",
+      "sql": "select (select count(*) from ar_contactor where ar_code = 'UAT' || :'run_short' || 'C1') as contactor, (select count(*) from ar_dealer where ar_code = 'UAT' || :'run_short' || 'C1') as dealer, (select count(*) from ar_item_by_customer where ar_code = 'UAT' || :'run_short' || 'C1') as item_by, (select count(*) from ar_customer_cashier_list where ar_code = 'UAT' || :'run_short' || 'C1') as cashier, (select count(*) from images where image_id = 'CONTRACT' || 'UAT' || :'run_short' || 'C1') as img, (select count(*) from ar_customer_detail where ar_code = 'UAT' || :'run_short' || 'C1') as detail, (select count(*) from ar_customer where code = 'UAT' || :'run_short' || 'C1') as cust",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "contactor",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "dealer",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "item_by",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "cashier",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "img",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "detail",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "cust",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "กดลบรายการ A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันการลบ A",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการลบลูกหนี้ [UAT{{run.short}}C1] จริงหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดยกเลิกการลบก่อน",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ยกเลิก\")"
+    },
+    {
+      "title": "DB: ยกเลิกการลบแล้ว A ยังอยู่พร้อมข้อมูลลูก",
+      "do": "db.query",
+      "sql": "select (select count(*) from ar_contactor where ar_code = 'UAT' || :'run_short' || 'C1') as contactor, (select count(*) from ar_dealer where ar_code = 'UAT' || :'run_short' || 'C1') as dealer, (select count(*) from ar_item_by_customer where ar_code = 'UAT' || :'run_short' || 'C1') as item_by, (select count(*) from ar_customer_cashier_list where ar_code = 'UAT' || :'run_short' || 'C1') as cashier, (select count(*) from images where image_id = 'CONTRACT' || 'UAT' || :'run_short' || 'C1') as img, (select count(*) from ar_customer_detail where ar_code = 'UAT' || :'run_short' || 'C1') as detail, (select count(*) from ar_customer where code = 'UAT' || :'run_short' || 'C1') as cust",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "contactor",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "dealer",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "item_by",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "cashier",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "img",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "detail",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "cust",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "กดลบรายการ A อีกครั้ง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "กดตกลงยืนยันการลบ",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ระบบแจ้งลบสำเร็จ 1 รายการ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ลบข้อมูลลูกหนี้เรียบร้อยแล้ว (1 รายการ)",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง (ลบ A สำเร็จ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: ลบ A แล้วไม่เหลือแถวในลูกหนี้ รายละเอียด และข้อมูลลูกทุกตาราง",
+      "do": "db.query",
+      "sql": "select (select count(*) from ar_contactor where ar_code = 'UAT' || :'run_short' || 'C1') as contactor, (select count(*) from ar_dealer where ar_code = 'UAT' || :'run_short' || 'C1') as dealer, (select count(*) from ar_item_by_customer where ar_code = 'UAT' || :'run_short' || 'C1') as item_by, (select count(*) from ar_customer_cashier_list where ar_code = 'UAT' || :'run_short' || 'C1') as cashier, (select count(*) from images where image_id = 'CONTRACT' || 'UAT' || :'run_short' || 'C1') as img, (select count(*) from ar_customer_detail where ar_code = 'UAT' || :'run_short' || 'C1') as detail, (select count(*) from ar_customer where code = 'UAT' || :'run_short' || 'C1') as cust",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "contactor",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "dealer",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "item_by",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "cashier",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "img",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "detail",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "cust",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: master_logs บันทึกการลบ A 1 ครั้ง",
+      "do": "db.query",
+      "sql": "select count(*) filter (where function_code = 1) as n_new, count(*) filter (where function_code = 2) as n_edit, count(*) filter (where function_code = 3) as n_del from master_logs where menu_name = 'menu_ar' and code = 'UAT' || :'run_short' || 'C1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n_new",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "n_edit",
+          "op": "eq",
+          "value": "2"
+        },
+        {
+          "col": "n_del",
+          "op": "eq",
+          "value": "1"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว A หายจากรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ตัวนับเหลือ 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "ติ๊กเลือกแถว B ในรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C2\"]) td[data-col-key=\"__check__\"]"
+    },
+    {
+      "title": "ติ๊กเลือกแถว C ในรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C3\"]) td[data-col-key=\"__check__\"]"
+    },
+    {
+      "title": "กดปุ่มลบรายการที่เลือกในรายการซ้าย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-testid=\"sml-nav-delete-btn\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันการลบ 2 รายการ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "จำนวน: 2 รายการ",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงยืนยันการลบ",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ระบบแจ้งลบสำเร็จ 2 รายการ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ลบข้อมูลลูกหนี้เรียบร้อยแล้ว (2 รายการ)",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง (ลบ B และ C สำเร็จ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: ไม่เหลือลูกหนี้ของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: ไม่เหลือรายละเอียดลูกหนี้ของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer_detail where ar_code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: master_logs บันทึกการลบ B และ C",
+      "do": "db.query",
+      "sql": "select count(*) as n_del from master_logs where menu_name = 'menu_ar' and function_code = 3 and code in ('UAT' || :'run_short' || 'C2', 'UAT' || :'run_short' || 'C3')",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n_del",
+          "op": "eq",
+          "value": "2"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว B หายจากรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C2\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว C หายจากรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_ar_detail\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}C3\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบแล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/",
+        "ERR_QUIC_PROTOCOL_ERROR",
+        "openstreetmap",
+        "arcgisonline",
+        "unpkg",
+        "leaflet",
+        "cdnjs",
+        "jsdelivr",
+        "nominatim"
+      ],
+      "continueOnFail": true
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบเอกสารทดสอบที่ค้างในตารางเอกสาร (เลขที่รูปแบบ UAT+6 ตัว+CD เท่านั้น)",
+      "do": "db.exec",
+      "sql": "delete from ic_trans_detail where doc_no ~ '^UAT[0-9A-Z]{6}CD$'; delete from ic_trans where doc_no ~ '^UAT[0-9A-Z]{6}CD$'; delete from ap_ar_trans_detail where doc_no ~ '^UAT[0-9A-Z]{6}CD$'; delete from ap_ar_trans where doc_no ~ '^UAT[0-9A-Z]{6}CD$'"
+    },
+    {
+      "title": "ลบข้อมูลลูกของลูกหนี้ UAT ที่ค้าง (รหัสรูปแบบ UAT+6 ตัว+C1/C2/C3 เท่านั้น)",
+      "do": "db.exec",
+      "sql": "delete from images where image_id ~ '^CONTRACTUAT[0-9A-Z]{6}C[123]$'; delete from ar_item_by_customer where ar_code ~ '^UAT[0-9A-Z]{6}C[123]$'; delete from ar_customer_cashier_list where ar_code ~ '^UAT[0-9A-Z]{6}C[123]$'; delete from ar_contactor where ar_code ~ '^UAT[0-9A-Z]{6}C[123]$'; delete from ar_dealer where ar_code ~ '^UAT[0-9A-Z]{6}C[123]$'"
+    },
+    {
+      "title": "ลบลูกหนี้ UAT ที่ค้างจากรอบนี้หรือรอบที่ถูกขัดจังหวะ และประวัติ master_logs ของรหัสเหล่านั้น",
+      "do": "db.exec",
+      "sql": "delete from ar_customer_detail where ar_code ~ '^UAT[0-9A-Z]{6}C[123]$'; delete from ar_customer where code ~ '^UAT[0-9A-Z]{6}C[123]$'; delete from master_logs where menu_name = 'menu_ar' and code ~ '^UAT[0-9A-Z]{6}C[123]$'"
+    },
+    {
+      "title": "ลบจังหวัด อำเภอ ตำบล ประเภทลูกหนี้ UAT ที่สร้างไว้ให้ช่องค้นหา (รหัสรูปแบบ UAT+6 ตัว+P/A/T/Y เท่านั้น)",
+      "do": "db.exec",
+      "sql": "delete from erp_tambon where code ~ '^UAT[0-9A-Z]{6}T[12]$'; delete from erp_amper where code ~ '^UAT[0-9A-Z]{6}A[12]$'; delete from erp_province where code ~ '^UAT[0-9A-Z]{6}P[12]$'; delete from ar_type where code ~ '^UAT[0-9A-Z]{6}Y[12]$'"
+    },
+    {
+      "title": "DB: ไม่เหลือลูกหนี้ของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "DB: ไม่เหลือรายละเอียดลูกหนี้ของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ar_customer_detail where ar_code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "DB: ไม่เหลือข้อมูลลูกของ A",
+      "do": "db.query",
+      "sql": "select (select count(*) from ar_contactor where ar_code = 'UAT' || :'run_short' || 'C1') as contactor, (select count(*) from ar_dealer where ar_code = 'UAT' || :'run_short' || 'C1') as dealer, (select count(*) from ar_item_by_customer where ar_code = 'UAT' || :'run_short' || 'C1') as item_by, (select count(*) from ar_customer_cashier_list where ar_code = 'UAT' || :'run_short' || 'C1') as cashier, (select count(*) from images where image_id = 'CONTRACT' || 'UAT' || :'run_short' || 'C1') as img, (select count(*) from ar_customer_detail where ar_code = 'UAT' || :'run_short' || 'C1') as detail, (select count(*) from ar_customer where code = 'UAT' || :'run_short' || 'C1') as cust",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "contactor",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "dealer",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "item_by",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "cashier",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "img",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "detail",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "cust",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "DB: ไม่เหลือจังหวัด อำเภอ ตำบล ประเภทลูกหนี้ UAT ของรอบนี้",
+      "do": "db.query",
+      "sql": "select (select count(*) from erp_province where code like 'UAT' || :'run_short' || '%') as prov, (select count(*) from erp_amper where code like 'UAT' || :'run_short' || '%') as amp, (select count(*) from erp_tambon where code like 'UAT' || :'run_short' || '%') as tam, (select count(*) from ar_type where code like 'UAT' || :'run_short' || '%') as typ",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "prov",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "amp",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "tam",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "typ",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "DB: ไม่เหลือเอกสารทดสอบของรอบนี้",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no = 'UAT' || :'run_short' || 'CD') + (select count(*) from ic_trans_detail where doc_no = 'UAT' || :'run_short' || 'CD') + (select count(*) from ap_ar_trans where doc_no = 'UAT' || :'run_short' || 'CD') + (select count(*) from ap_ar_trans_detail where doc_no = 'UAT' || :'run_short' || 'CD') as cnt",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

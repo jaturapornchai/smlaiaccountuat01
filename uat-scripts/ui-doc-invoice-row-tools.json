@@ -1,0 +1,818 @@
+{
+  "id": "ui-doc-invoice-row-tools",
+  "title": "หน้าจอขายเชื่อ: ปุ่มเครื่องมือของแถวสินค้า (สูตรราคาขาย สูตรลัดจำนวน/ส่วนลด ล็อกต้นทุน เช็คยอดคงเหลือตามคลัง ดูราคาขาย ลบรายการ) เนื้อหาตรงฐานข้อมูล และเตือนเมื่อปิดแท็บที่ยังไม่บันทึก",
+  "module": "sales",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "บิลขายเชื่อ (menu_so_invoice) ผ่านหน้าจอจริง: แก้ราคาเอง แล้วเลือกราคาคืนจากหน้าต่างสูตรราคาขาย (ค่าระดับราคาของลูกค้าตรง ic_inventory_price_formula), สูตรลัดช่องจำนวน ยอดรวม/จำนวน และสูตรส่วนลด =a*2 (grid_shortcut.go), ล็อกต้นทุนรวมของบรรทัด (CostLockModal → is_lock_cost/sum_of_cost_fix และต้นทุนขายจริง sum_of_cost หลังบันทึก service.go:290-296), เช็คยอดคงเหลือตามคลัง (ยอดรวม/คงเหลือ/มูลค่าตามคลัง-ที่เก็บตรง ic_inventory + ic_trans_detail เงื่อนไข stockRowsSQL) และกดเลือกคลังกลับเข้าแถว, ดูราคาขาย 3 ตารางของสินค้าที่มีตารางราคา (ตรง ic_inventory_price ตาม price_info.go) แล้วลบบรรทัดนั้น, บันทึกตรวจ ic_trans_detail, ลบผ่านปุ่มลบบนจอ แล้วเปิดเพิ่มใหม่ค้างไว้ กดปิดแท็บต้องมีหน้าต่างเตือน (อยู่ต่อ/ปิดทิ้ง) · ข้อมูลหลักสุ่มจากฐานจริงตอนรัน",
+  "timeoutMs": 420000,
+  "steps": [
+    {
+      "title": "กำหนดเลขบิลขายทดสอบ",
+      "do": "set",
+      "name": "r",
+      "value": "UAT-{{run.short}}-R"
+    },
+    {
+      "title": "เลือกลูกค้าจริงรายที่ 1 (เรียงรหัสจากท้าย): ใช้งานอยู่ ไม่ถูกปิดเครดิต วงเงินไม่บล็อก (ไม่มีวงเงิน หรือระบบไม่ล็อกวงเงิน) มีเครดิต 1-300 วัน ไม่มีส่วนลด/พนักงานขาย/บังคับภาษีของลูกค้า",
+      "do": "db.query",
+      "sql": "select c.code as c, c.name_1 as c_name, substr(c.name_1, 1, greatest(3, (char_length(c.name_1) * 2) / 3)) as c_part, d.credit_day::int::text as c_cday, to_char((now() at time zone 'Asia/Bangkok')::date + d.credit_day::int, 'YYYY-MM-DD') as c_due, (case when coalesce(c.price_level, 0)::int between 1 and 9 then coalesce(c.price_level, 0)::int else 0 end)::text as c_lvl from ar_customer c join lateral (select * from ar_customer_detail x where x.ar_code = c.code limit 1) d on true where c.code !~* '^UAT' and coalesce(c.status, 0) = 0 and char_length(coalesce(c.name_1, '')) >= 3 and coalesce(d.credit_status, 0) = 0 and (coalesce(d.credit_money, 0) = 0 or (select coalesce(lock_credit_money, 0) = 0 and coalesce(request_ar_credit, 0) = 0 from erp_option limit 1)) and coalesce(d.credit_day, 0) between 1 and 300 and coalesce(d.sale_type, 0) in (0, 2) and coalesce(d.set_tax_type, 0) = 0 and coalesce(trim(d.discount_item), '') = '' and coalesce(trim(d.discount_bill), '') = '' and coalesce(trim(d.sale_code), '') = '' order by c.code desc offset 0 limit 1",
+      "rows": 1,
+      "save": {
+        "c": "c",
+        "c_name": "c_name",
+        "c_part": "c_part",
+        "c_cday": "c_cday",
+        "c_due": "c_due",
+        "c_lvl": "c_lvl"
+      }
+    },
+    {
+      "title": "เลือกสินค้าจริงตัวที่ 1 (เรียงรหัสจากท้าย): สินค้าสต๊อกหน่วยเดียว 1:1 มีคลัง/ที่เก็บเดียว สูตรราคาขายเงินเชื่อ (ตามระดับราคาของลูกค้า) เป็นตัวเลขเดียวไม่ต่ำกว่าทุน ไม่มีตารางราคา/ส่วนลด และสต๊อกที่คลังนั้น >= 10 · ราคาไม่เกิน 2 ตำแหน่ง ไม่น้อยกว่า 10 ทุกแถวสูตรราคาของสินค้ามีค่าระดับราคานี้เท่ากัน และตอนนี้ไม่มีเอกสาร UAT อื่นใช้สินค้านี้ (ยอดคงเหลือไม่ถูกรันอื่นแทรก)",
+      "do": "db.query",
+      "sql": "select i.code as it, i.name_1 as it_name, substr(i.name_1, 1, greatest(3, (char_length(i.name_1) * 2) / 3)) as it_part, i.unit_standard as it_unit, ws.wh as it_wh, ws.shelf as it_shelf, f.p::text as it_price, b.bal::text as it_bal from ic_inventory i join ic_unit_use u on u.ic_code = i.code and u.code = i.unit_standard and u.stand_value = 1 and u.divide_value = 1 left join lateral (select * from ic_inventory_detail x where x.ic_code = i.code limit 1) d on true join lateral (select min(wh_code) as wh, min(shelf_code) as shelf, count(*) as n from ic_wh_shelf where ic_code = i.code) ws on ws.n = 1 join lateral (select min(pf)::numeric as p, count(distinct pf) as nd, count(*) filter (where coalesce(pf, '') !~ '^[0-9]+(\\.[0-9]+)?$') as bad from (select (array[price_0, price_1, price_2, price_3, price_4, price_5, price_6, price_7, price_8, price_9])[:'c_lvl'::int + 1] as pf from ic_inventory_price_formula where ic_code = i.code and unit_code = i.unit_standard and sale_type in (0, 2) and coalesce(tax_type, 0) in (0, 1)) ff) f on f.nd = 1 and f.bad = 0 and f.p > 0 cross join lateral (select coalesce(sum(d.qty * d.calc_flag * coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1)), 0) from ic_trans_detail d where d.item_code = i.code and d.wh_code = ws.wh and d.shelf_code = ws.shelf and d.doc_no !~* '^UAT' and coalesce(d.last_status, 0) = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12, 310, 14, 311, 16, 44, 46, 48, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 521, 522, 523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14, 16, 311) and coalesce(d.inquiry_type, 0) in (1, 3))) b(bal) where i.code !~* '^UAT' and coalesce(i.item_type, 0) = 0 and coalesce(i.tax_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0 and coalesce(i.use_expire, 0) = 0 and char_length(coalesce(i.name_1, '')) >= 3 and coalesce(d.start_sale_unit, '') in ('', i.unit_standard) and coalesce(d.start_unit_code, '') in ('', i.unit_standard) and coalesce(d.start_sale_wh, '') = '' and coalesce(trim(d.discount), '') = '' and coalesce(d.is_hold_sale, 0) = 0 and not exists (select 1 from ic_inventory_price p where p.ic_code = i.code) and not exists (select 1 from ic_inventory_discount p where p.ic_code = i.code) and (select coalesce(enable_all_ic_wh_shelf, 0) from erp_option limit 1) = 0 and f.p >= coalesce(i.average_cost, 0) and b.bal >= 10 and f.p = round(f.p, 2) and floor(f.p / 10) >= 1 and not exists (select 1 from ic_trans_detail u where u.item_code = i.code and u.doc_no ~* '^UAT') and (select count(distinct coalesce((array[x.price_0, x.price_1, x.price_2, x.price_3, x.price_4, x.price_5, x.price_6, x.price_7, x.price_8, x.price_9])[:'c_lvl'::int + 1], '')) from ic_inventory_price_formula x where x.ic_code = i.code) = 1 order by i.code desc offset 0 limit 1",
+      "rows": 1,
+      "save": {
+        "it": "it",
+        "it_name": "it_name",
+        "it_part": "it_part",
+        "it_unit": "it_unit",
+        "it_wh": "it_wh",
+        "it_shelf": "it_shelf",
+        "it_price": "it_price"
+      }
+    },
+    {
+      "title": "เลือกสินค้าจริงที่มีตารางราคาขายทั่วไป (ic_inventory_price โหมด 1 ประเภท 1) 1-15 แถว ไว้ดูหน้าต่างราคาขาย (แถวแรกเรียงหน่วยนับ+roworder ตาม price_info.go) ไม่ใช่สินค้าซีเรียล/วันหมดอายุ/ห้ามขาย",
+      "do": "db.query",
+      "sql": "select i.code as ip, i.name_1 as ip_name, n.cnt::text as ip_n, (n.cnt + 1)::text as ip_n1, fr.unit_code as ip_unit1, fr.sale_price1::text as ip_price1 from ic_inventory i join lateral (select count(*) as cnt from ic_inventory_price p where p.ic_code = i.code and p.price_mode = 1 and p.price_type = 1) n on n.cnt between 1 and 15 join lateral (select coalesce(p.unit_code, '') as unit_code, coalesce(p.sale_price1, 0)::numeric as sale_price1 from ic_inventory_price p where p.ic_code = i.code and p.price_mode = 1 and p.price_type = 1 order by p.unit_code, p.roworder limit 1) fr on true where i.code !~* '^UAT' and i.code <> :'it' and coalesce(i.item_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0 and coalesce(i.use_expire, 0) = 0 and char_length(coalesce(i.name_1, '')) >= 3 and not exists (select 1 from ic_inventory_detail d where d.ic_code = i.code and coalesce(d.is_hold_sale, 0) = 1) order by ((select count(*) from ic_unit_use u where u.ic_code = i.code) = 1) desc, i.code desc limit 1",
+      "rows": 1,
+      "save": {
+        "ip": "ip",
+        "ip_name": "ip_name",
+        "ip_n": "ip_n",
+        "ip_n1": "ip_n1",
+        "ip_unit1": "ip_unit1",
+        "ip_price1": "ip_price1"
+      }
+    },
+    {
+      "title": "ค่าที่ควรได้: ราคาแก้เอง = ราคา+1, ยอด 2 x ราคา, สูตรลัด ยอดรวม 3 x ราคา / 3, ส่วนลด =a*2 (a = ราคา/10 ปัดลง) ตามสูตร itemLineAmount (grid_calc.go:266-275), ต้นทุนล็อก = 3 x ทุนเฉลี่ยสินค้า + 1, คอลัมน์ระดับราคาของลูกค้าในตารางสูตร",
+      "do": "db.query",
+      "sql": "with o as (select coalesce(calc_item_price_discount, 0)::int as cipd, coalesce(item_amount_decimal, 2)::int as ad, coalesce(item_price_decimal, 2)::int as pd, :'it_price'::numeric as p, floor(:'it_price'::numeric / 10) as a from erp_option limit 1) select (:'c_lvl'::int + 2)::text as lvl_td, (p + 1)::text as p_alt, round(2 * (p + 1), ad)::text as l_alt, round(2 * p, ad)::text as l2, round(3 * p, ad)::text as tot3, a::int::text as da, (2 * a)::int::text as dsc, (case when cipd = 1 then round(3 * round(p - 2 * a, pd), ad) else round(3 * p, ad) - 2 * a end)::text as l3, (round(3 * coalesce((select average_cost from ic_inventory where code = :'it'), 0), 2) + 1)::text as cost_fix from o",
+      "rows": 1,
+      "save": {
+        "lvl_td": "lvl_td",
+        "p_alt": "p_alt",
+        "l_alt": "l_alt",
+        "l2": "l2",
+        "tot3": "tot3",
+        "da": "da",
+        "dsc": "dsc",
+        "l3": "l3",
+        "cost_fix": "cost_fix"
+      }
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เปิดหน้าจอขายสินค้าและบริการ (ขายเชื่อ)",
+      "do": "ui.openMenu",
+      "key": "menu_so_invoice"
+    },
+    {
+      "title": "กดปุ่ม เพิ่มใหม่ บนแถบเครื่องมือ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.h-11 button:has-text(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "ช่องเลขที่เอกสารเปิดให้กรอก (โหมดเพิ่มใหม่)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input:not([disabled])"
+    },
+    {
+      "title": "กรอกเลขที่เอกสารทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input",
+      "value": "{{r}}"
+    },
+    {
+      "title": "ช่องเลขที่เอกสารแสดงเลขที่กรอก (ตัวพิมพ์ใหญ่)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input",
+      "value": "{{r}}",
+      "op": "same"
+    },
+    {
+      "title": "เลือกประเภทการขาย = ขายเงินเชื่อ (ค่า 0)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] [role=\"radiogroup\"] >> nth=0 >> input[type=\"radio\"][value=\"0\"]"
+    },
+    {
+      "title": "พิมพ์รหัสลูกค้า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] input[placeholder=\"รหัส...\"]",
+      "value": "{{c}}"
+    },
+    {
+      "title": "กด Tab ยืนยันรหัสลูกค้า",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] input[placeholder=\"รหัส...\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "ชื่อลูกค้าเติมเองตาม ar_customer.name_1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] textarea[placeholder=\"ชื่อเจ้าหนี้ / ลูกหนี้...\"]",
+      "value": "{{c_name}}",
+      "op": "same"
+    },
+    {
+      "title": "บรรทัดที่ 1: พิมพ์รหัสสินค้า",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) input[placeholder=\"รหัสสินค้า...\"]",
+      "value": "{{it}}"
+    },
+    {
+      "title": "กด Enter ยืนยันช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) input[placeholder=\"รหัสสินค้า...\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "บรรทัดที่ 1: ชื่อสินค้าเติมเองตาม ic_inventory.name_1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) textarea",
+      "value": "{{it_name}}",
+      "op": "same"
+    },
+    {
+      "title": "บรรทัดที่ 1: จำนวน 2",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(7) input",
+      "value": "2"
+    },
+    {
+      "title": "กด Enter ยืนยันช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(7) input",
+      "key": "Enter"
+    },
+    {
+      "title": "บรรทัดที่ 1: ราคาต่อหน่วยตามสูตรราคาขายระดับของลูกค้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(8) input",
+      "value": "{{it_price}}",
+      "op": "eq"
+    },
+    {
+      "title": "บรรทัดที่ 1: จำนวนเงิน = 2 x ราคา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(10)",
+      "text": "{{l2}}",
+      "op": "eq"
+    },
+    {
+      "title": "แก้ราคาต่อหน่วยเองเป็น ราคา+1",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(8) input",
+      "value": "{{p_alt}}"
+    },
+    {
+      "title": "กด Enter ยืนยันช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(8) input",
+      "key": "Enter"
+    },
+    {
+      "title": "จำนวนเงินเปลี่ยนเป็น 2 x (ราคา+1)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(10)",
+      "text": "{{l_alt}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปุ่ม ฿ เลือกสูตรราคาขาย ในช่องราคา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) button[title=\"เลือกสูตรราคาขาย\"]"
+    },
+    {
+      "title": "หน้าต่างตารางสูตรราคาขายแสดง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ตารางสูตรราคาขาย (Ctrl+3 / Ctrl+4)\"))"
+    },
+    {
+      "title": "หัวหน้าต่างสูตรราคาแสดงรหัสสินค้าของแถว",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ตารางสูตรราคาขาย (Ctrl+3 / Ctrl+4)\")) span.font-mono",
+      "text": "{{it}}",
+      "op": "same"
+    },
+    {
+      "title": "ช่องระดับราคาของลูกค้าในแถวหน่วยนับของสินค้า = ราคาใน ic_inventory_price_formula",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ตารางสูตรราคาขาย (Ctrl+3 / Ctrl+4)\")) tbody > tr:has(> td:first-child:text-is(\"{{it_unit}}\")) >> nth=0 >> td:nth-child({{lvl_td}})",
+      "text": "{{it_price}}",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกช่องราคาระดับของลูกค้าเพื่อนำไปใช้ในแถว",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ตารางสูตรราคาขาย (Ctrl+3 / Ctrl+4)\")) tbody > tr:has(> td:first-child:text-is(\"{{it_unit}}\")) >> nth=0 >> td:nth-child({{lvl_td}})"
+    },
+    {
+      "title": "หน้าต่างสูตรราคาปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ตารางสูตรราคาขาย (Ctrl+3 / Ctrl+4)\"))",
+      "visible": false
+    },
+    {
+      "title": "ราคาต่อหน่วยกลับเป็นราคาจากสูตรที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(8) input",
+      "value": "{{it_price}}",
+      "op": "eq"
+    },
+    {
+      "title": "จำนวนเงินกลับเป็น 2 x ราคา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(10)",
+      "text": "{{l2}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปุ่ม สูตร ในช่องจำนวน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(7) button[title=\"คำนวณจากยอดรวม เช่น 1000/4\"]"
+    },
+    {
+      "title": "พิมพ์สูตร ยอดรวม/จำนวน = (3 x ราคา)/3",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.rounded-lg:has(> div.font-bold:text-is(\"ยอดรวม ÷ จำนวน\")) input",
+      "value": "{{tot3}}/3"
+    },
+    {
+      "title": "กด Enter ยืนยันสูตร",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.rounded-lg:has(> div.font-bold:text-is(\"ยอดรวม ÷ จำนวน\")) input",
+      "key": "Enter"
+    },
+    {
+      "title": "กล่องสูตรปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.rounded-lg:has(> div.font-bold:text-is(\"ยอดรวม ÷ จำนวน\")) input",
+      "visible": false
+    },
+    {
+      "title": "จำนวนจากสูตร = 3",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(7) input",
+      "value": "3",
+      "op": "eq"
+    },
+    {
+      "title": "ราคาต่อหน่วยจากสูตร = ยอดรวม/3 = ราคาเดิม",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(8) input",
+      "value": "{{it_price}}",
+      "op": "eq"
+    },
+    {
+      "title": "จำนวนเงิน = 3 x ราคา ไม่มีเศษส่วนลด",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(10)",
+      "text": "{{tot3}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปุ่ม สูตร ในช่องส่วนลด",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(9) button[title=\"ใส่ส่วนลดด้วยสูตร เช่น =100*2+50\"]"
+    },
+    {
+      "title": "พิมพ์สูตรส่วนลด =a*2",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.rounded-lg:has(> div.font-bold:text-is(\"สูตรส่วนลด\")) input",
+      "value": "={{da}}*2"
+    },
+    {
+      "title": "กด Enter ยืนยันสูตร",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.rounded-lg:has(> div.font-bold:text-is(\"สูตรส่วนลด\")) input",
+      "key": "Enter"
+    },
+    {
+      "title": "กล่องสูตรปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.rounded-lg:has(> div.font-bold:text-is(\"สูตรส่วนลด\")) input",
+      "visible": false
+    },
+    {
+      "title": "ช่องส่วนลด = ผลสูตร (2 x a)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) input[placeholder=\"เช่น 5% หรือ 10\"]",
+      "value": "{{dsc}}",
+      "op": "same"
+    },
+    {
+      "title": "จำนวนเงิน = 3 x ราคา - ส่วนลด ตาม SQL",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(10)",
+      "text": "{{l3}}",
+      "op": "eq"
+    },
+    {
+      "title": "กดปุ่ม ล็อกต้นทุน ของแถว",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) button[title=\"ล็อกต้นทุน\"]"
+    },
+    {
+      "title": "หน้าต่างแก้ไขต้นทุนสินค้าแสดง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(div:text-is(\"แก้ไขต้นทุนสินค้า\"))"
+    },
+    {
+      "title": "หน้าต่างต้นทุนแสดงรหัสสินค้าของแถว",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(div:text-is(\"แก้ไขต้นทุนสินค้า\")) span.font-mono",
+      "text": "{{it}}",
+      "op": "same"
+    },
+    {
+      "title": "กรอกต้นทุนรวมของรายการ = 3 x ทุนเฉลี่ย + 1",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(div:text-is(\"แก้ไขต้นทุนสินค้า\")) input",
+      "value": "{{cost_fix}}"
+    },
+    {
+      "title": "กด ล็อกต้นทุน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(div:text-is(\"แก้ไขต้นทุนสินค้า\")) button:has-text(\"ล็อกต้นทุน\"):not(:has-text(\"ปลด\"))"
+    },
+    {
+      "title": "หน้าต่างต้นทุนปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(div:text-is(\"แก้ไขต้นทุนสินค้า\"))",
+      "visible": false
+    },
+    {
+      "title": "ปุ่มในแถวเปลี่ยนเป็น ล็อกต้นทุนอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) button[title=\"ล็อกต้นทุนอยู่ (กดเพื่อแก้/ปลดล็อก)\"]"
+    },
+    {
+      "title": "เปิดหน้าต่างต้นทุนอีกครั้ง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) button[title=\"ล็อกต้นทุนอยู่ (กดเพื่อแก้/ปลดล็อก)\"]"
+    },
+    {
+      "title": "หน้าต่างแจ้งสถานะ ล็อกต้นทุนอยู่",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(div:text-is(\"แก้ไขต้นทุนสินค้า\"))",
+      "text": "สถานะ: ล็อกต้นทุนอยู่"
+    },
+    {
+      "title": "ช่องต้นทุนแสดงค่าที่ล็อกไว้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(div:text-is(\"แก้ไขต้นทุนสินค้า\")) input",
+      "value": "{{cost_fix}}",
+      "op": "eq"
+    },
+    {
+      "title": "กด ยกเลิก (ไม่เปลี่ยน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(div:text-is(\"แก้ไขต้นทุนสินค้า\")) button:text-is(\"ยกเลิก\")"
+    },
+    {
+      "title": "หน้าต่างต้นทุนปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(div:text-is(\"แก้ไขต้นทุนสินค้า\"))",
+      "visible": false
+    },
+    {
+      "title": "ยอดคงเหลือที่ควรเห็น: รวมทั้งสินค้า = ic_inventory.balance_qty, ที่คลัง/ที่เก็บของแถว = ผลรวม ic_trans_detail ตามเงื่อนไขสต๊อก (stock_rebuild.go:18-26) จำนวนและมูลค่า",
+      "do": "db.query",
+      "sql": "with o as (select coalesce(item_qty_decimal, 2)::int as qd from erp_option limit 1) select to_char(round((select balance_qty from ic_inventory where code = :'it'), qd), 'FM999,999,999,990.' || repeat('0', greatest(qd, 1))) as bal_fmt, round(coalesce(sum(case when trans_flag in (14, 16, 311) and coalesce(inquiry_type, 0) in (1, 3) then 0 else coalesce(qty, 0) * (coalesce(nullif(stand_value, 0), 1) / coalesce(nullif(divide_value, 0), 1)) * coalesce(calc_flag, 0) end), 0), qd)::text as bal_loc, round(coalesce(sum(coalesce(sum_of_cost, sum_amount, 0) * coalesce(calc_flag, 0)), 0), 2)::text as val_loc from o cross join ic_trans_detail where item_code = :'it' and wh_code = :'it_wh' and shelf_code = :'it_shelf' and last_status = 0 and coalesce(is_doc_copy, 0) = 0 and coalesce(item_type, 0) in (0, 4, 6) and trans_flag in (12, 310, 14, 311, 16, 44, 46, 48, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 521, 522, 523) and not (trans_flag = 46 and coalesce(inquiry_type, 0) <> 0) and not (trans_flag = 48 and coalesce(inquiry_type, 0) > 1) and not (trans_flag = 44 and coalesce(doc_ref, '') <> '' and coalesce(is_pos, 0) = 1) group by qd",
+      "rows": 1,
+      "save": {
+        "bal_fmt": "bal_fmt",
+        "bal_loc": "bal_loc",
+        "val_loc": "val_loc"
+      }
+    },
+    {
+      "title": "กดปุ่ม เช็คยอดคงเหลือตามคลัง ของแถว",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) button[title=\"เช็คยอดคงเหลือตามคลัง\"]"
+    },
+    {
+      "title": "หน้าต่างยอดสินค้าคงเหลือแสดง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ยอดสินค้าคงเหลือ (Ctrl+2)\"))"
+    },
+    {
+      "title": "หัวหน้าต่างแสดงรหัสสินค้าของแถว",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ยอดสินค้าคงเหลือ (Ctrl+2)\")) span.font-mono",
+      "text": "{{it}}",
+      "op": "same"
+    },
+    {
+      "title": "ยอดคงเหลือรวม = ic_inventory.balance_qty",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ยอดสินค้าคงเหลือ (Ctrl+2)\")) div.rounded-lg:has(> div:text-is(\"ยอดคงเหลือรวม\"))",
+      "text": "{{bal_fmt}}"
+    },
+    {
+      "title": "แถวคลัง/ที่เก็บของสินค้า: คงเหลือ ตรง SQL",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ยอดสินค้าคงเหลือ (Ctrl+2)\")) tbody > tr:has(> td:nth-child(1):text-is(\"{{it_wh}}\")):has(> td:nth-child(3):text-is(\"{{it_shelf}}\")) > td:nth-child(4)",
+      "text": "{{bal_loc}}",
+      "op": "eq"
+    },
+    {
+      "title": "แถวคลัง/ที่เก็บของสินค้า: มูลค่ารวม ตรง SQL",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ยอดสินค้าคงเหลือ (Ctrl+2)\")) tbody > tr:has(> td:nth-child(1):text-is(\"{{it_wh}}\")):has(> td:nth-child(3):text-is(\"{{it_shelf}}\")) > td:nth-child(5)",
+      "text": "{{val_loc}}",
+      "op": "eq",
+      "continueOnFail": true
+    },
+    {
+      "title": "กด ปิด หน้าต่างยอดคงเหลือ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ยอดสินค้าคงเหลือ (Ctrl+2)\")) button:text-is(\"ปิด\")"
+    },
+    {
+      "title": "หน้าต่างยอดคงเหลือปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ยอดสินค้าคงเหลือ (Ctrl+2)\"))",
+      "visible": false
+    },
+    {
+      "title": "ล้างช่องคลังของแถวให้ว่าง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(4) input",
+      "value": ""
+    },
+    {
+      "title": "ล้างช่องที่เก็บของแถวให้ว่าง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(5) input",
+      "value": ""
+    },
+    {
+      "title": "ช่องคลังว่าง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(4) input",
+      "value": "",
+      "op": "same"
+    },
+    {
+      "title": "เปิดหน้าต่างเช็คยอดคงเหลือตามคลังอีกครั้ง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) button[title=\"เช็คยอดคงเหลือตามคลัง\"]"
+    },
+    {
+      "title": "กดปุ่ม เลือก ที่แถวคลัง/ที่เก็บของสินค้า (นำไปใส่ในแถว)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ยอดสินค้าคงเหลือ (Ctrl+2)\")) tbody > tr:has(> td:nth-child(1):text-is(\"{{it_wh}}\")):has(> td:nth-child(3):text-is(\"{{it_shelf}}\")) button[title=\"นำคลังและที่เก็บนี้ไปใส่ในแถว\"]"
+    },
+    {
+      "title": "หน้าต่างยอดคงเหลือปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ยอดสินค้าคงเหลือ (Ctrl+2)\"))",
+      "visible": false
+    },
+    {
+      "title": "ช่องคลังของแถว = คลังที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(4) input",
+      "value": "{{it_wh}}",
+      "op": "same"
+    },
+    {
+      "title": "ช่องที่เก็บของแถว = ที่เก็บที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(1) > td:nth-child(5) input",
+      "value": "{{it_shelf}}",
+      "op": "same"
+    },
+    {
+      "title": "กดปุ่ม + เพิ่มบรรทัดรายการใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] button:has-text(\"เพิ่มบรรทัดรายการใหม่\")"
+    },
+    {
+      "title": "บรรทัดที่ 2: พิมพ์รหัสสินค้าที่มีตารางราคา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(2) input[placeholder=\"รหัสสินค้า...\"]",
+      "value": "{{ip}}"
+    },
+    {
+      "title": "กด Enter ยืนยันช่อง",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(2) input[placeholder=\"รหัสสินค้า...\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "บรรทัดที่ 2: ชื่อสินค้าเติมเอง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(2) textarea",
+      "value": "{{ip_name}}",
+      "op": "same"
+    },
+    {
+      "title": "กดปุ่ม ราคาขาย ของบรรทัดที่ 2",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(2) button[title^=\"ดูราคาขาย 3 ตาราง\"]"
+    },
+    {
+      "title": "หน้าต่างดูราคาขายแสดง",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ดูราคาขาย\"))"
+    },
+    {
+      "title": "หัวหน้าต่างแสดงรหัสสินค้าของบรรทัดที่ 2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ดูราคาขาย\")) span.font-mono",
+      "text": "{{ip}}",
+      "op": "same"
+    },
+    {
+      "title": "ตารางราคาขายทั่วไป แถวแรก: ราคาขาย 1 = ic_inventory_price.sale_price1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ดูราคาขาย\")) section:has(> h3:has-text(\"ราคาขายทั่วไป\")) tbody > tr:nth-child(1) > td:nth-child(1)",
+      "text": "{{ip_price1}}",
+      "op": "eq"
+    },
+    {
+      "title": "ตารางราคาขายทั่วไป แถวแรก: หน่วยนับ = ic_inventory_price.unit_code",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ดูราคาขาย\")) section:has(> h3:has-text(\"ราคาขายทั่วไป\")) tbody > tr:nth-child(1) > td:nth-child(3)",
+      "text": "{{ip_unit1}}",
+      "op": "same"
+    },
+    {
+      "title": "ตารางราคาขายทั่วไป มีแถวครบตาม ic_inventory_price (แถวสุดท้ายแสดง)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ดูราคาขาย\")) section:has(> h3:has-text(\"ราคาขายทั่วไป\")) tbody > tr:nth-child({{ip_n}})"
+    },
+    {
+      "title": "ตารางราคาขายทั่วไป ไม่มีแถวเกิน",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ดูราคาขาย\")) section:has(> h3:has-text(\"ราคาขายทั่วไป\")) tbody > tr:nth-child({{ip_n1}})",
+      "visible": false
+    },
+    {
+      "title": "กด ปิด หน้าต่างดูราคาขาย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ดูราคาขาย\")) button:text-is(\"ปิด\")"
+    },
+    {
+      "title": "หน้าต่างดูราคาขายปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.fixed.inset-0.z-50:has(span:text-is(\"ดูราคาขาย\"))",
+      "visible": false
+    },
+    {
+      "title": "กดปุ่ม ลบรายการ ของบรรทัดที่ 2",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(2) button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "บรรทัดที่ 2 หายไป",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] table:has(th:has-text(\"ราคา/หน่วย\")) > tbody > tr:nth-child(2)",
+      "visible": false
+    },
+    {
+      "title": "ภาพหน้าจอก่อนบันทึก",
+      "do": "ui.screenshot",
+      "name": "row-tools-before-save"
+    },
+    {
+      "title": "กดปุ่ม บันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.h-11 button:has-text(\"บันทึก\")"
+    },
+    {
+      "title": "หน้าต่างบันทึกสำเร็จแสดง (ถามพิมพ์แบบฟอร์ม)",
+      "do": "ui.expectVisible",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+      "timeout": 30000
+    },
+    {
+      "title": "กด ยังไม่พิมพ์ (ไม่พิมพ์จริง)",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งบันทึกเอกสารสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] header.card-head span.font-medium",
+      "text": "บันทึกเอกสาร {{r}} เรียบร้อยแล้ว"
+    },
+    {
+      "title": "ic_trans_detail: เหลือบรรทัดเดียว คลัง/ที่เก็บที่เลือก จำนวน 3 ราคา ส่วนลดจากสูตร ยอดเงิน ล็อกต้นทุน และต้นทุนขายจริง = ต้นทุนที่ล็อก",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans_detail where doc_no = :'r' and trans_flag = 44)::text as n, wh_code, shelf_code, qty::numeric::text as qty, price::numeric::text as price, coalesce(discount, '') as discount, sum_amount::numeric::text as sum_amount, coalesce(is_lock_cost, 0)::text as lck, coalesce(sum_of_cost_fix, 0)::numeric::text as fix, coalesce(sum_of_cost, 0)::numeric::text as cost from ic_trans_detail where doc_no = :'r' and trans_flag = 44 and item_code = :'it'",
+      "rows": 1,
+      "continueOnFail": true,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "wh_code",
+          "op": "same",
+          "value": "{{it_wh}}"
+        },
+        {
+          "col": "shelf_code",
+          "op": "same",
+          "value": "{{it_shelf}}"
+        },
+        {
+          "col": "qty",
+          "op": "eq",
+          "value": "3"
+        },
+        {
+          "col": "price",
+          "op": "eq",
+          "value": "{{it_price}}"
+        },
+        {
+          "col": "discount",
+          "op": "same",
+          "value": "{{dsc}}"
+        },
+        {
+          "col": "sum_amount",
+          "op": "eq",
+          "value": "{{l3}}"
+        },
+        {
+          "col": "lck",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "fix",
+          "op": "eq",
+          "value": "{{cost_fix}}"
+        },
+        {
+          "col": "cost",
+          "op": "eq",
+          "value": "{{cost_fix}}"
+        }
+      ]
+    },
+    {
+      "title": "กดปุ่ม ลบ (ยืนยันลบเอกสารในกล่องยืนยัน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.h-11 button:has-text(\"ลบ\")"
+    },
+    {
+      "title": "แถบสถานะแจ้งลบเอกสารสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] header.card-head span.font-medium",
+      "text": "ลบเอกสาร {{r}} เรียบร้อยแล้ว",
+      "timeout": 30000
+    },
+    {
+      "title": "หลังลบผ่านจอ: ไม่เหลือแถวของบิลทดสอบในทุกตารางที่บันทึกขายเขียน",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ic_trans where doc_no in (:'r')) + (select count(*) from ic_trans_detail where doc_no in (:'r')) + (select count(*) from ic_trans_shipment where doc_no in (:'r')) + (select count(*) from ic_trans_serial_number where doc_no in (:'r')) + (select count(*) from ap_ar_trans where doc_no in (:'r')) + (select count(*) from cb_trans where doc_no in (:'r')) + (select count(*) from cb_trans_detail where doc_no in (:'r')) + (select count(*) from gl_journal where doc_no in (:'r')) + (select count(*) from gl_journal_detail where doc_no in (:'r')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'r')) + (select count(*) from erp_credit_request where doc_no in (:'r')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'r') or billing_no in (:'r')))::text as n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "กดปุ่ม เพิ่มใหม่ (เอกสารใหม่ยังไม่บันทึก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div.h-11 button:has-text(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "พิมพ์เลขที่เอกสารค้างไว้ (ไม่บันทึก)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input",
+      "value": "{{r}}"
+    },
+    {
+      "title": "กดปุ่ม X ปิดแท็บขายเชื่อ",
+      "do": "ui.click",
+      "selector": "[data-testid=\"workspace-tab-close-menu_so_invoice\"]"
+    },
+    {
+      "title": "หน้าต่างเตือน แท็บนี้มีการแก้ไขข้อมูลค้างอยู่ แสดง",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]"
+    },
+    {
+      "title": "หน้าต่างเตือนบอกว่ามีการแก้ไขค้างอยู่",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "text": "แท็บนี้มีการแก้ไขข้อมูลค้างอยู่"
+    },
+    {
+      "title": "กด อยู่ต่อ (ไม่ปิด)",
+      "do": "ui.click",
+      "selector": "[data-testid=\"tab-warning-keep-btn\"]"
+    },
+    {
+      "title": "หน้าต่างเตือนปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "visible": false
+    },
+    {
+      "title": "แท็บยังเปิดอยู่ และเลขที่ที่พิมพ์ค้างยังอยู่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] div:has(> label:has-text(\"เลขที่เอกสาร *\")) > input",
+      "value": "{{r}}",
+      "op": "same"
+    },
+    {
+      "title": "กดปุ่ม X ปิดแท็บอีกครั้ง",
+      "do": "ui.click",
+      "selector": "[data-testid=\"workspace-tab-close-menu_so_invoice\"]"
+    },
+    {
+      "title": "หน้าต่างเตือนแสดงอีกครั้ง",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]"
+    },
+    {
+      "title": "กด ปิดทิ้ง (ไม่บันทึก)",
+      "do": "ui.click",
+      "selector": "[data-testid=\"tab-warning-force-close-btn\"]"
+    },
+    {
+      "title": "แท็บขายเชื่อถูกปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"]",
+      "visible": false
+    },
+    {
+      "title": "ปิดทิ้งแล้วไม่มีเอกสารถูกบันทึก (0 แถว)",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ic_trans where doc_no in (:'r')) + (select count(*) from ic_trans_detail where doc_no in (:'r')) + (select count(*) from ic_trans_shipment where doc_no in (:'r')) + (select count(*) from ic_trans_serial_number where doc_no in (:'r')) + (select count(*) from ap_ar_trans where doc_no in (:'r')) + (select count(*) from cb_trans where doc_no in (:'r')) + (select count(*) from cb_trans_detail where doc_no in (:'r')) + (select count(*) from gl_journal where doc_no in (:'r')) + (select count(*) from gl_journal_detail where doc_no in (:'r')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'r')) + (select count(*) from erp_credit_request where doc_no in (:'r')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'r') or billing_no in (:'r')))::text as n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงบนหน้าจอ (HTTP/JS/DB)",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบบิลขายทดสอบผ่าน API (กรณีขั้นหลักค้าง)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{r}}",
+        "transFlag": 44
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือแถวของบิลทดสอบ (0 แถว)",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ic_trans where doc_no in (:'r')) + (select count(*) from ic_trans_detail where doc_no in (:'r')) + (select count(*) from ic_trans_shipment where doc_no in (:'r')) + (select count(*) from ic_trans_serial_number where doc_no in (:'r')) + (select count(*) from ap_ar_trans where doc_no in (:'r')) + (select count(*) from cb_trans where doc_no in (:'r')) + (select count(*) from cb_trans_detail where doc_no in (:'r')) + (select count(*) from gl_journal where doc_no in (:'r')) + (select count(*) from gl_journal_detail where doc_no in (:'r')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'r')) + (select count(*) from erp_credit_request where doc_no in (:'r')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'r') or billing_no in (:'r')))::text as n",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

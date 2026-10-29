@@ -1,0 +1,301 @@
+{
+ "id": "glx-period-close-preview",
+ "title": "ปิดงวด/ปิดสิ้นปี (ดูตัวอย่างเท่านั้น): รายการปิดบัญชีกลับยอดค่าใช้จ่ายของเราเข้าบัญชีปิดตรงเป๊ะ และไม่บันทึกอะไรลงฐานข้อมูล",
+ "module": "gl",
+ "lens": "api",
+ "severityOnFail": "S1",
+ "description": "อ่านอย่างเดียวฝั่งปิดบัญชี: ไม่สั่งบันทึกปิดงวด/ปิดปี/ปิดบัญชีจริง (ห้ามรันกระบวนการทั่วทั้งฐาน) · สร้างรายวัน UAT-<รอบ>-JC ในวันที่ว่าง (ไม่มี GL อื่น, งวดเปิด) เดบิตค่าใช้จ่าย/เครดิตหนี้สิน ยอดจากเดบิตล่าสุดจริงของบัญชี → POST /api/process/workflow/gl-close save:false (ปุ่มดูตัวอย่างของ menu_gl_end_of_period และ menu_gl_end_of_year/menu_close_account_process) ช่วงวันเดียวนั้น ปิดเข้าบัญชีทุนระดับย่อยจริง (ประเภท 2 ที่มีบัญชีคุม รหัสสูงสุด = กำไรสะสม): ต้องได้ 2 บรรทัด เครดิตค่าใช้จ่าย = ยอด, เดบิตบัญชีปิด = ยอด, กำไร(ขาดทุน) = −ยอด, saved = false (workflow.go:824 preview ไม่เปิด transaction) → ตรวจว่าไม่มีเอกสารปิดงวด (trans_flag 1998/1999) เกิดขึ้น · ตรวจเงื่อนไขก่อนบันทึก: save:true ไม่ระบุเลขที่/สมุด ต้องได้ 400 (workflow.go:834) · cleanup ลบรายวันผ่าน /api/process/doc/delete แล้วตรวจว่าไม่เหลือแถว",
+ "timeoutMs": 300000,
+ "steps": [
+  {
+   "title": "กำหนดเลขเอกสารรายวันทดสอบ",
+   "do": "set",
+   "name": "jc",
+   "value": "UAT-{{run.short}}-JC"
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "เลือกวันที่ว่าง บัญชีค่าใช้จ่าย/หนี้สิน/ทุน ยอดเงิน และสมุดรายวันจากข้อมูลจริง",
+   "do": "db.query",
+   "sql": "with base as (with qd as (\n select g::date as qd from generate_series((now() at time zone 'Asia/Bangkok')::date - 40, (now() at time zone 'Asia/Bangkok')::date - 3, interval '1 day') g\n where not exists (select 1 from gl_journal_detail x where x.doc_date = g::date)\n   and exists (select 1 from erp_account_period p where g::date between p.date_start and p.date_end and coalesce(p.status, 0) = 0)\n order by g desc limit 1),\nleaf as (select c.code, coalesce(c.name_1, '') nm, c.account_type t from gl_chart_of_account c where not exists (select 1 from gl_chart_of_account k where k.main_code = c.code)),\nused as (select l.code, l.nm, l.t, count(*) n, (array_agg(d.debit order by d.doc_date desc, d.roworder desc) filter (where d.debit > 0))[1] lastdr\n from leaf l join gl_journal_detail d on d.account_code = l.code and d.doc_no not like 'UAT%' group by 1, 2, 3)\nselect to_char(q.qd, 'YYYY-MM-DD') qd, e.code exp, e.nm expname, a.code liab, a.nm liabname, round(e.lastdr, 2)::text amt, (round(e.lastdr, 2) + 1)::text bad, b.code book\nfrom qd q,\n (select * from used where t = 4 and lastdr > 0 order by n desc, code limit 1) e,\n (select code, coalesce(name_1, '') nm from gl_chart_of_account, (values (0, '2111'), (1, '2110'), (2, '2100')) p(o, c)\n where code = p.c or code like p.c || '-%' order by p.o, (code = p.c) desc, code limit 1) a,\n (select code from gl_journal_book order by code limit 1) b),\neq as (select c.code from gl_chart_of_account c where c.account_type = 2 and coalesce(c.main_code, '') <> '' and not exists (select 1 from gl_chart_of_account k where k.main_code = c.code) order by c.code desc limit 1)\nselect base.*, eq.code eqacc, (-(base.amt::numeric))::text loss from base, eq",
+   "rows": 1,
+   "save": {
+    "qd": "qd",
+    "exp": "exp",
+    "expname": "expname",
+    "liab": "liab",
+    "liabname": "liabname",
+    "amt": "amt",
+    "book": "book",
+    "eqacc": "eqacc",
+    "loss": "loss"
+   }
+  },
+  {
+   "title": "บันทึกรายวันค่าใช้จ่ายของเรา",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/save",
+   "body": {
+    "kind": "gl_journal",
+    "isNew": true,
+    "docNo": "{{jc}}",
+    "docDate": "{{qd}}",
+    "transFlag": 0,
+    "bookCode": "{{book}}",
+    "docFormatCode": "JV",
+    "remark": "{{run.tag}}",
+    "glLines": [
+     {
+      "accountCode": "{{exp}}",
+      "accountName": "{{expname}}",
+      "debit": "{{amt}}",
+      "credit": "0",
+      "remark": "{{run.tag}}"
+     },
+     {
+      "accountCode": "{{liab}}",
+      "accountName": "{{liabname}}",
+      "debit": "0",
+      "credit": "{{amt}}",
+      "remark": "{{run.tag}}"
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    }
+   ]
+  },
+  {
+   "title": "วันที่ทดสอบมีแค่รายการของเราใน GL",
+   "do": "db.query",
+   "sql": "select count(distinct doc_no)::text docs from gl_journal_detail where doc_date = :'qd'::date",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "docs",
+     "op": "eq",
+     "value": "1"
+    }
+   ]
+  },
+  {
+   "title": "ดูตัวอย่างปิดงวด: กลับยอดค่าใช้จ่ายเข้าบัญชีปิดตรงเป๊ะ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/workflow/gl-close",
+   "body": {
+    "menuName": "menu_gl_end_of_period",
+    "mode": "period",
+    "dateFrom": "{{qd}}",
+    "dateTo": "{{qd}}",
+    "closeToAccount": "{{eqacc}}",
+    "save": false
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    },
+    {
+     "path": "data.saved",
+     "op": "eq",
+     "value": false
+    },
+    {
+     "path": "data.lines.0.accountCode",
+     "op": "eq",
+     "value": "{{exp}}"
+    },
+    {
+     "path": "data.lines.0.credit",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.lines.0.debit",
+     "op": "eq",
+     "value": "0"
+    },
+    {
+     "path": "data.lines.1.accountCode",
+     "op": "eq",
+     "value": "{{eqacc}}"
+    },
+    {
+     "path": "data.lines.1.debit",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.lines.1.credit",
+     "op": "eq",
+     "value": "0"
+    },
+    {
+     "path": "data.lines.2.accountCode",
+     "op": "empty"
+    },
+    {
+     "path": "data.totalDebit",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.totalCredit",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.profit",
+     "op": "eq",
+     "value": "{{loss}}"
+    }
+   ]
+  },
+  {
+   "title": "ดูตัวอย่างปิดสิ้นปี: ผลเหมือนกันในช่วงวันเดียวกัน",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/workflow/gl-close",
+   "body": {
+    "menuName": "menu_gl_end_of_year",
+    "mode": "year",
+    "dateFrom": "{{qd}}",
+    "dateTo": "{{qd}}",
+    "closeToAccount": "{{eqacc}}",
+    "save": false
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    },
+    {
+     "path": "data.saved",
+     "op": "eq",
+     "value": false
+    },
+    {
+     "path": "data.lines.0.accountCode",
+     "op": "eq",
+     "value": "{{exp}}"
+    },
+    {
+     "path": "data.lines.0.credit",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.lines.0.debit",
+     "op": "eq",
+     "value": "0"
+    },
+    {
+     "path": "data.lines.1.accountCode",
+     "op": "eq",
+     "value": "{{eqacc}}"
+    },
+    {
+     "path": "data.lines.1.debit",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.lines.1.credit",
+     "op": "eq",
+     "value": "0"
+    },
+    {
+     "path": "data.lines.2.accountCode",
+     "op": "empty"
+    },
+    {
+     "path": "data.totalDebit",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.totalCredit",
+     "op": "eq",
+     "value": "{{amt}}"
+    },
+    {
+     "path": "data.profit",
+     "op": "eq",
+     "value": "{{loss}}"
+    }
+   ]
+  },
+  {
+   "title": "เงื่อนไขก่อนบันทึกปิดงวด: ไม่ระบุเลขที่เอกสาร/สมุดรายวันต้องถูกปฏิเสธ (400)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/workflow/gl-close",
+   "body": {
+    "menuName": "menu_gl_end_of_period",
+    "mode": "period",
+    "dateFrom": "{{qd}}",
+    "dateTo": "{{qd}}",
+    "closeToAccount": "",
+    "docNo": "",
+    "bookCode": "",
+    "save": true
+   },
+   "expectStatus": 400
+  },
+  {
+   "title": "ไม่มีเอกสารปิดงวด/ปิดปีเกิดขึ้นในวันที่ทดสอบ",
+   "do": "db.query",
+   "sql": "select ((select count(*) from gl_journal where doc_date = :'qd'::date and trans_flag in (1998, 1999)) + (select count(*) from gl_journal_detail where doc_date = :'qd'::date and doc_no <> :'jc'))::text n",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบรายวันทดสอบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/delete",
+   "body": {
+    "kind": "gl_journal",
+    "docNo": "{{jc}}"
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo",
+   "do": "db.query",
+   "sql": "select (select count(*) from gl_journal where doc_no = :'jc') + (select count(*) from gl_journal_detail where doc_no = :'jc') + (select count(*) from gl_journal_vat_buy where doc_no = :'jc') + (select count(*) from gl_journal_vat_sale where doc_no = :'jc') + (select count(*) from gl_wht_list where doc_no = :'jc') + (select count(*) from gl_wht_list_detail where doc_no = :'jc') as left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,1366 @@
+{
+  "id": "wf-sale-quote-so-invoice",
+  "title": "ขั้นตอนขาย: ใบเสนอราคา → อนุมัติ → ใบสั่งขาย → อนุมัติ → ขายเชื่ออ้างใบสั่งขาย 2 ใบ: ส่งเกินถูกปฏิเสธ ใบสั่งขายปิดครบ ภาษีขาย GL สต๊อกถูก แล้วลบคืนไม่เหลือเศษ",
+  "module": "sales",
+  "lens": "api",
+  "severityOnFail": "S1",
+  "timeoutMs": 600000,
+  "description": "ทำแบบผู้ใช้ Demo ผ่าน API ตัวเดียวกับหน้าจอ · สินค้าเลือกตัวแรกตามรหัสที่หน่วย 1:1 คลัง/ที่เก็บมีจริงและสต๊อกพอ ราคาจากบิลขายจริงล่าสุดของสินค้านั้น ลูกค้า/อัตราภาษี/รหัสบัญชีจากบิลขายเชื่อจริงล่าสุด ยอดที่ควรได้คำนวณใน SQL · (1) ใบเสนอราคา 10 หน่วย → ไม่ลง GL/ภาษี/สต๊อก → อนุมัติ (approve_status=1) · (2) ดึงใบเสนอราคาเข้าใบสั่งขาย → ใบเสนอราคาปิด → อนุมัติใบสั่งขาย · (3) ขายเชื่ออ้างใบสั่งขาย 6 หน่วย → ใบสั่งขายยังไม่ปิด ยอดให้ดึงเหลือ 4 ภาษีขาย/GL/สต๊อกตรง · (4) ส่งเกิน 5 หน่วยถูกปฏิเสธ 'จำนวนเกินเอกสารอ้างอิง' และยกเลิกใบสั่งขายที่ถูกอ้างอิงถูกปฏิเสธ · (5) ขายเชื่อส่วนที่เหลือ 4 → ใบสั่งขายปิด (doc_success=1) ดึงซ้ำไม่มีรายการ สต๊อกลดรวม 10 ลูกหนี้ค้างรวม = ยอดใบเสนอราคา รายงานภาษีขายตรง · ล้างข้อมูล: ลบบิล → ยกเลิกอนุมัติ → ลบใบสั่งขาย/ใบเสนอราคา แล้วพิสูจน์ว่าไม่เหลือแถวในทุกตาราง",
+  "steps": [
+    {
+      "title": "กำหนดเลขใบเสนอราคาทดสอบ",
+      "do": "set",
+      "name": "qt",
+      "value": "UAT-{{run.short}}-QT"
+    },
+    {
+      "title": "กำหนดเลขใบสั่งขายทดสอบ",
+      "do": "set",
+      "name": "so",
+      "value": "UAT-{{run.short}}-SO"
+    },
+    {
+      "title": "กำหนดเลขบิลขายใบที่ 1 (ส่งบางส่วน)",
+      "do": "set",
+      "name": "ia",
+      "value": "UAT-{{run.short}}-IVA"
+    },
+    {
+      "title": "กำหนดเลขบิลขายใบที่ 2 (ส่งส่วนที่เหลือ)",
+      "do": "set",
+      "name": "ib",
+      "value": "UAT-{{run.short}}-IVB"
+    },
+    {
+      "title": "ค่าเริ่มต้นเลขใบอนุมัติใบเสนอราคา (ERP ออกเลขเองตอนอนุมัติ)",
+      "do": "set",
+      "name": "qa",
+      "value": "UAT-{{run.short}}-NOQA"
+    },
+    {
+      "title": "ค่าเริ่มต้นเลขใบอนุมัติใบสั่งขาย (ERP ออกเลขเองตอนอนุมัติ)",
+      "do": "set",
+      "name": "sa",
+      "value": "UAT-{{run.short}}-NOSA"
+    },
+    {
+      "title": "กำหนดรูปแบบเลขเอกสารของรอบนี้ (ใช้แยกจากเอกสาร UAT ของรอบอื่นที่รันพร้อมกัน)",
+      "do": "set",
+      "name": "mine",
+      "value": "UAT-{{run.short}}-%"
+    },
+    {
+      "title": "จำนวนในใบเสนอราคา/ใบสั่งขาย",
+      "do": "set",
+      "name": "q_qt",
+      "value": "10"
+    },
+    {
+      "title": "จำนวนที่ส่งในบิลขายใบที่ 1",
+      "do": "set",
+      "name": "q_a",
+      "value": "6"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เลือกสินค้าตัวแรกตามรหัส (ORDER BY รหัสสินค้า) ที่หน่วยนับ 1:1 มีจริง คลัง/ที่เก็บมีจริง ราคาขายจากบิลขายจริงล่าสุด และสต๊อกพอ ≥ 10",
+      "do": "db.query",
+      "sql": "select i.code as item, i.unit_standard as unit, p.wh_code as wh, p.shelf_code as shelf, p.price::text as price from ic_inventory i join ic_unit_use u on u.ic_code = i.code and u.code = i.unit_standard and u.stand_value = 1 and u.divide_value = 1 cross join lateral (select d.price, d.wh_code, d.shelf_code from ic_trans_detail d join ic_trans t on t.doc_no = d.doc_no and t.trans_flag = d.trans_flag where d.item_code = i.code and d.trans_flag = 44 and t.doc_no not like 'UAT%' and t.last_status = 0 and coalesce(t.is_cancel, 0) = 0 and d.unit_code = i.unit_standard and d.stand_value = 1 and d.divide_value = 1 and d.price > 0 and coalesce(d.discount, '') = '' and coalesce(d.tax_type, 0) = 0 and coalesce(d.wh_code, '') <> '' and coalesce(d.shelf_code, '') <> '' order by t.doc_date desc, t.roworder desc, d.line_number limit 1) p join ic_warehouse w on w.code = p.wh_code join ic_shelf s on s.whcode = p.wh_code and s.code = p.shelf_code cross join lateral (select coalesce(sum(d.qty * d.calc_flag * coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1)), 0) as bal from ic_trans_detail d where d.item_code = i.code and d.wh_code = p.wh_code and d.shelf_code = p.shelf_code and d.doc_no not like 'UAT-%' and coalesce(d.last_status, 0) = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12, 310, 14, 311, 16, 44, 46, 48, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 521, 522, 523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14, 16, 311) and coalesce(d.inquiry_type, 0) in (1, 3))) b where coalesce(i.item_type, 0) = 0 and coalesce(i.ic_serial_no, 0) = 0 and coalesce(i.tax_type, 0) = 0 and b.bal >= 10 order by i.code asc limit 1",
+      "rows": 1,
+      "save": {
+        "item": "item",
+        "unit": "unit",
+        "wh": "wh",
+        "shelf": "shelf",
+        "price": "price"
+      }
+    },
+    {
+      "title": "เลือกลูกค้า อัตราภาษี และรหัสบัญชีลูกหนี้/ขาย/ภาษีขาย จากบิลขายเชื่อจริงล่าสุด (ภาษีแยกนอก) ที่ลง GL ครบ",
+      "do": "db.query",
+      "sql": "select * from (select t.cust_code as cust, t.vat_rate::text as rate, (select g.account_code from gl_journal_detail g join gl_chart_of_account x on x.code = g.account_code where g.doc_no = t.doc_no and g.debit = t.total_amount and g.credit = 0 limit 1) as acc_ar, (select g.account_code from gl_journal_detail g join gl_chart_of_account x on x.code = g.account_code where g.doc_no = t.doc_no and g.credit = t.total_before_vat and g.debit = 0 limit 1) as acc_sale, (select g.account_code from gl_journal_detail g join gl_chart_of_account x on x.code = g.account_code where g.doc_no = t.doc_no and g.credit = t.total_vat_value and g.debit = 0 limit 1) as acc_vat, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today from ic_trans t join ar_customer c on c.code = t.cust_code where t.trans_flag = 44 and t.inquiry_type = 0 and t.vat_type = 0 and t.doc_no not like 'UAT%' and t.last_status = 0 and coalesce(t.is_cancel, 0) = 0 and coalesce(t.advance_amount, 0) = 0 and t.total_vat_value > 0 and t.total_before_vat <> t.total_vat_value order by t.doc_date desc, t.roworder desc limit 20) x where acc_ar is not null and acc_sale is not null and acc_vat is not null limit 1",
+      "rows": 1,
+      "save": {
+        "cust": "cust",
+        "rate": "rate",
+        "acc_ar": "acc_ar",
+        "acc_sale": "acc_sale",
+        "acc_vat": "acc_vat",
+        "today": "today"
+      }
+    },
+    {
+      "title": "คำนวณยอดที่ควรได้จากราคาจริง (ฐาน ภาษี รวม) ของใบเสนอราคา บิลใบที่ 1 บิลใบที่ 2 และจำนวนคงเหลือ",
+      "do": "db.query",
+      "sql": "select (:'q_qt'::numeric - :'q_a'::numeric)::text as q_b, (:'q_qt'::numeric - :'q_a'::numeric + 1)::text as q_over, round((:'q_qt'::numeric) * :'price'::numeric, 2)::text as qt_sum, round(round((:'q_qt'::numeric) * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as qt_vat, (round((:'q_qt'::numeric) * :'price'::numeric, 2) + round(round((:'q_qt'::numeric) * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as qt_total, round((:'q_a'::numeric) * :'price'::numeric, 2)::text as a_sum, round(round((:'q_a'::numeric) * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as a_vat, (round((:'q_a'::numeric) * :'price'::numeric, 2) + round(round((:'q_a'::numeric) * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as a_total, round((:'q_qt'::numeric - :'q_a'::numeric) * :'price'::numeric, 2)::text as b_sum, round(round((:'q_qt'::numeric - :'q_a'::numeric) * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as b_vat, (round((:'q_qt'::numeric - :'q_a'::numeric) * :'price'::numeric, 2) + round(round((:'q_qt'::numeric - :'q_a'::numeric) * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as b_total, round((:'q_qt'::numeric - :'q_a'::numeric + 1) * :'price'::numeric, 2)::text as o_sum, round(round((:'q_qt'::numeric - :'q_a'::numeric + 1) * :'price'::numeric, 2) * :'rate'::numeric / 100, 2)::text as o_vat, (round((:'q_qt'::numeric - :'q_a'::numeric + 1) * :'price'::numeric, 2) + round(round((:'q_qt'::numeric - :'q_a'::numeric + 1) * :'price'::numeric, 2) * :'rate'::numeric / 100, 2))::text as o_total",
+      "rows": 1,
+      "save": {
+        "q_b": "q_b",
+        "q_over": "q_over",
+        "qt_sum": "qt_sum",
+        "qt_vat": "qt_vat",
+        "qt_total": "qt_total",
+        "a_sum": "a_sum",
+        "a_vat": "a_vat",
+        "a_total": "a_total",
+        "b_sum": "b_sum",
+        "b_vat": "b_vat",
+        "b_total": "b_total",
+        "o_sum": "o_sum",
+        "o_vat": "o_vat",
+        "o_total": "o_total"
+      }
+    },
+    {
+      "title": "สต๊อกของสินค้า/คลัง/ที่เก็บนี้ก่อนเริ่ม (สูตรเดียวกับ ERP ไม่นับเอกสาร UAT ของรอบอื่นที่รันพร้อมกัน)",
+      "do": "db.query",
+      "sql": "select coalesce(sum(d.qty * d.calc_flag * coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1)), 0)::text as stock0 from ic_trans_detail d where d.item_code = :'item' and d.wh_code = :'wh' and d.shelf_code = :'shelf' and (d.doc_no not like 'UAT-%' or d.doc_no like :'mine') and coalesce(d.last_status, 0) = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12, 310, 14, 311, 16, 44, 46, 48, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 521, 522, 523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14, 16, 311) and coalesce(d.inquiry_type, 0) in (1, 3))",
+      "rows": 1,
+      "save": {
+        "stock0": "stock0"
+      }
+    },
+    {
+      "title": "บันทึกใบเสนอราคา (ขายเชื่อ ภาษีแยกนอก)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{qt}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 30,
+        "inquiryType": 0,
+        "custCode": "{{cust}}",
+        "docFormatCode": "SO",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "1",
+            "divideValue": "1",
+            "qty": "{{q_qt}}",
+            "price": "{{price}}",
+            "sumAmount": "{{qt_sum}}",
+            "taxType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{qt}}"
+        }
+      ]
+    },
+    {
+      "title": "หัวใบเสนอราคา: ฐาน/ภาษี/รวมตรงที่คำนวณ ยังไม่อนุมัติ ยังไม่ถูกใช้",
+      "do": "db.query",
+      "sql": "select total_before_vat, total_vat_value, total_amount, vat_rate, coalesce(approve_status, 0) as approve_status, coalesce(used_status, 0) as used_status, coalesce(doc_success, 0) as doc_success from ic_trans where doc_no = :'qt' and trans_flag = 30",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{qt_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{qt_vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{qt_total}}"
+        },
+        {
+          "col": "vat_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "approve_status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "doc_success",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ใบเสนอราคาไม่ลง GL และไม่ลงภาษีขาย",
+      "do": "db.query",
+      "sql": "select (select count(*) from gl_journal where doc_no = :'qt') as gl_rows, (select count(*) from gl_journal_vat_sale where doc_no = :'qt') as vat_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "gl_rows",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "vat_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ใบเสนอราคาไม่ทำให้สต๊อกเปลี่ยน (สูตรสต๊อก ERP)",
+      "do": "db.query",
+      "sql": "select (coalesce(sum(d.qty * d.calc_flag * coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1)), 0) - :'stock0'::numeric)::text as moved from ic_trans_detail d where d.item_code = :'item' and d.wh_code = :'wh' and d.shelf_code = :'shelf' and (d.doc_no not like 'UAT-%' or d.doc_no like :'mine') and coalesce(d.last_status, 0) = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12, 310, 14, 311, 16, 44, 46, 48, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 521, 522, 523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14, 16, 311) and coalesce(d.inquiry_type, 0) in (1, 3))",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "moved",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "อนุมัติใบเสนอราคา (เมนูอนุมัติใบเสนอราคา)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/approve",
+      "body": {
+        "menuName": "menu_so_quotation_approve",
+        "flag": 32,
+        "origFlag": 30,
+        "docRef": "{{qt}}",
+        "docFormat": "SOA",
+        "screenCode": "SOA",
+        "docDate": "{{today}}",
+        "remark": "{{run.tag}}",
+        "undo": false,
+        "notApprove": false
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "exists"
+        }
+      ],
+      "save": {
+        "qa": "data.docNo"
+      }
+    },
+    {
+      "title": "ใบเสนอราคาอนุมัติแล้ว: มีใบอนุมัติอ้างถึง ใบเสนอราคาถูกใช้ (used_status=1 ตาม ERP/C# ที่ไม่ใช้ approve_status กับใบเสนอราคา) และการอนุมัติไม่ลง GL",
+      "do": "db.query",
+      "sql": "select coalesce(q.used_status, 0) as used_status, (select count(*) from ic_trans a where a.doc_no = :'qa' and a.trans_flag = 32 and a.doc_ref = :'qt') as approve_docs, (select count(*) from gl_journal where doc_no = :'qa') as gl_rows from ic_trans q where q.doc_no = :'qt' and q.trans_flag = 30",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "approve_docs",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "gl_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "กดดึงใบเสนอราคาเข้าใบสั่งขาย: ได้ 1 บรรทัด จำนวนเต็ม อ้างเลขใบเสนอราคา (ประเภทอ้างอิง 1 = ใบเสนอราคา ไม่ผูกเลขบรรทัด ตาม ERP)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/transgrid/refimport",
+      "body": {
+        "transFlag": 36,
+        "docDate": "{{today}}",
+        "custCode": "{{cust}}",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "inquiryType": 0,
+        "docNo": "{{so}}",
+        "refDocs": [
+          {
+            "docNo": "{{qt}}",
+            "transFlag": 30,
+            "docRefType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.lines.0.itemCode",
+          "op": "eq",
+          "value": "{{item}}"
+        },
+        {
+          "path": "data.lines.0.qty",
+          "op": "eq",
+          "value": "{{q_qt}}"
+        },
+        {
+          "path": "data.lines.0.refDocNo",
+          "op": "eq",
+          "value": "{{qt}}"
+        },
+        {
+          "path": "data.lines.0.docRefType",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "path": "data.lines.1",
+          "op": "empty"
+        }
+      ]
+    },
+    {
+      "title": "บันทึกใบสั่งขายอ้างใบเสนอราคา (ค่าอ้างอิงตามที่หน้าจอดึงมา)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{so}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 36,
+        "inquiryType": 0,
+        "custCode": "{{cust}}",
+        "docFormatCode": "SS",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "docRef": "{{qt}}",
+        "docRefDate": "{{today}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "1",
+            "divideValue": "1",
+            "qty": "{{q_qt}}",
+            "price": "{{price}}",
+            "sumAmount": "{{qt_sum}}",
+            "taxType": 0,
+            "refDocNo": "{{qt}}",
+            "refRow": 0,
+            "docRefType": 1
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{so}}"
+        }
+      ]
+    },
+    {
+      "title": "หัวใบสั่งขาย: ยอดเท่าใบเสนอราคา อ้างเลขใบเสนอราคา ยังไม่อนุมัติ ยังไม่ปิด",
+      "do": "db.query",
+      "sql": "select total_before_vat, total_vat_value, total_amount, vat_rate, doc_ref, coalesce(approve_status, 0) as approve_status, coalesce(doc_success, 0) as doc_success from ic_trans where doc_no = :'so' and trans_flag = 36",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{qt_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{qt_vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{qt_total}}"
+        },
+        {
+          "col": "vat_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "eq",
+          "value": "{{qt}}"
+        },
+        {
+          "col": "approve_status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "doc_success",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "บรรทัดใบสั่งขายอ้างเลขใบเสนอราคา จำนวนเต็ม และไม่ลง GL/ภาษีขาย",
+      "do": "db.query",
+      "sql": "select d.ref_doc_no, d.qty, (select count(*) from gl_journal where doc_no = :'so') as gl_rows, (select count(*) from gl_journal_vat_sale where doc_no = :'so') as vat_rows from ic_trans_detail d where d.doc_no = :'so' and d.trans_flag = 36",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "ref_doc_no",
+          "op": "eq",
+          "value": "{{qt}}"
+        },
+        {
+          "col": "qty",
+          "op": "eq",
+          "value": "{{q_qt}}"
+        },
+        {
+          "col": "gl_rows",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "vat_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ใบสั่งขายไม่ทำให้สต๊อกเปลี่ยน (สูตรสต๊อก ERP)",
+      "do": "db.query",
+      "sql": "select (coalesce(sum(d.qty * d.calc_flag * coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1)), 0) - :'stock0'::numeric)::text as moved from ic_trans_detail d where d.item_code = :'item' and d.wh_code = :'wh' and d.shelf_code = :'shelf' and (d.doc_no not like 'UAT-%' or d.doc_no like :'mine') and coalesce(d.last_status, 0) = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12, 310, 14, 311, 16, 44, 46, 48, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 521, 522, 523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14, 16, 311) and coalesce(d.inquiry_type, 0) in (1, 3))",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "moved",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ใบเสนอราคาหลังเปิดใบสั่งขายครบจำนวน: ถูกใช้แล้ว (used_status=1) และปิดแล้ว (doc_success=1)",
+      "do": "db.query",
+      "sql": "select coalesce(used_status, 0) as used_status, coalesce(doc_success, 0) as doc_success from ic_trans where doc_no = :'qt' and trans_flag = 30",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "doc_success",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "อนุมัติใบสั่งขาย (เมนูอนุมัติใบสั่งขาย)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/approve",
+      "body": {
+        "menuName": "menu_so_sale_order_approve",
+        "flag": 52,
+        "origFlag": 36,
+        "docRef": "{{so}}",
+        "docFormat": "SSA",
+        "screenCode": "SSA",
+        "docDate": "{{today}}",
+        "remark": "{{run.tag}}",
+        "undo": false,
+        "notApprove": false
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "exists"
+        }
+      ],
+      "save": {
+        "sa": "data.docNo"
+      }
+    },
+    {
+      "title": "ใบสั่งขายเปลี่ยนเป็นอนุมัติแล้ว (approve_status=1) มีใบอนุมัติอ้างถึง ไม่ลง GL",
+      "do": "db.query",
+      "sql": "select coalesce(s.approve_status, 0) as approve_status, (select count(*) from ic_trans a where a.doc_no = :'sa' and a.trans_flag = 52 and a.doc_ref = :'so') as approve_docs, (select count(*) from gl_journal where doc_no = :'sa') as gl_rows from ic_trans s where s.doc_no = :'so' and s.trans_flag = 36",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "approve_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "approve_docs",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "gl_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "กดดึงใบสั่งขายเข้าบิลขาย: ได้ 1 บรรทัด จำนวนเต็ม อ้างบรรทัดที่ 1",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/transgrid/refimport",
+      "body": {
+        "transFlag": 44,
+        "docDate": "{{today}}",
+        "custCode": "{{cust}}",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "inquiryType": 0,
+        "docNo": "{{ia}}",
+        "refDocs": [
+          {
+            "docNo": "{{so}}",
+            "transFlag": 36,
+            "docRefType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.lines.0.itemCode",
+          "op": "eq",
+          "value": "{{item}}"
+        },
+        {
+          "path": "data.lines.0.qty",
+          "op": "eq",
+          "value": "{{q_qt}}"
+        },
+        {
+          "path": "data.lines.0.refDocNo",
+          "op": "eq",
+          "value": "{{so}}"
+        },
+        {
+          "path": "data.lines.0.refRow",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "path": "data.lines.1",
+          "op": "empty"
+        }
+      ]
+    },
+    {
+      "title": "บันทึกขายเชื่อใบที่ 1 ส่งบางส่วน อ้างใบสั่งขาย บรรทัดที่ 1",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{ia}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 44,
+        "inquiryType": 0,
+        "custCode": "{{cust}}",
+        "docFormatCode": "SI",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "taxDocNo": "{{ia}}",
+        "taxDocDate": "{{today}}",
+        "docRef": "{{so}}",
+        "docRefDate": "{{today}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "1",
+            "divideValue": "1",
+            "qty": "{{q_a}}",
+            "price": "{{price}}",
+            "sumAmount": "{{a_sum}}",
+            "taxType": 0,
+            "refDocNo": "{{so}}",
+            "refRow": 1,
+            "docRefType": 3
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{ia}}"
+        }
+      ]
+    },
+    {
+      "title": "หัวบิลขายใบที่ 1: ฐาน/ภาษี/รวมตรง และอ้างเลขใบสั่งขาย",
+      "do": "db.query",
+      "sql": "select total_before_vat, total_vat_value, total_amount, vat_rate, doc_ref from ic_trans where doc_no = :'ia' and trans_flag = 44",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{a_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{a_vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{a_total}}"
+        },
+        {
+          "col": "vat_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "doc_ref",
+          "op": "eq",
+          "value": "{{so}}"
+        }
+      ]
+    },
+    {
+      "title": "บรรทัดบิลขายใบที่ 1 อ้างใบสั่งขาย บรรทัดที่ 1 และเป็นรายการตัดสต๊อก (calc_flag = -1)",
+      "do": "db.query",
+      "sql": "select ref_doc_no, ref_row, qty, calc_flag from ic_trans_detail where doc_no = :'ia' and trans_flag = 44",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "ref_doc_no",
+          "op": "eq",
+          "value": "{{so}}"
+        },
+        {
+          "col": "ref_row",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "qty",
+          "op": "eq",
+          "value": "{{q_a}}"
+        },
+        {
+          "col": "calc_flag",
+          "op": "eq",
+          "value": "-1"
+        }
+      ]
+    },
+    {
+      "title": "ใบสั่งขายหลังส่งบางส่วน: ถูกใช้แล้วแต่ยังไม่ปิด (doc_success=0)",
+      "do": "db.query",
+      "sql": "select coalesce(used_status, 0) as used_status, coalesce(doc_success, 0) as doc_success from ic_trans where doc_no = :'so' and trans_flag = 36",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "doc_success",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ดึงใบสั่งขายซ้ำ: ยอดคงเหลือให้ส่ง = สั่ง − ส่งแล้ว",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/transgrid/refimport",
+      "body": {
+        "transFlag": 44,
+        "docDate": "{{today}}",
+        "custCode": "{{cust}}",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "inquiryType": 0,
+        "docNo": "{{ib}}",
+        "refDocs": [
+          {
+            "docNo": "{{so}}",
+            "transFlag": 36,
+            "docRefType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.lines.0.qty",
+          "op": "eq",
+          "value": "{{q_b}}"
+        },
+        {
+          "path": "data.lines.0.refRow",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "path": "data.lines.1",
+          "op": "empty"
+        }
+      ]
+    },
+    {
+      "title": "ภาษีขายบิลใบที่ 1: ลงรายงานภาษีขาย 1 แถว ฐาน/ภาษีตรง เป็นยอดบวก",
+      "do": "db.query",
+      "sql": "select base_caltax_amount, amount, tax_rate, vat_calc from gl_journal_vat_sale where doc_no = :'ia'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "base_caltax_amount",
+          "op": "eq",
+          "value": "{{a_sum}}"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{a_vat}}"
+        },
+        {
+          "col": "tax_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "vat_calc",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "GL บิลขายใบที่ 1: Dr ลูกหนี้ = ยอดรวม, Cr ขาย = ฐาน, Cr ภาษีขาย = ภาษี และเดบิต = เครดิต",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit), 0) as debit, coalesce(sum(debit) filter (where account_code = :'acc_ar'), 0) as l0, coalesce(sum(credit) filter (where account_code = :'acc_sale'), 0) as l1, coalesce(sum(credit) filter (where account_code = :'acc_vat'), 0) as l2 from gl_journal_detail where doc_no = :'ia'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "debit",
+          "op": "eq",
+          "value": "{{a_total}}"
+        },
+        {
+          "col": "l0",
+          "op": "eq",
+          "value": "{{a_total}}"
+        },
+        {
+          "col": "l1",
+          "op": "eq",
+          "value": "{{a_sum}}"
+        },
+        {
+          "col": "l2",
+          "op": "eq",
+          "value": "{{a_vat}}"
+        }
+      ]
+    },
+    {
+      "title": "สต๊อกหลังบิลใบที่ 1: ลดลงเท่าจำนวนที่ส่ง",
+      "do": "db.query",
+      "sql": "select (coalesce(sum(d.qty * d.calc_flag * coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1)), 0) - :'stock0'::numeric)::text as moved from ic_trans_detail d where d.item_code = :'item' and d.wh_code = :'wh' and d.shelf_code = :'shelf' and (d.doc_no not like 'UAT-%' or d.doc_no like :'mine') and coalesce(d.last_status, 0) = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12, 310, 14, 311, 16, 44, 46, 48, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 521, 522, 523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14, 16, 311) and coalesce(d.inquiry_type, 0) in (1, 3))",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "moved",
+          "op": "eq",
+          "value": "-{{q_a}}"
+        }
+      ]
+    },
+    {
+      "title": "ส่งเกินยอดคงเหลือของใบสั่งขาย (คงเหลือ + 1) ต้องถูกปฏิเสธ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{ib}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 44,
+        "inquiryType": 0,
+        "custCode": "{{cust}}",
+        "docFormatCode": "SI",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "taxDocNo": "{{ib}}",
+        "taxDocDate": "{{today}}",
+        "docRef": "{{so}}",
+        "docRefDate": "{{today}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "1",
+            "divideValue": "1",
+            "qty": "{{q_over}}",
+            "price": "{{price}}",
+            "sumAmount": "{{o_sum}}",
+            "taxType": 0,
+            "refDocNo": "{{so}}",
+            "refRow": 1,
+            "docRefType": 3
+          }
+        ]
+      },
+      "expectStatus": [
+        400,
+        409,
+        422
+      ],
+      "expect": [
+        {
+          "path": "error",
+          "op": "contains",
+          "value": "จำนวนเกินเอกสารอ้างอิง"
+        }
+      ]
+    },
+    {
+      "title": "บิลที่ส่งเกินไม่ถูกบันทึก (ไม่มีหัว/GL ค้าง)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no = :'ib') + (select count(*) from ap_ar_trans where doc_no = :'ib') + (select count(*) from gl_journal_detail where doc_no = :'ib') as n",
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "บันทึกขายเชื่อใบที่ 2 ส่งส่วนที่เหลือ อ้างใบสั่งขาย บรรทัดที่ 1",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{ib}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 44,
+        "inquiryType": 0,
+        "custCode": "{{cust}}",
+        "docFormatCode": "SI",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "remark": "{{run.tag}}",
+        "taxDocNo": "{{ib}}",
+        "taxDocDate": "{{today}}",
+        "docRef": "{{so}}",
+        "docRefDate": "{{today}}",
+        "lines": [
+          {
+            "itemCode": "{{item}}",
+            "unitCode": "{{unit}}",
+            "whCode": "{{wh}}",
+            "shelfCode": "{{shelf}}",
+            "standValue": "1",
+            "divideValue": "1",
+            "qty": "{{q_b}}",
+            "price": "{{price}}",
+            "sumAmount": "{{b_sum}}",
+            "taxType": 0,
+            "refDocNo": "{{so}}",
+            "refRow": 1,
+            "docRefType": 3
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{ib}}"
+        }
+      ]
+    },
+    {
+      "title": "หัวบิลขายใบที่ 2: ฐาน/ภาษี/รวมตรง",
+      "do": "db.query",
+      "sql": "select total_before_vat, total_vat_value, total_amount, vat_rate from ic_trans where doc_no = :'ib' and trans_flag = 44",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "total_before_vat",
+          "op": "eq",
+          "value": "{{b_sum}}"
+        },
+        {
+          "col": "total_vat_value",
+          "op": "eq",
+          "value": "{{b_vat}}"
+        },
+        {
+          "col": "total_amount",
+          "op": "eq",
+          "value": "{{b_total}}"
+        },
+        {
+          "col": "vat_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        }
+      ]
+    },
+    {
+      "title": "ใบสั่งขายหลังส่งครบ: ปิดแล้ว (doc_success=1) และอนุมัติค้างอยู่",
+      "do": "db.query",
+      "sql": "select coalesce(used_status, 0) as used_status, coalesce(doc_success, 0) as doc_success, coalesce(approve_status, 0) as approve_status from ic_trans where doc_no = :'so' and trans_flag = 36",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "used_status",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "doc_success",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "approve_status",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "ยกเลิกใบสั่งขายที่ส่งครบ/ปิดแล้ว ต้องถูกปฏิเสธ (ERP ยอมให้ยกเลิกเฉพาะใบที่ยังค้างส่ง)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/cancel",
+      "body": {
+        "menuName": "menu_so_sale_order_cancel",
+        "flag": 37,
+        "origFlag": 36,
+        "docRef": "{{so}}",
+        "docFormat": "SSC",
+        "screenCode": "SSC",
+        "docDate": "{{today}}",
+        "remark": "{{run.tag}}",
+        "undo": false,
+        "notApprove": false,
+        "cancelType": 0
+      },
+      "expectStatus": [
+        400,
+        409,
+        422
+      ],
+      "expect": [
+        {
+          "path": "error",
+          "op": "contains",
+          "value": "ปิดรายการไปแล้ว"
+        }
+      ]
+    },
+    {
+      "title": "ใบสั่งขายยังไม่ถูกยกเลิกและไม่มีใบยกเลิกค้าง",
+      "do": "db.query",
+      "sql": "select coalesce(last_status, 0) as last_status, (select count(*) from ic_trans where doc_ref = :'so' and trans_flag = 37) as cancel_docs from ic_trans where doc_no = :'so' and trans_flag = 36",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "last_status",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "cancel_docs",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ดึงใบสั่งขายที่ส่งครบแล้ว: ไม่มีรายการคงเหลือให้ดึง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/transgrid/refimport",
+      "body": {
+        "transFlag": 44,
+        "docDate": "{{today}}",
+        "custCode": "{{cust}}",
+        "vatType": 0,
+        "vatRate": "{{rate}}",
+        "inquiryType": 0,
+        "docNo": "{{ib}}",
+        "refDocs": [
+          {
+            "docNo": "{{so}}",
+            "transFlag": 36,
+            "docRefType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.lines.0",
+          "op": "empty"
+        }
+      ]
+    },
+    {
+      "title": "ภาษีขายบิลใบที่ 2: ฐาน/ภาษีตรง",
+      "do": "db.query",
+      "sql": "select base_caltax_amount, amount, tax_rate, vat_calc from gl_journal_vat_sale where doc_no = :'ib'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "base_caltax_amount",
+          "op": "eq",
+          "value": "{{b_sum}}"
+        },
+        {
+          "col": "amount",
+          "op": "eq",
+          "value": "{{b_vat}}"
+        },
+        {
+          "col": "tax_rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "vat_calc",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "GL บิลขายใบที่ 2: Dr ลูกหนี้/Cr ขาย/Cr ภาษีขาย ตรง และเดบิต = เครดิต",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit), 0) as debit, coalesce(sum(debit) filter (where account_code = :'acc_ar'), 0) as l0, coalesce(sum(credit) filter (where account_code = :'acc_sale'), 0) as l1, coalesce(sum(credit) filter (where account_code = :'acc_vat'), 0) as l2 from gl_journal_detail where doc_no = :'ib'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "debit",
+          "op": "eq",
+          "value": "{{b_total}}"
+        },
+        {
+          "col": "l0",
+          "op": "eq",
+          "value": "{{b_total}}"
+        },
+        {
+          "col": "l1",
+          "op": "eq",
+          "value": "{{b_sum}}"
+        },
+        {
+          "col": "l2",
+          "op": "eq",
+          "value": "{{b_vat}}"
+        }
+      ]
+    },
+    {
+      "title": "สต๊อกรวมหลังส่งครบ: ลดลงเท่าจำนวนในใบสั่งขาย",
+      "do": "db.query",
+      "sql": "select (coalesce(sum(d.qty * d.calc_flag * coalesce(nullif(d.stand_value, 0), 1) / coalesce(nullif(d.divide_value, 0), 1)), 0) - :'stock0'::numeric)::text as moved from ic_trans_detail d where d.item_code = :'item' and d.wh_code = :'wh' and d.shelf_code = :'shelf' and (d.doc_no not like 'UAT-%' or d.doc_no like :'mine') and coalesce(d.last_status, 0) = 0 and coalesce(d.is_doc_copy, 0) = 0 and coalesce(d.item_type, 0) in (0, 4, 6) and d.trans_flag in (12, 310, 14, 311, 16, 44, 46, 48, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 521, 522, 523) and not (d.trans_flag = 46 and coalesce(d.inquiry_type, 0) <> 0) and not (d.trans_flag = 48 and coalesce(d.inquiry_type, 0) > 1) and not (d.trans_flag = 44 and coalesce(d.doc_ref, '') <> '' and coalesce(d.is_pos, 0) = 1) and not (d.trans_flag in (14, 16, 311) and coalesce(d.inquiry_type, 0) in (1, 3))",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "moved",
+          "op": "eq",
+          "value": "-{{q_qt}}"
+        }
+      ]
+    },
+    {
+      "title": "ลูกหนี้คงค้างของบิลทั้ง 2 ใบ (สูตรหน้ารับชำระ) = ยอดรวม 2 ใบ = ยอดใบเสนอราคา",
+      "do": "db.query",
+      "sql": "select coalesce(sum((case when h.trans_flag = 48 and h.inquiry_type in (0, 2, 4) then -1 else 1 end) * coalesce(h.total_amount, 0) - coalesce((select sum(coalesce(p.sum_pay_money, 0) + case when h.trans_flag in (12, 44, 1802) then coalesce(p.lost_profit_exchange_amount, 0) else 0 end) from ap_ar_trans_detail p where p.last_status = 0 and p.trans_flag = 239 and p.billing_no = h.doc_no and p.bill_type = h.trans_flag), 0)), 0)::text as ar, count(*) as docs from ic_trans h where h.doc_no in (:'ia', :'ib') and h.last_status = 0 and ((h.trans_flag = 44 and h.inquiry_type in (0, 2)) or h.trans_flag = 46 or (h.trans_flag = 48 and h.inquiry_type in (0, 2, 4)))",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "ar",
+          "op": "eq",
+          "value": "{{qt_total}}"
+        },
+        {
+          "col": "docs",
+          "op": "eq",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "title": "รายงานภาษีขาย (เมนูจริง) แสดงบิลใบที่ 1 ยอดตรง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_report_vat_sale",
+        "mode": "summary",
+        "dateFrom": "{{today}}",
+        "dateTo": "{{today}}",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "{{ia}}",
+        "viewDetail": false
+      },
+      "expect": [
+        {
+          "path": "data.rows.0.เลขที่เอกสาร",
+          "op": "eq",
+          "value": "{{ia}}"
+        },
+        {
+          "path": "data.rows.0.มูลค่าสินค้า/บริการ",
+          "op": "eq",
+          "value": "{{a_sum}}"
+        },
+        {
+          "path": "data.rows.0.ภาษีมูลค่าเพิ่ม",
+          "op": "eq",
+          "value": "{{a_vat}}"
+        },
+        {
+          "path": "data.rows.0.รวม",
+          "op": "eq",
+          "value": "{{a_total}}"
+        },
+        {
+          "path": "data.rows.0.สถานะ",
+          "op": "empty",
+          "value": ""
+        },
+        {
+          "path": "data.rows.1",
+          "op": "empty"
+        }
+      ]
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบบิลขายทดสอบใบที่ 2",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{ib}}",
+        "transFlag": 44
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบบิลขายทดสอบใบที่ 1",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{ia}}",
+        "transFlag": 44
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "คืนสถานะการยกเลิกใบสั่งขาย (ถ้ามีค้าง)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/cancel",
+      "body": {
+        "menuName": "menu_so_sale_order_cancel",
+        "flag": 37,
+        "origFlag": 36,
+        "docRef": "{{so}}",
+        "docFormat": "SSC",
+        "screenCode": "SSC",
+        "docDate": "",
+        "remark": "{{run.tag}}",
+        "undo": true,
+        "notApprove": false,
+        "cancelType": 0,
+        "cancelDocNo": ""
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ยกเลิกการอนุมัติใบสั่งขาย",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/approve",
+      "body": {
+        "menuName": "menu_so_sale_order_approve",
+        "flag": 52,
+        "origFlag": 36,
+        "docRef": "{{so}}",
+        "docFormat": "SSA",
+        "screenCode": "SSA",
+        "docDate": "",
+        "remark": "{{run.tag}}",
+        "undo": true,
+        "notApprove": false
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบสั่งขายทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{so}}",
+        "transFlag": 36
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ยกเลิกการอนุมัติใบเสนอราคา",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/approve",
+      "body": {
+        "menuName": "menu_so_quotation_approve",
+        "flag": 32,
+        "origFlag": 30,
+        "docRef": "{{qt}}",
+        "docFormat": "SOA",
+        "screenCode": "SOA",
+        "docDate": "",
+        "remark": "{{run.tag}}",
+        "undo": true,
+        "notApprove": false
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ลบใบเสนอราคาทดสอบ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{qt}}",
+        "transFlag": 30
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo (หัว/บรรทัด/ลูกหนี้/การเงิน/GL/ภาษีขาย-ซื้อ/การตัดมัดจำ/เอกสารอนุมัติ-ยกเลิก)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'qt', :'so', :'ia', :'ib', :'qa', :'sa')) + (select count(*) from ic_trans_detail where doc_no in (:'qt', :'so', :'ia', :'ib', :'qa', :'sa')) + (select count(*) from ap_ar_trans where doc_no in (:'qt', :'so', :'ia', :'ib', :'qa', :'sa')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'qt', :'so', :'ia', :'ib', :'qa', :'sa')) + (select count(*) from cb_trans where doc_no in (:'qt', :'so', :'ia', :'ib', :'qa', :'sa')) + (select count(*) from cb_trans_detail where doc_no in (:'qt', :'so', :'ia', :'ib', :'qa', :'sa')) + (select count(*) from gl_journal where doc_no in (:'qt', :'so', :'ia', :'ib', :'qa', :'sa')) + (select count(*) from gl_journal_detail where doc_no in (:'qt', :'so', :'ia', :'ib', :'qa', :'sa')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'qt', :'so', :'ia', :'ib', :'qa', :'sa')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'qt', :'so', :'ia', :'ib', :'qa', :'sa')) + (select count(*) from cb_trans_detail where trans_number in (:'qt', :'so', :'ia', :'ib', :'qa', :'sa')) + (select count(*) from ic_trans where doc_ref in (:'qt', :'so', :'ia', :'ib', :'qa', :'sa') and trans_flag in (31, 32, 37, 52)) as left_rows",
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,463 @@
+{
+  "id": "ui-prc-journal-pass",
+  "title": "หน้าจอผ่านรายการ / ยกเลิกผ่านรายการใบสำคัญ (เฉพาะใบสำคัญทดสอบของเรา)",
+  "module": "gl",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "สร้างใบสำคัญรายวันทดสอบ 1 ใบผ่าน API แล้วใช้หน้าจอ menu_gl_journal_pass กรองช่วงวันที่ + เลขที่ใบสำคัญให้เหลือแค่ใบของเรา ตรวจข้อความเตือนเมื่อไม่เลือก ปุ่มเลือกทั้งหมด/ไม่เลือก กดผ่านรายการ แล้วตรวจ is_pass ในฐานข้อมูล จากนั้นใช้ menu_gl_journal_pass_cancel ยกเลิกผ่านรายการ ก่อนกดตรวจก่อนว่าคำสั่ง sync is_pass ทั้งฐานจะไม่กระทบเอกสารอื่น",
+  "timeoutMs": 300000,
+  "steps": [
+    {
+      "title": "กำหนดเลขใบสำคัญทดสอบ",
+      "do": "set",
+      "name": "jc",
+      "value": "UAT-{{run.short}}-JP"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เลือกวันที่ว่างในงวดที่ยังเปิด บัญชีค่าใช้จ่าย/หนี้สิน ยอดเงิน และสมุดรายวันจากข้อมูลจริง",
+      "do": "db.query",
+      "sql": "with qd as (\n select g::date as qd from generate_series((now() at time zone 'Asia/Bangkok')::date - 60, (now() at time zone 'Asia/Bangkok')::date - 5, interval '1 day') g\n where not exists (select 1 from gl_journal_detail x where x.doc_date = g::date)\n   and not exists (select 1 from gl_journal x where x.doc_date = g::date)\n   and exists (select 1 from erp_account_period p where g::date between p.date_start and p.date_end and coalesce(p.status, 0) = 0)\n order by g limit 1),\nleaf as (select c.code, coalesce(c.name_1, '') nm, c.account_type t from gl_chart_of_account c where coalesce(c.status, 0) = 0 and not exists (select 1 from gl_chart_of_account k where k.main_code = c.code)),\nused as (select l.code, l.nm, l.t, count(*) n, (array_agg(d.debit order by d.doc_date desc, d.roworder desc) filter (where d.debit > 0))[1] lastdr\n from leaf l join gl_journal_detail d on d.account_code = l.code and d.doc_no not like 'UAT%' group by 1, 2, 3)\nselect to_char(q.qd, 'YYYY-MM-DD') qd, to_char(q.qd, 'DD/MM/YYYY') qdmy, e.code exp, e.nm expname, a.code liab, a.nm liabname, round(e.lastdr, 2)::text amt, to_char(round(e.lastdr, 2), 'FM999,999,999,990.00') amtfmt, b.code book\nfrom qd q,\n (select * from used where t = 4 and lastdr > 0 order by n desc, code limit 1) e,\n (select * from used where t = 2 order by n desc, code limit 1) a,\n (select code from gl_journal_book order by code limit 1) b",
+      "rows": 1,
+      "save": {
+        "qd": "qd",
+        "qdmy": "qdmy",
+        "exp": "exp",
+        "expname": "expname",
+        "liab": "liab",
+        "liabname": "liabname",
+        "amt": "amt",
+        "amtfmt": "amtfmt",
+        "book": "book"
+      }
+    },
+    {
+      "title": "บันทึกใบสำคัญรายวันทดสอบผ่าน API",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/save",
+      "body": {
+        "kind": "gl_journal",
+        "isNew": true,
+        "docNo": "{{jc}}",
+        "docDate": "{{qd}}",
+        "transFlag": 0,
+        "bookCode": "{{book}}",
+        "docFormatCode": "JV",
+        "remark": "{{run.tag}}",
+        "glLines": [
+          {
+            "accountCode": "{{exp}}",
+            "accountName": "{{expname}}",
+            "debit": "{{amt}}",
+            "credit": "0",
+            "remark": "{{run.tag}}"
+          },
+          {
+            "accountCode": "{{liab}}",
+            "accountName": "{{liabname}}",
+            "debit": "0",
+            "credit": "{{amt}}",
+            "remark": "{{run.tag}}"
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        }
+      ]
+    },
+    {
+      "title": "ใบสำคัญของเรายังไม่ผ่านรายการ ยอดเดบิต = เครดิต = ยอดที่บันทึก",
+      "do": "db.query",
+      "sql": "select coalesce(j.is_pass, 0)::text is_pass, j.debit::numeric(18,2)::text dr, j.credit::numeric(18,2)::text cr, (select count(*) from gl_journal_detail d where d.doc_no = j.doc_no)::text lines, (select count(*) from gl_journal_detail d where d.doc_no = j.doc_no and coalesce(d.is_pass, 0) <> 0)::text det_pass from gl_journal j where j.doc_no = :'jc'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "is_pass",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "dr",
+          "op": "eq",
+          "value": "{{amt}}"
+        },
+        {
+          "col": "cr",
+          "op": "eq",
+          "value": "{{amt}}"
+        },
+        {
+          "col": "lines",
+          "op": "eq",
+          "value": "2"
+        },
+        {
+          "col": "det_pass",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ตรวจก่อนกด: คำสั่ง sync is_pass ทั้งฐาน (workflow.go JournalPass) จะไม่แก้รายการของเอกสารอื่น (ต้องเป็น 0 แถว)",
+      "do": "db.query",
+      "sql": "select count(*)::text n from gl_journal_detail d join gl_journal j on j.doc_no = d.doc_no where d.is_pass is distinct from j.is_pass and j.doc_no <> :'jc'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอผ่านรายการใบสำคัญ",
+      "do": "ui.openMenu",
+      "key": "menu_gl_journal_pass"
+    },
+    {
+      "title": "ปุ่มผ่านรายการแสดงอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] button:text-is(\"ผ่านรายการ\")"
+    },
+    {
+      "title": "กรอกจากวันที่ = วันที่ใบสำคัญของเรา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] div:has(> label:text-is(\"จากวันที่\")) input[type=\"text\"]",
+      "value": "{{qdmy}}"
+    },
+    {
+      "title": "ออกจากช่องจากวันที่",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] div:has(> label:text-is(\"จากวันที่\")) input[type=\"text\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกถึงวันที่ = วันที่ใบสำคัญของเรา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] div:has(> label:text-is(\"ถึงวันที่\")) input[type=\"text\"]",
+      "value": "{{qdmy}}"
+    },
+    {
+      "title": "ออกจากช่องถึงวันที่",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] div:has(> label:text-is(\"ถึงวันที่\")) input[type=\"text\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกเลขที่ใบสำคัญที่ไม่มีอยู่ (ทดสอบไม่พบข้อมูล)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] div:has(> label:text-is(\"จากเลขที่ใบสำคัญ (รออนุมัติผ่านรายการ)\")) input",
+      "value": "{{jc}}-NONE"
+    },
+    {
+      "title": "กดดึงข้อมูลใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] button:has-text(\"ดึงข้อมูลใหม่\")"
+    },
+    {
+      "title": "ไม่พบข้อมูล: แสดง 0 แถวและข้อความไม่พบข้อมูล",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] span:has-text(\"รายการ (\")",
+      "text": "รายการ (0 แถว)",
+      "op": "eq"
+    },
+    {
+      "title": "ข้อความไม่พบข้อมูลตามเงื่อนไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่เลือก\")"
+    },
+    {
+      "title": "กรอกจากเลขที่ใบสำคัญ = ใบของเรา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] div:has(> label:text-is(\"จากเลขที่ใบสำคัญ (รออนุมัติผ่านรายการ)\")) input",
+      "value": "{{jc}}"
+    },
+    {
+      "title": "กรอกถึงเลขที่ใบสำคัญ = ใบของเรา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] div:has(> label:text-is(\"ถึงเลขที่ใบสำคัญ (รออนุมัติผ่านรายการ)\")) input",
+      "value": "{{jc}}"
+    },
+    {
+      "title": "กดดึงข้อมูลใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] button:has-text(\"ดึงข้อมูลใหม่\")"
+    },
+    {
+      "title": "ตารางเหลือ 1 แถว",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] span:has-text(\"รายการ (\")",
+      "text": "รายการ (1 แถว)",
+      "op": "eq"
+    },
+    {
+      "title": "แถวของเราแสดงยอดเงินตรงกับฐานข้อมูล",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] tbody tr:has(td:text-is(\"{{jc}}\"))",
+      "text": "{{amtfmt}}"
+    },
+    {
+      "title": "แถวของเราแสดงสมุดรายวัน",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] tbody tr:has(td:text-is(\"{{jc}}\"))",
+      "text": "{{book}}"
+    },
+    {
+      "title": "ยังไม่เลือกแถว กดผ่านรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] button:text-is(\"ผ่านรายการ\")"
+    },
+    {
+      "title": "ต้องเตือนให้เลือกใบสำคัญอย่างน้อย 1 ใบ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] div.bg-rose-50",
+      "text": "กรุณาเลือกใบสำคัญอย่างน้อย 1 ใบ"
+    },
+    {
+      "title": "กดเตือนแล้วฐานข้อมูลยังไม่เปลี่ยน",
+      "do": "db.query",
+      "sql": "select coalesce(is_pass, 0)::text is_pass from gl_journal where doc_no = :'jc'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "is_pass",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "กดเลือกทั้งหมด",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] button:has-text(\"เลือกทั้งหมด\"):not(:has-text(\"ไม่เลือก\"))"
+    },
+    {
+      "title": "แถวของเราถูกติ๊กเลือก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] tbody tr:has(td:text-is(\"{{jc}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "กดไม่เลือกทั้งหมด",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] button:has-text(\"ไม่เลือกทั้งหมด\")"
+    },
+    {
+      "title": "แถวของเราไม่ถูกติ๊กแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] tbody tr:has(td:text-is(\"{{jc}}\")) input[type=\"checkbox\"]:checked",
+      "visible": false
+    },
+    {
+      "title": "คลิกแถวของเราเพื่อเลือก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] tbody tr:has(td:text-is(\"{{jc}}\")) td:text-is(\"{{jc}}\")"
+    },
+    {
+      "title": "แถวของเราถูกเลือก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] tbody tr:has(td:text-is(\"{{jc}}\")) input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "กดผ่านรายการ (ยืนยัน 1 ใบ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] button:text-is(\"ผ่านรายการ\")"
+    },
+    {
+      "title": "แสดงข้อความผ่านรายการเรียบร้อย 1 ใบ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] header",
+      "text": "ผ่านรายการเรียบร้อย 1 ใบ"
+    },
+    {
+      "title": "ฐานข้อมูล: หัวใบสำคัญและทุกบรรทัดผ่านรายการแล้ว (is_pass = 1)",
+      "do": "db.query",
+      "sql": "select coalesce(j.is_pass, 0)::text is_pass, (select count(*) from gl_journal_detail d where d.doc_no = j.doc_no and d.is_pass = 1)::text det_pass from gl_journal j where j.doc_no = :'jc'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "is_pass",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "det_pass",
+          "op": "eq",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "title": "ตารางโหลดใหม่ แถวของเราขึ้นหมายเหตุผ่านรายการแล้ว",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass\"] tbody tr:has(td:text-is(\"{{jc}}\"))",
+      "text": "ผ่านรายการแล้ว"
+    },
+    {
+      "title": "มีบันทึกประวัติการประมวลผลผ่านรายการของใบเรา 1 รายการ",
+      "do": "db.query",
+      "sql": "select count(*)::text n from logs where function_type = 2 and menu_name = 'menu_gl_journal_pass' and data1 like '%' || :'jc' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "ตรวจหน้าจอผ่านรายการไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "เปิดหน้าจอยกเลิกผ่านรายการ",
+      "do": "ui.openMenu",
+      "key": "menu_gl_journal_pass_cancel"
+    },
+    {
+      "title": "ปุ่มยกเลิกผ่านรายการแสดงอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] button:text-is(\"ยกเลิกผ่านรายการ\")"
+    },
+    {
+      "title": "กรอกจากวันที่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] div:has(> label:text-is(\"จากวันที่\")) input[type=\"text\"]",
+      "value": "{{qdmy}}"
+    },
+    {
+      "title": "ออกจากช่องจากวันที่",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] div:has(> label:text-is(\"จากวันที่\")) input[type=\"text\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกถึงวันที่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] div:has(> label:text-is(\"ถึงวันที่\")) input[type=\"text\"]",
+      "value": "{{qdmy}}"
+    },
+    {
+      "title": "ออกจากช่องถึงวันที่",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] div:has(> label:text-is(\"ถึงวันที่\")) input[type=\"text\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกเลขที่ใบสำคัญ (ที่ผ่านรายการแล้ว) = ใบของเรา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] div:has(> label:text-is(\"จากเลขที่ใบสำคัญ (ที่ผ่านรายการแล้ว)\")) input",
+      "value": "{{jc}}"
+    },
+    {
+      "title": "กดดึงข้อมูลใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] button:has-text(\"ดึงข้อมูลใหม่\")"
+    },
+    {
+      "title": "ตารางยกเลิกผ่านรายการแสดงใบของเรา 1 แถว",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] span:has-text(\"รายการ (\")",
+      "text": "รายการ (1 แถว)",
+      "op": "eq"
+    },
+    {
+      "title": "เลขที่ใบสำคัญของเรามองเห็นได้ในตาราง (คอลัมน์ข้อมูลต้องไม่ถูกบีบจนหาย)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] tbody tr td:text-is(\"{{jc}}\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดเลือกทั้งหมด (ตารางกรองเหลือแค่ใบของเรา)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] button:has-text(\"เลือกทั้งหมด\"):not(:has-text(\"ไม่เลือก\"))"
+    },
+    {
+      "title": "แถวของเราถูกติ๊กเลือก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] tbody tr input[type=\"checkbox\"]:checked"
+    },
+    {
+      "title": "กดยกเลิกผ่านรายการ (ยืนยัน 1 ใบ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] button:text-is(\"ยกเลิกผ่านรายการ\")"
+    },
+    {
+      "title": "แสดงข้อความยกเลิกผ่านรายการเรียบร้อย 1 ใบ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] header",
+      "text": "ยกเลิกผ่านรายการเรียบร้อย 1 ใบ"
+    },
+    {
+      "title": "ฐานข้อมูล: หัวใบสำคัญและทุกบรรทัดกลับเป็นยังไม่ผ่านรายการ (is_pass = 0)",
+      "do": "db.query",
+      "sql": "select coalesce(j.is_pass, 0)::text is_pass, (select count(*) from gl_journal_detail d where d.doc_no = j.doc_no and coalesce(d.is_pass, 0) <> 0)::text det_pass from gl_journal j where j.doc_no = :'jc'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "is_pass",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "det_pass",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ตารางยกเลิกผ่านรายการไม่มีใบของเราแล้ว",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_gl_journal_pass_cancel\"] span:has-text(\"รายการ (\")",
+      "text": "รายการ (0 แถว)",
+      "op": "eq"
+    },
+    {
+      "title": "ตรวจหน้าจอยกเลิกผ่านรายการไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบใบสำคัญทดสอบผ่าน API",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/delete",
+      "body": {
+        "kind": "gl_journal",
+        "docNo": "{{jc}}"
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษใบสำคัญทดสอบใน smldemo",
+      "do": "db.query",
+      "sql": "select ((select count(*) from gl_journal where doc_no = :'jc') + (select count(*) from gl_journal_detail where doc_no = :'jc') + (select count(*) from gl_journal_vat_buy where doc_no = :'jc') + (select count(*) from gl_journal_vat_sale where doc_no = :'jc') + (select count(*) from gl_wht_list where doc_no = :'jc'))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

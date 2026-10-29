@@ -1,0 +1,291 @@
+{
+  "id": "ui-prc-docform-print",
+  "title": "พิมพ์ฟอร์มบิลขายจากหน้าจอ: กระดาษฟอร์มแสดงเลขที่ ลูกค้า สินค้า จำนวน ราคา ภาษี ยอดรวมตรงฐานข้อมูล",
+  "module": "reports",
+  "lens": "screen",
+  "severityOnFail": "S1",
+  "description": "บันทึกบิลขายเชื่อทดสอบ 2 รายการ (ลูกค้า/สินค้า/หน่วย/คลัง/ราคาจากบิลขายจริงล่าสุด) ผ่าน API ยอดที่คาดคำนวณใน SQL แล้วเปิดเอกสารบนหน้าจอขายสินค้า (menu_so_invoice) กดพิมพ์ฟอร์ม [trans-open-doc-form-print-btn] ตรวจกระดาษฟอร์มในหน้าต่างพิมพ์ว่าดึงข้อมูลที่บันทึกแล้วจากฐานข้อมูล และมีเลขที่เอกสาร รหัสลูกค้า รหัสสินค้าแต่ละบรรทัด จำนวน ราคา จำนวนเงิน มูลค่าก่อนภาษี ภาษี และยอดรวมตรงเป๊ะ หมายเหตุ: ฟอร์มเอกสารพิมพ์ด้วย window.print() ไม่มีปุ่มดาวน์โหลดไฟล์ PDF จึงใช้ ui.pdf ไม่ได้ และไม่กดสั่งพิมพ์จริงเพราะจะเขียน erp_business_ext (doc_print_audit) ที่ลบผ่าน API ไม่ได้",
+  "timeoutMs": 300000,
+  "steps": [
+    {
+      "title": "กำหนดเลขบิลขายทดสอบ",
+      "do": "set",
+      "name": "si",
+      "value": "UAT-{{run.short}}-PF"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "เลือกลูกค้า + สินค้า 2 รายการ (หน่วย/คลัง/ที่เก็บ/ราคา) จากบิลขายเชื่อจริงล่าสุด แล้วคำนวณยอดที่คาดใน SQL (VAT แยกนอก)",
+      "do": "db.query",
+      "sql": "with src as (select t.cust_code cust, d.item_code item, d.unit_code unit, d.wh_code wh, d.shelf_code shelf, d.stand_value::text stand, d.divide_value::text divide, round(d.price, 2) price, t.doc_date, d.roworder, row_number() over (partition by d.item_code order by t.doc_date desc, d.roworder desc) rn\n from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag\n join ic_inventory i on i.code = d.item_code and coalesce(i.tax_type, 0) = 0\n join ar_customer c on c.code = t.cust_code\n join ic_unit u on u.code = d.unit_code\n where t.trans_flag = 44 and t.inquiry_type = 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and coalesce(t.vat_type, 0) = 0 and d.price > 0 and d.qty > 0 and coalesce(d.wh_code, '') <> '' and d.item_code !~ '[\\s\"]'),\n p as (select *, row_number() over (order by doc_date desc, roworder desc) k from src where rn = 1),\n a as (select * from p where k = 1), b as (select * from p where k = 2),\n calc as (select a.price * 2 amt1, b.price * 3 amt2 from a, b)\nselect a.cust, a.item item1, a.unit unit1, a.wh wh1, a.shelf shelf1, a.stand stand1, a.divide divide1, a.price::text price1,\n b.item item2, b.unit unit2, b.wh wh2, b.shelf shelf2, b.stand stand2, b.divide divide2, b.price::text price2,\n c.amt1::text amt1, c.amt2::text amt2, (c.amt1 + c.amt2)::text before, round((c.amt1 + c.amt2) * 0.07, 2)::text vat, (c.amt1 + c.amt2 + round((c.amt1 + c.amt2) * 0.07, 2))::text total,\n to_char(a.price, 'FM999,999,999,990.00') price1f, to_char(b.price, 'FM999,999,999,990.00') price2f, to_char(c.amt1, 'FM999,999,999,990.00') amt1f, to_char(c.amt2, 'FM999,999,999,990.00') amt2f,\n to_char(c.amt1 + c.amt2, 'FM999,999,999,990.00') beforef, to_char(round((c.amt1 + c.amt2) * 0.07, 2), 'FM999,999,999,990.00') vatf, to_char(c.amt1 + c.amt2 + round((c.amt1 + c.amt2) * 0.07, 2), 'FM999,999,999,990.00') totalf,\n to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') today\nfrom a, b, calc c",
+      "rows": 1,
+      "save": {
+        "cust": "cust",
+        "item1": "item1",
+        "unit1": "unit1",
+        "wh1": "wh1",
+        "shelf1": "shelf1",
+        "stand1": "stand1",
+        "divide1": "divide1",
+        "price1": "price1",
+        "item2": "item2",
+        "unit2": "unit2",
+        "wh2": "wh2",
+        "shelf2": "shelf2",
+        "stand2": "stand2",
+        "divide2": "divide2",
+        "price2": "price2",
+        "amt1": "amt1",
+        "amt2": "amt2",
+        "before": "before",
+        "vat": "vat",
+        "total": "total",
+        "price1f": "price1f",
+        "price2f": "price2f",
+        "amt1f": "amt1f",
+        "amt2f": "amt2f",
+        "beforef": "beforef",
+        "vatf": "vatf",
+        "totalf": "totalf",
+        "today": "today"
+      }
+    },
+    {
+      "title": "บันทึกบิลขายเชื่อทดสอบ 2 รายการผ่าน API",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true,
+        "confirmed": true,
+        "docNo": "{{si}}",
+        "docDate": "{{today}}",
+        "transType": 2,
+        "transFlag": 44,
+        "inquiryType": 0,
+        "custCode": "{{cust}}",
+        "docFormatCode": "SI",
+        "taxDocNo": "{{si}}",
+        "taxDocDate": "{{today}}",
+        "vatType": 0,
+        "vatRate": "7",
+        "remark": "{{run.tag}}",
+        "lines": [
+          {
+            "itemCode": "{{item1}}",
+            "unitCode": "{{unit1}}",
+            "whCode": "{{wh1}}",
+            "shelfCode": "{{shelf1}}",
+            "standValue": "{{stand1}}",
+            "divideValue": "{{divide1}}",
+            "qty": "2",
+            "price": "{{price1}}",
+            "sumAmount": "{{amt1}}",
+            "taxType": 0
+          },
+          {
+            "itemCode": "{{item2}}",
+            "unitCode": "{{unit2}}",
+            "whCode": "{{wh2}}",
+            "shelfCode": "{{shelf2}}",
+            "standValue": "{{stand2}}",
+            "divideValue": "{{divide2}}",
+            "qty": "3",
+            "price": "{{price2}}",
+            "sumAmount": "{{amt2}}",
+            "taxType": 0
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "data.docNo",
+          "op": "eq",
+          "value": "{{si}}"
+        }
+      ]
+    },
+    {
+      "title": "หัวบิลในฐานข้อมูล: มูลค่าก่อนภาษี ภาษี ยอดรวม ตรงกับที่คำนวณใน SQL",
+      "do": "db.query",
+      "sql": "select cust_code, total_before_vat::numeric(18,2)::text before, total_vat_value::numeric(18,2)::text vat, total_amount::numeric(18,2)::text total, (select count(*) from ic_trans_detail d where d.doc_no = t.doc_no and d.trans_flag = 44)::text lines from ic_trans t where doc_no = :'si' and trans_flag = 44",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cust_code",
+          "op": "eq",
+          "value": "{{cust}}"
+        },
+        {
+          "col": "before",
+          "op": "eq",
+          "value": "{{before}}"
+        },
+        {
+          "col": "vat",
+          "op": "eq",
+          "value": "{{vat}}"
+        },
+        {
+          "col": "total",
+          "op": "eq",
+          "value": "{{total}}"
+        },
+        {
+          "col": "lines",
+          "op": "eq",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอขายสินค้า/บริการ",
+      "do": "ui.openMenu",
+      "key": "menu_so_invoice"
+    },
+    {
+      "title": "ค้นหาบิลของเราในรายการเอกสาร",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{si}}"
+    },
+    {
+      "title": "กด Enter เพื่อค้นหา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "คลิกแถวบิลของเราเพื่อเปิดดู (โหมดดูเอกสาร ไม่ใช่โหมดแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] td:has-text(\"{{si}}\")"
+    },
+    {
+      "title": "กดปุ่มพิมพ์ฟอร์ม / เลือกรูปแบบ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_so_invoice\"] [data-testid=\"trans-open-doc-form-print-btn\"]"
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มเปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]"
+    },
+    {
+      "title": "โหมดพิมพ์จากข้อมูลที่บันทึกแล้ว (ปุ่มสั่งพิมพ์จากฐานข้อมูลแสดง)",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-testid=\"doc-form-print-verified-btn\"]"
+    },
+    {
+      "title": "กระดาษฟอร์มแสดงเลขที่เอกสารของเรา",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-testid=\"doc-form-paper-page-1\"]",
+      "text": "{{si}}"
+    },
+    {
+      "title": "กระดาษฟอร์มแสดงรหัสลูกค้า",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-testid=\"doc-form-paper-page-1\"]",
+      "text": "{{cust}}"
+    },
+    {
+      "title": "บรรทัดสินค้า 1: ราคาต่อหน่วยตรงฐานข้อมูล",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-testid=\"doc-form-paper-page-1\"] tr:has(td:text-is(\"{{item1}}\"))",
+      "text": "{{price1f}}"
+    },
+    {
+      "title": "บรรทัดสินค้า 1: คอลัมน์เรียงถูก จำนวน 2 → หน่วย → ราคา → ส่วนลด → จำนวนเงิน",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-testid=\"doc-form-paper-page-1\"] tr:has(td:text-is(\"{{item1}}\"))",
+      "text": "\t2\t[^\t]*\t{{price1f}}\t[^\t]*\t{{amt1f}}",
+      "op": "matches"
+    },
+    {
+      "title": "บรรทัดสินค้า 1: จำนวนเงิน = 2 × ราคา",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-testid=\"doc-form-paper-page-1\"] tr:has(td:text-is(\"{{item1}}\"))",
+      "text": "{{amt1f}}"
+    },
+    {
+      "title": "บรรทัดสินค้า 2: ราคาต่อหน่วยตรงฐานข้อมูล",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-testid=\"doc-form-paper-page-1\"] tr:has(td:text-is(\"{{item2}}\"))",
+      "text": "{{price2f}}"
+    },
+    {
+      "title": "บรรทัดสินค้า 2: คอลัมน์เรียงถูก จำนวน 3 → หน่วย → ราคา → ส่วนลด → จำนวนเงิน",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-testid=\"doc-form-paper-page-1\"] tr:has(td:text-is(\"{{item2}}\"))",
+      "text": "\t3\t[^\t]*\t{{price2f}}\t[^\t]*\t{{amt2f}}",
+      "op": "matches"
+    },
+    {
+      "title": "บรรทัดสินค้า 2: จำนวนเงิน = 3 × ราคา",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-testid=\"doc-form-paper-page-1\"] tr:has(td:text-is(\"{{item2}}\"))",
+      "text": "{{amt2f}}"
+    },
+    {
+      "title": "กระดาษฟอร์มแสดงมูลค่าก่อนภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-testid=\"doc-form-paper-page-1\"]",
+      "text": "{{beforef}}"
+    },
+    {
+      "title": "กระดาษฟอร์มแสดงภาษีมูลค่าเพิ่ม 7%",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-testid=\"doc-form-paper-page-1\"]",
+      "text": "{{vatf}}"
+    },
+    {
+      "title": "กระดาษฟอร์มแสดงยอดรวมทั้งสิ้น",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] [data-testid=\"doc-form-paper-page-1\"]",
+      "text": "{{totalf}}"
+    },
+    {
+      "title": "ถ่ายภาพกระดาษฟอร์มเป็นหลักฐาน",
+      "do": "ui.screenshot",
+      "name": "docform-paper"
+    },
+    {
+      "title": "ตรวจหน้าจอไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบบิลขายทดสอบผ่าน API",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{si}}",
+        "transFlag": 44
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ic_trans where doc_no = :'si') + (select count(*) from ic_trans_detail where doc_no = :'si') + (select count(*) from ap_ar_trans where doc_no = :'si') + (select count(*) from ap_ar_trans_detail where doc_no = :'si') + (select count(*) from cb_trans where doc_no = :'si') + (select count(*) from gl_journal where doc_no = :'si') + (select count(*) from gl_journal_detail where doc_no = :'si') + (select count(*) from gl_journal_vat_sale where doc_no = :'si'))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

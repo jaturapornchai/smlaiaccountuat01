@@ -1,0 +1,1147 @@
+{
+ "id": "glx-ui-asset-depreciation",
+ "title": "สินทรัพย์ถาวร (หน้าจอ): ประมวลผลค่าเสื่อมเฉพาะสินทรัพย์ทดสอบผ่านหน้าจอโอนค่าเสื่อม ตรวจยอดตามสูตร บันทึก GL ลบผ่านหน้าจอ และกรณีผิดพลาด",
+ "module": "gl",
+ "lens": "screen",
+ "severityOnFail": "S1",
+ "description": "ลงทะเบียนสินทรัพย์ UAT-<รอบ>-FA (ลอกกลุ่ม/บัญชี/ทุน/ซาก/อายุจากสินทรัพย์จริง) → เปิดเมนู menu_asset_transfers กรอกช่วงรหัส/ประเภท เลขที่เอกสาร สมุดรายวัน หมายเหตุ วันที่ → ประมวลผล: ตารางและสรุปต้องตรงสูตร (30 วัน/360) → ทดสอบสมุดรายวันผิด เลขที่ยาวเกิน → บันทึก: as_trans/as_trans_detail/GL ตรง → ทดสอบบันทึกซ้ำช่วงเดิมเลขใหม่ต้องถูกปฏิเสธ → เปิดใหม่ เลือกเอกสารจากรายการ ลบผ่านหน้าจอ → ลบซ้ำต้องแจ้งไม่พบ → ไม่เหลือข้อมูลทดสอบ",
+ "timeoutMs": 420000,
+ "steps": [
+  {
+   "title": "กำหนดรหัสสินทรัพย์ทดสอบ",
+   "do": "set",
+   "name": "fa",
+   "value": "UAT-{{run.short}}-FA"
+  },
+  {
+   "title": "กำหนดเลขเอกสารค่าเสื่อมทดสอบ",
+   "do": "set",
+   "name": "dp",
+   "value": "UAT-{{run.short}}-DP"
+  },
+  {
+   "title": "กำหนดเลขเอกสารที่สอง (ทดสอบบันทึกซ้ำช่วงเดิม)",
+   "do": "set",
+   "name": "dq",
+   "value": "UAT-{{run.short}}-DQ"
+  },
+  {
+   "title": "กำหนดเลขเอกสารยาว 31 ตัว (เกิน 25)",
+   "do": "set",
+   "name": "dlong",
+   "value": "UAT-{{run.short}}-XXXXXXXXXXXXXXXXXXXX"
+  },
+  {
+   "title": "กำหนดรูปแบบเลขเอกสารทดสอบรอบนี้",
+   "do": "set",
+   "name": "pfx",
+   "value": "UAT-{{run.short}}-%"
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "ลอกกลุ่ม/บัญชี/ทุน/ซาก/อายุจากสินทรัพย์จริง และคำนวณค่าที่ต้องแสดง",
+   "do": "db.query",
+   "sql": "with src as (\n select a.as_type, upper(trim(a.account_code)) acc, upper(trim(a.depreciation_account_code)) dacc, upper(trim(a.depreciation_sum_account_code)) sacc,\n  round(d.as_buy_price, 2) buy, round(case when coalesce(d.as_dead_value, 0) <= 0 then 1 else d.as_dead_value end, 2) dead, d.as_age::int age\n from as_asset a join as_asset_detail d on d.as_code = a.code\n where a.code not like 'UAT%' and coalesce(a.as_type, '') <> '' and a.as_type = upper(trim(a.as_type))\n   and coalesce(d.as_buy_price, 0) > 0 and coalesce(d.as_age, 0) >= 2 and d.as_age = trunc(d.as_age)\n   and exists (select 1 from gl_chart_of_account c where c.code = upper(trim(a.account_code))) and exists (select 1 from gl_chart_of_account c where c.code = upper(trim(a.depreciation_account_code))) and exists (select 1 from gl_chart_of_account c where c.code = upper(trim(a.depreciation_sum_account_code)))\n order by a.code limit 1),\nmo as (select case when extract(month from m) = 12 then m - interval '1 month' else m end::date m from (select date_trunc('month', (now() at time zone 'Asia/Bangkok')::date) - interval '1 month' m) x),\nsc as (select coalesce((select item_amount_decimal from erp_option limit 1), 2)::int sc),\ne as (\n select src.*, mo.m, (mo.m + interval '1 month' - interval '1 day')::date m2, b.code book,\n  round(30 * round(round((src.buy - src.dead) / src.age, sc.sc) / 360, sc.sc), sc.sc) amt\n from src, mo, sc, (select code from gl_journal_book order by code limit 1) b\n where exists (select 1 from erp_account_period p where (mo.m + interval '1 month' - interval '1 day')::date between p.date_start and p.date_end and coalesce(p.status, 0) = 0)),\nf as (select e.*, (extract(month from m)::int - 1) * amt bef from e)\nselect as_type, acc, dacc, sacc, buy::text buy, dead::text dead, age::text age, book, amt::text expamt,\n to_char(m, 'YYYY-MM-DD') d1, to_char(m2, 'YYYY-MM-DD') d2, to_char(m, 'DD/MM/') || (extract(year from m)::int + 543)::text d1th, to_char(m2, 'DD/MM/') || (extract(year from m2)::int + 543)::text d2th,\n to_char(date_trunc('year', m), 'YYYY-MM-DD') st, to_char(date_trunc('year', m) + make_interval(years => age) - interval '1 day', 'YYYY-MM-DD') sp,\n case when buy = 0 then '' else to_char(buy, 'FM999,999,999,990.00') end buyd, case when bef = 0 then '' else to_char(bef, 'FM999,999,999,990.00') end befd, case when buy - bef = 0 then '' else to_char(buy - bef, 'FM999,999,999,990.00') end comed, case when amt = 0 then '' else to_char(amt, 'FM999,999,999,990.00') end amtd, case when buy - bef - amt = 0 then '' else to_char(buy - bef - amt, 'FM999,999,999,990.00') end god,\n rtrim('เดบิต ' || dacc || ' ' || coalesce((select regexp_replace(trim(coalesce(name_1, '')), '\\s+', ' ', 'g') from gl_chart_of_account where code = dacc), '')) drlbl, rtrim('เครดิต ' || sacc || ' ' || coalesce((select regexp_replace(trim(coalesce(name_1, '')), '\\s+', ' ', 'g') from gl_chart_of_account where code = sacc), '')) crlbl\nfrom f",
+   "rows": 1,
+   "save": {
+    "as_type": "as_type",
+    "acc": "acc",
+    "dacc": "dacc",
+    "sacc": "sacc",
+    "buy": "buy",
+    "dead": "dead",
+    "age": "age",
+    "book": "book",
+    "expamt": "expamt",
+    "d1": "d1",
+    "d2": "d2",
+    "d1th": "d1th",
+    "d2th": "d2th",
+    "st": "st",
+    "sp": "sp",
+    "buyd": "buyd",
+    "befd": "befd",
+    "comed": "comed",
+    "amtd": "amtd",
+    "god": "god",
+    "drlbl": "drlbl",
+    "crlbl": "crlbl"
+   }
+  },
+  {
+   "title": "รหัสตัวพิมพ์เล็ก (หน้าจอต้องแปลงเป็นตัวใหญ่)",
+   "do": "db.query",
+   "sql": "select lower(:'fa') fal, lower(:'dp') dpl, lower(:'dq') dql",
+   "rows": 1,
+   "save": {
+    "fal": "fal",
+    "dpl": "dpl",
+    "dql": "dql"
+   }
+  },
+  {
+   "title": "ลงทะเบียนสินทรัพย์ทดสอบ (API)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/master-detail/save",
+   "body": {
+    "menuKey": "menu_asset_lists",
+    "key": "{{fa}}",
+    "mode": "new",
+    "header": {
+     "name_1": "{{run.tag}}",
+     "as_type": "{{as_type}}",
+     "account_code": "{{acc}}",
+     "depreciation_account_code": "{{dacc}}",
+     "depreciation_sum_account_code": "{{sacc}}",
+     "remark": "{{run.tag}}"
+    },
+    "grids": {
+     "detail": [
+      {
+       "as_buy_date": "{{st}}",
+       "as_buy_price": "{{buy}}",
+       "as_calc_value": "{{buy}}",
+       "as_dead_value": "{{dead}}",
+       "as_age": "{{age}}",
+       "start_calc_date": "{{st}}",
+       "stop_calc_date": "{{sp}}"
+      }
+     ]
+    }
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    }
+   ]
+  },
+  {
+   "title": "สินทรัพย์ทดสอบถูกบันทึกครบ และยังไม่มีค่าเสื่อมยกมา",
+   "do": "db.query",
+   "sql": "select a.as_type, d.as_buy_price::text buy, d.as_calc_value::text calc, d.as_dead_value::text dead, d.as_age::text age, d.start_calc_date::date::text st, d.stop_calc_date::date::text sp, coalesce(d.as_value_balance, 0)::text vb, coalesce(d.as_sum_value_balance, 0)::text svb from as_asset a join as_asset_detail d on d.as_code = a.code where a.code = :'fa'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "as_type",
+     "op": "eq",
+     "value": "{{as_type}}"
+    },
+    {
+     "col": "buy",
+     "op": "eq",
+     "value": "{{buy}}"
+    },
+    {
+     "col": "calc",
+     "op": "eq",
+     "value": "{{buy}}"
+    },
+    {
+     "col": "dead",
+     "op": "eq",
+     "value": "{{dead}}"
+    },
+    {
+     "col": "age",
+     "op": "eq",
+     "value": "{{age}}"
+    },
+    {
+     "col": "st",
+     "op": "eq",
+     "value": "{{st}}"
+    },
+    {
+     "col": "sp",
+     "op": "eq",
+     "value": "{{sp}}"
+    },
+    {
+     "col": "vb",
+     "op": "eq",
+     "value": "0"
+    },
+    {
+     "col": "svb",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "เปิดเมนูโอนค่าเสื่อมราคา",
+   "do": "ui.openMenu",
+   "key": "menu_asset_transfers"
+  },
+  {
+   "title": "รายการเอกสารค่าเสื่อม (1801) แสดง",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รวมค่าเสื่อมราคา\"))"
+  },
+  {
+   "title": "ยังไม่ประมวลผล: ปุ่มบันทึกกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] button:text-is(\"บันทึก\"):disabled"
+  },
+  {
+   "title": "ยังไม่ระบุเลขที่เอกสาร: ปุ่มลบกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] button:text-is(\"ลบ\"):disabled"
+  },
+  {
+   "title": "ค่าเริ่มต้น: แสดงค่าเสื่อมรายเดือน",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"แสดงค่าเสื่อมราคา\")) span:has(> span:text-is(\"รายเดือน\")) > input[type=\"radio\"]:checked"
+  },
+  {
+   "title": "ค่าเริ่มต้น: วิธีคำนวณแบบบัญชี (30 วัน/360 วัน)",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"วิธีคำนวณ\")) span:has(> span:text-is(\"บัญชี (30 วัน/360 วัน)\")) > input[type=\"radio\"]:checked"
+  },
+  {
+   "title": "แสดงค่าเสื่อมราคา: เลือก \"รายวัน\"",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"แสดงค่าเสื่อมราคา\")) span:has(> span:text-is(\"รายวัน\")) > input[type=\"radio\"]"
+  },
+  {
+   "title": "แสดงค่าเสื่อมราคา: \"รายวัน\" ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"แสดงค่าเสื่อมราคา\")) span:has(> span:text-is(\"รายวัน\")) > input[type=\"radio\"]:checked"
+  },
+  {
+   "title": "แสดงค่าเสื่อมราคา: เลือก \"รายเดือน\"",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"แสดงค่าเสื่อมราคา\")) span:has(> span:text-is(\"รายเดือน\")) > input[type=\"radio\"]"
+  },
+  {
+   "title": "แสดงค่าเสื่อมราคา: \"รายเดือน\" ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"แสดงค่าเสื่อมราคา\")) span:has(> span:text-is(\"รายเดือน\")) > input[type=\"radio\"]:checked"
+  },
+  {
+   "title": "วิธีคำนวณ: เลือก \"สรรพากร (365 วัน)\"",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"วิธีคำนวณ\")) span:has(> span:text-is(\"สรรพากร (365 วัน)\")) > input[type=\"radio\"]"
+  },
+  {
+   "title": "วิธีคำนวณ: \"สรรพากร (365 วัน)\" ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"วิธีคำนวณ\")) span:has(> span:text-is(\"สรรพากร (365 วัน)\")) > input[type=\"radio\"]:checked"
+  },
+  {
+   "title": "วิธีคำนวณ: เลือก \"บัญชี (30 วัน/360 วัน)\"",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"วิธีคำนวณ\")) span:has(> span:text-is(\"บัญชี (30 วัน/360 วัน)\")) > input[type=\"radio\"]"
+  },
+  {
+   "title": "วิธีคำนวณ: \"บัญชี (30 วัน/360 วัน)\" ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"วิธีคำนวณ\")) span:has(> span:text-is(\"บัญชี (30 วัน/360 วัน)\")) > input[type=\"radio\"]:checked"
+  },
+  {
+   "title": "จากรหัสสินทรัพย์ (พิมพ์ตัวเล็ก)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"จากรหัสสินทรัพย์\")) > input",
+   "value": "{{fal}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"จากรหัสสินทรัพย์\")) > input",
+   "key": "Tab"
+  },
+  {
+   "title": "จากรหัสสินทรัพย์ (พิมพ์ตัวเล็ก): ช่องแสดง {{fa}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"จากรหัสสินทรัพย์\")) > input",
+   "value": "{{fa}}",
+   "op": "same"
+  },
+  {
+   "title": "ถึงรหัสสินทรัพย์ (พิมพ์ตัวเล็ก)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"ถึงรหัสสินทรัพย์\")) > input",
+   "value": "{{fal}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"ถึงรหัสสินทรัพย์\")) > input",
+   "key": "Tab"
+  },
+  {
+   "title": "ถึงรหัสสินทรัพย์ (พิมพ์ตัวเล็ก): ช่องแสดง {{fa}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"ถึงรหัสสินทรัพย์\")) > input",
+   "value": "{{fa}}",
+   "op": "same"
+  },
+  {
+   "title": "จากประเภทสินทรัพย์",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"จากประเภทสินทรัพย์\")) > input",
+   "value": "{{as_type}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"จากประเภทสินทรัพย์\")) > input",
+   "key": "Tab"
+  },
+  {
+   "title": "จากประเภทสินทรัพย์: ช่องแสดง {{as_type}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"จากประเภทสินทรัพย์\")) > input",
+   "value": "{{as_type}}",
+   "op": "same"
+  },
+  {
+   "title": "ถึงประเภทสินทรัพย์",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"ถึงประเภทสินทรัพย์\")) > input",
+   "value": "{{as_type}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"ถึงประเภทสินทรัพย์\")) > input",
+   "key": "Tab"
+  },
+  {
+   "title": "ถึงประเภทสินทรัพย์: ช่องแสดง {{as_type}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"ถึงประเภทสินทรัพย์\")) > input",
+   "value": "{{as_type}}",
+   "op": "same"
+  },
+  {
+   "title": "จากแผนก ว่าง (สินทรัพย์ทดสอบไม่มีแผนก)",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"จากแผนก\")) > input",
+   "value": "",
+   "op": "same"
+  },
+  {
+   "title": "ถึงแผนก ว่าง",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"ถึงแผนก\")) > input",
+   "value": "",
+   "op": "same"
+  },
+  {
+   "title": "เลขที่เอกสาร (พิมพ์ตัวเล็ก)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"เลขที่เอกสาร\")) > input",
+   "value": "{{dpl}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"เลขที่เอกสาร\")) > input",
+   "key": "Tab"
+  },
+  {
+   "title": "เลขที่เอกสาร (พิมพ์ตัวเล็ก): ช่องแสดง {{dp}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"เลขที่เอกสาร\")) > input",
+   "value": "{{dp}}",
+   "op": "same"
+  },
+  {
+   "title": "วันที่เอกสารว่าง (ใช้ถึงวันที่)",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"วันที่เอกสาร (ว่าง = ถึงวันที่)\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "",
+   "op": "same"
+  },
+  {
+   "title": "สมุดรายวัน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"สมุดรายวัน\")) > input",
+   "value": "{{book}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"สมุดรายวัน\")) > input",
+   "key": "Tab"
+  },
+  {
+   "title": "สมุดรายวัน: ช่องแสดง {{book}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"สมุดรายวัน\")) > input",
+   "value": "{{book}}",
+   "op": "same"
+  },
+  {
+   "title": "หมายเหตุ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"หมายเหตุ\")) > input",
+   "value": "{{run.tag}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"หมายเหตุ\")) > input",
+   "key": "Tab"
+  },
+  {
+   "title": "หมายเหตุ: ช่องแสดง {{run.tag}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"หมายเหตุ\")) > input",
+   "value": "{{run.tag}}",
+   "op": "same"
+  },
+  {
+   "title": "จากวันที่ (วันแรกของเดือนทดสอบ)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"จากวันที่\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{d1th}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"จากวันที่\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "key": "Tab"
+  },
+  {
+   "title": "จากวันที่ (วันแรกของเดือนทดสอบ): ช่องแสดง {{d1th}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"จากวันที่\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{d1th}}",
+   "op": "same"
+  },
+  {
+   "title": "ถึงวันที่ (วันสุดท้ายของเดือนทดสอบ)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"ถึงวันที่\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{d2th}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"ถึงวันที่\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "key": "Tab"
+  },
+  {
+   "title": "ถึงวันที่ (วันสุดท้ายของเดือนทดสอบ): ช่องแสดง {{d2th}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"ถึงวันที่\")) input[placeholder=\"DD/MM/YYYY\"]",
+   "value": "{{d2th}}",
+   "op": "same"
+  },
+  {
+   "title": "กดประมวลผล (ดูตัวอย่าง ยังไม่บันทึก)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] button:has(> span:text-is(\"ประมวลผล\"))"
+  },
+  {
+   "title": "ตารางมีเฉพาะสินทรัพย์ทดสอบ 1 แถว",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] span:has-text(\"รายการ (\")",
+   "text": "รายการ (1 แถว)",
+   "op": "same"
+  },
+  {
+   "title": "แถว: รหัสสินทรัพย์ = {{fa}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รหัสสินทรัพย์\")) tbody tr:has(td:text-is(\"{{fa}}\")) >> td >> nth=1",
+   "text": "{{fa}}",
+   "op": "same"
+  },
+  {
+   "title": "แถว: ชื่อสินทรัพย์ = {{run.tag}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รหัสสินทรัพย์\")) tbody tr:has(td:text-is(\"{{fa}}\")) >> td >> nth=2",
+   "text": "{{run.tag}}",
+   "op": "same"
+  },
+  {
+   "title": "แถว: มูลค่าคิดค่าเสื่อม = {{buyd}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รหัสสินทรัพย์\")) tbody tr:has(td:text-is(\"{{fa}}\")) >> td >> nth=3",
+   "text": "{{buyd}}",
+   "op": "same"
+  },
+  {
+   "title": "แถว: ค่าเสื่อมสะสมยกมา (เดือนก่อนหน้า × ยอดต่อเดือน) = {{befd}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รหัสสินทรัพย์\")) tbody tr:has(td:text-is(\"{{fa}}\")) >> td >> nth=4",
+   "text": "{{befd}}",
+   "op": "same"
+  },
+  {
+   "title": "แถว: มูลค่ายกมา = {{comed}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รหัสสินทรัพย์\")) tbody tr:has(td:text-is(\"{{fa}}\")) >> td >> nth=5",
+   "text": "{{comed}}",
+   "op": "same"
+  },
+  {
+   "title": "แถว: ค่าเสื่อมราคางวดนี้ (สูตร 30 × ยอดต่อปี/360) = {{amtd}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รหัสสินทรัพย์\")) tbody tr:has(td:text-is(\"{{fa}}\")) >> td >> nth=6",
+   "text": "{{amtd}}",
+   "op": "same"
+  },
+  {
+   "title": "แถว: มูลค่าคงเหลือยกไป = {{god}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รหัสสินทรัพย์\")) tbody tr:has(td:text-is(\"{{fa}}\")) >> td >> nth=7",
+   "text": "{{god}}",
+   "op": "same"
+  },
+  {
+   "title": "แถว: บัญชีค่าเสื่อมราคา = {{dacc}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รหัสสินทรัพย์\")) tbody tr:has(td:text-is(\"{{fa}}\")) >> td >> nth=8",
+   "text": "{{dacc}}",
+   "op": "same"
+  },
+  {
+   "title": "แถว: บัญชีค่าเสื่อมราคาสะสม = {{sacc}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รหัสสินทรัพย์\")) tbody tr:has(td:text-is(\"{{fa}}\")) >> td >> nth=9",
+   "text": "{{sacc}}",
+   "op": "same"
+  },
+  {
+   "title": "สรุป: รวมค่าเสื่อมราคา",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div.justify-between:has(> span:text-is(\"รวมค่าเสื่อมราคา\")) > span.font-mono",
+   "text": "{{amtd}}",
+   "op": "same"
+  },
+  {
+   "title": "สรุป: รวมเดบิต",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div.justify-between:has(> span:text-is(\"รวมเดบิต\")) > span.font-mono",
+   "text": "{{amtd}}",
+   "op": "same"
+  },
+  {
+   "title": "สรุป: รวมเครดิต",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div.justify-between:has(> span:text-is(\"รวมเครดิต\")) > span.font-mono",
+   "text": "{{amtd}}",
+   "op": "same"
+  },
+  {
+   "title": "สรุป: จำนวนสินทรัพย์ 1",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div.justify-between:has(> span:text-is(\"จำนวนสินทรัพย์\")) > span.font-mono",
+   "text": "1",
+   "op": "same"
+  },
+  {
+   "title": "สรุป: เดบิตบัญชีค่าเสื่อมราคา",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div.justify-between:has(> span:text-is(\"{{drlbl}}\")) > span.font-mono",
+   "text": "{{amtd}}",
+   "op": "same"
+  },
+  {
+   "title": "สรุป: เครดิตบัญชีค่าเสื่อมราคาสะสม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div.justify-between:has(> span:text-is(\"{{crlbl}}\")) > span.font-mono",
+   "text": "{{amtd}}",
+   "op": "same"
+  },
+  {
+   "title": "ภาพหน้าจอผลประมวลผล",
+   "do": "ui.screenshot",
+   "name": "dep-preview"
+  },
+  {
+   "title": "ประมวลผลไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean"
+  },
+  {
+   "title": "ดูตัวอย่างไม่บันทึกอะไรลงฐานข้อมูล",
+   "do": "db.query",
+   "sql": "select (select count(*) from as_trans where doc_no = :'dp') + (select count(*) from as_trans_detail where doc_no = :'dp')\n + (select count(*) from gl_journal where doc_no = :'dp') + (select count(*) from gl_journal_detail where doc_no = :'dp') as n",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "สมุดรายวันที่ไม่มีอยู่จริง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"สมุดรายวัน\")) > input",
+   "value": "ZQXJ"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"สมุดรายวัน\")) > input",
+   "key": "Tab"
+  },
+  {
+   "title": "สมุดรายวันที่ไม่มีอยู่จริง: ช่องแสดง ZQXJ",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"สมุดรายวัน\")) > input",
+   "value": "ZQXJ",
+   "op": "same"
+  },
+  {
+   "title": "กดบันทึก (สมุดรายวันผิด → ต้องไม่บันทึก)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] button:text-is(\"บันทึก\")"
+  },
+  {
+   "title": "หน้าจอแจ้ง \"ไม่พบสมุดรายวัน ZQXJ\"",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div.bg-rose-50",
+   "text": "ไม่พบสมุดรายวัน ZQXJ"
+  },
+  {
+   "title": "ข้อผิดพลาดแฝงมีเฉพาะ 4xx ที่ตั้งใจ",
+   "do": "ui.expectClean",
+   "ignore": [
+    "^HTTP 4\\d\\d POST /api/process/workflow/fa-depreciation",
+    "status of 4\\d\\d"
+   ]
+  },
+  {
+   "title": "สมุดรายวันผิด: ไม่มีเอกสารถูกบันทึก",
+   "do": "db.query",
+   "sql": "select (select count(*) from as_trans where doc_no = :'dp') + (select count(*) from as_trans_detail where doc_no = :'dp')\n + (select count(*) from gl_journal where doc_no = :'dp') + (select count(*) from gl_journal_detail where doc_no = :'dp') as n",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "คืนสมุดรายวันที่ถูก",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"สมุดรายวัน\")) > input",
+   "value": "{{book}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"สมุดรายวัน\")) > input",
+   "key": "Tab"
+  },
+  {
+   "title": "คืนสมุดรายวันที่ถูก: ช่องแสดง {{book}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"สมุดรายวัน\")) > input",
+   "value": "{{book}}",
+   "op": "same"
+  },
+  {
+   "title": "เลขที่เอกสารยาว 31 ตัว",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"เลขที่เอกสาร\")) > input",
+   "value": "{{dlong}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"เลขที่เอกสาร\")) > input",
+   "key": "Tab"
+  },
+  {
+   "title": "เลขที่เอกสารยาว 31 ตัว: ช่องแสดง {{dlong}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"เลขที่เอกสาร\")) > input",
+   "value": "{{dlong}}",
+   "op": "same"
+  },
+  {
+   "title": "กดบันทึก (เลขที่เอกสารยาวเกิน → ต้องไม่บันทึก)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] button:text-is(\"บันทึก\")"
+  },
+  {
+   "title": "หน้าจอแจ้ง \"เลขที่เอกสารยาวเกิน 25 ตัวอักษร\"",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div.bg-rose-50",
+   "text": "เลขที่เอกสารยาวเกิน 25 ตัวอักษร"
+  },
+  {
+   "title": "ข้อผิดพลาดแฝงมีเฉพาะ 4xx ที่ตั้งใจ",
+   "do": "ui.expectClean",
+   "ignore": [
+    "^HTTP 4\\d\\d POST /api/process/workflow/fa-depreciation",
+    "status of 4\\d\\d"
+   ]
+  },
+  {
+   "title": "คืนเลขที่เอกสารทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"เลขที่เอกสาร\")) > input",
+   "value": "{{dp}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"เลขที่เอกสาร\")) > input",
+   "key": "Tab"
+  },
+  {
+   "title": "คืนเลขที่เอกสารทดสอบ: ช่องแสดง {{dp}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"เลขที่เอกสาร\")) > input",
+   "value": "{{dp}}",
+   "op": "same"
+  },
+  {
+   "title": "กดบันทึก (ยืนยันอัตโนมัติ)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] button:text-is(\"บันทึก\")"
+  },
+  {
+   "title": "แจ้งบันทึกเอกสารเรียบร้อย 1 สินทรัพย์",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] header span.bg-emerald-50",
+   "text": "บันทึกเอกสาร {{dp}} เรียบร้อย (1 สินทรัพย์)",
+   "op": "same"
+  },
+  {
+   "title": "ไม่มีข้อความผิดพลาด",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div.bg-rose-50",
+   "visible": false
+  },
+  {
+   "title": "ภาพหน้าจอหลังบันทึก",
+   "do": "ui.screenshot",
+   "name": "dep-saved"
+  },
+  {
+   "title": "การบันทึกไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean"
+  },
+  {
+   "title": "หัวเอกสาร as_trans: วันที่ = ถึงวันที่, ช่วง, ยอด, เงื่อนไขที่กรอก",
+   "do": "db.query",
+   "sql": "select doc_date::text dd, date_begin::text b, date_end::text e, total_amount::text amt, remark, process_by::text pb, process_mode::text pm, from_as_code fac, to_as_code tac, from_as_type fat, to_as_type tat, coalesce(from_as_department, '') || coalesce(to_as_department, '') dep from as_trans where doc_no = :'dp' and trans_flag = 1801",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "dd",
+     "op": "eq",
+     "value": "{{d2}}"
+    },
+    {
+     "col": "b",
+     "op": "eq",
+     "value": "{{d1}}"
+    },
+    {
+     "col": "e",
+     "op": "eq",
+     "value": "{{d2}}"
+    },
+    {
+     "col": "amt",
+     "op": "eq",
+     "value": "{{expamt}}"
+    },
+    {
+     "col": "remark",
+     "op": "eq",
+     "value": "{{run.tag}}"
+    },
+    {
+     "col": "pb",
+     "op": "eq",
+     "value": "1"
+    },
+    {
+     "col": "pm",
+     "op": "eq",
+     "value": "1"
+    },
+    {
+     "col": "fac",
+     "op": "eq",
+     "value": "{{fa}}"
+    },
+    {
+     "col": "tac",
+     "op": "eq",
+     "value": "{{fa}}"
+    },
+    {
+     "col": "fat",
+     "op": "eq",
+     "value": "{{as_type}}"
+    },
+    {
+     "col": "tat",
+     "op": "eq",
+     "value": "{{as_type}}"
+    },
+    {
+     "col": "dep",
+     "op": "same",
+     "value": ""
+    }
+   ]
+  },
+  {
+   "title": "รายการ as_trans_detail มีเฉพาะสินทรัพย์เรา ยอดตรงสูตร",
+   "do": "db.query",
+   "sql": "select count(*)::text n, max(item_code) item, sum(sum_amount)::text amt from as_trans_detail where doc_no = :'dp' and trans_flag = 1801",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "1"
+    },
+    {
+     "col": "item",
+     "op": "eq",
+     "value": "{{fa}}"
+    },
+    {
+     "col": "amt",
+     "op": "eq",
+     "value": "{{expamt}}"
+    }
+   ]
+  },
+  {
+   "title": "GL: สมุดรายวัน/วันที่/คำอธิบาย และเดบิตค่าเสื่อม = เครดิตค่าเสื่อมสะสม = ยอดตามสูตร",
+   "do": "db.query",
+   "sql": "select h.book_code, h.doc_date::text dd, h.description, h.debit::text hdr_dr, h.credit::text hdr_cr, (select count(*) from gl_journal_detail d where d.doc_no = h.doc_no)::text n, (select coalesce(sum(debit), 0) from gl_journal_detail d where d.doc_no = h.doc_no and d.account_code = :'dacc')::text dr_dep, (select coalesce(sum(credit), 0) from gl_journal_detail d where d.doc_no = h.doc_no and d.account_code = :'sacc')::text cr_sum from gl_journal h where h.doc_no = :'dp' and h.trans_flag = 1801",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "book_code",
+     "op": "eq",
+     "value": "{{book}}"
+    },
+    {
+     "col": "dd",
+     "op": "eq",
+     "value": "{{d2}}"
+    },
+    {
+     "col": "description",
+     "op": "eq",
+     "value": "{{run.tag}}"
+    },
+    {
+     "col": "hdr_dr",
+     "op": "eq",
+     "value": "{{expamt}}"
+    },
+    {
+     "col": "hdr_cr",
+     "op": "eq",
+     "value": "{{expamt}}"
+    },
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "2"
+    },
+    {
+     "col": "dr_dep",
+     "op": "eq",
+     "value": "{{expamt}}"
+    },
+    {
+     "col": "cr_sum",
+     "op": "eq",
+     "value": "{{expamt}}"
+    }
+   ]
+  },
+  {
+   "title": "เลขที่เอกสารใหม่ ช่วงวันที่เดิม (พิมพ์ตัวเล็ก)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"เลขที่เอกสาร\")) > input",
+   "value": "{{dql}}"
+  },
+  {
+   "title": "ออกจากช่อง (Tab)",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"เลขที่เอกสาร\")) > input",
+   "key": "Tab"
+  },
+  {
+   "title": "เลขที่เอกสารใหม่ ช่วงวันที่เดิม (พิมพ์ตัวเล็ก): ช่องแสดง {{dq}}",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"เลขที่เอกสาร\")) > input",
+   "value": "{{dq}}",
+   "op": "same"
+  },
+  {
+   "title": "กดบันทึก (บันทึกซ้ำช่วงเดิม → ต้องถูกปฏิเสธ)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] button:text-is(\"บันทึก\")"
+  },
+  {
+   "title": "หน้าจอแจ้ง \"สินทรัพย์ช่วงวันที่นี้โอนค่าเสื่อมไปแล้วในเอกสาร {{dp}}\"",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div.bg-rose-50",
+   "text": "สินทรัพย์ช่วงวันที่นี้โอนค่าเสื่อมไปแล้วในเอกสาร {{dp}}"
+  },
+  {
+   "title": "ข้อผิดพลาดแฝงมีเฉพาะ 4xx ที่ตั้งใจ",
+   "do": "ui.expectClean",
+   "ignore": [
+    "^HTTP 4\\d\\d POST /api/process/workflow/fa-depreciation",
+    "status of 4\\d\\d"
+   ]
+  },
+  {
+   "title": "บันทึกซ้ำถูกปฏิเสธ: ไม่มีเอกสารที่สอง",
+   "do": "db.query",
+   "sql": "select (select count(*) from as_trans where doc_no = :'dq') + (select count(*) from as_trans_detail where doc_no = :'dq')\n + (select count(*) from gl_journal where doc_no = :'dq') + (select count(*) from gl_journal_detail where doc_no = :'dq') as n",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "เอกสารเราอยู่ใน 200 ใบแรกของรายการ (เรียงวันที่ล่าสุดก่อน)",
+   "do": "db.query",
+   "sql": "select count(*)::text n from as_trans where trans_flag = 1801 and (doc_date > :'d2'::date or (doc_date = :'d2'::date and doc_no > :'dp'))",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "lt",
+     "value": "200"
+    }
+   ]
+  },
+  {
+   "title": "เปิดเมนูใหม่",
+   "do": "ui.openMenu",
+   "key": "menu_asset_transfers"
+  },
+  {
+   "title": "รายการแสดงเอกสารที่บันทึก",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รวมค่าเสื่อมราคา\")) tbody tr:has(td:text-is(\"{{dp}}\"))"
+  },
+  {
+   "title": "แถว: วันที่เอกสาร = {{d2}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รวมค่าเสื่อมราคา\")) tbody tr:has(td:text-is(\"{{dp}}\")) >> td >> nth=1",
+   "text": "{{d2}}",
+   "op": "same"
+  },
+  {
+   "title": "แถว: จากวันที่คำนวณ = {{d1}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รวมค่าเสื่อมราคา\")) tbody tr:has(td:text-is(\"{{dp}}\")) >> td >> nth=3",
+   "text": "{{d1}}",
+   "op": "same"
+  },
+  {
+   "title": "แถว: ถึงวันที่คำนวณ = {{d2}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รวมค่าเสื่อมราคา\")) tbody tr:has(td:text-is(\"{{dp}}\")) >> td >> nth=4",
+   "text": "{{d2}}",
+   "op": "same"
+  },
+  {
+   "title": "แถว: รวมค่าเสื่อมราคา = {{amtd}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รวมค่าเสื่อมราคา\")) tbody tr:has(td:text-is(\"{{dp}}\")) >> td >> nth=5",
+   "text": "{{amtd}}",
+   "op": "same"
+  },
+  {
+   "title": "แถว: หมายเหตุ = {{run.tag}}",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รวมค่าเสื่อมราคา\")) tbody tr:has(td:text-is(\"{{dp}}\")) >> td >> nth=6",
+   "text": "{{run.tag}}",
+   "op": "same"
+  },
+  {
+   "title": "เลือกเอกสารจากรายการ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รวมค่าเสื่อมราคา\")) tbody tr:has(td:text-is(\"{{dp}}\"))"
+  },
+  {
+   "title": "เลขที่เอกสารถูกเติมจากแถวที่เลือก",
+   "do": "ui.expectValue",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div:has(> label:text-is(\"เลขที่เอกสาร\")) > input",
+   "value": "{{dp}}",
+   "op": "same"
+  },
+  {
+   "title": "ปุ่มลบกดได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] button:text-is(\"ลบ\"):enabled"
+  },
+  {
+   "title": "กดลบ (ยืนยันอัตโนมัติ)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] button:text-is(\"ลบ\")"
+  },
+  {
+   "title": "แจ้งลบเอกสารเรียบร้อย",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] header span.bg-emerald-50",
+   "text": "ลบเอกสาร {{dp}} เรียบร้อย",
+   "op": "same"
+  },
+  {
+   "title": "ภาพหน้าจอหลังลบ",
+   "do": "ui.screenshot",
+   "name": "dep-deleted"
+  },
+  {
+   "title": "การลบไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean"
+  },
+  {
+   "title": "ลบแล้ว: ไม่เหลือ as_trans/as_trans_detail/GL ของเอกสาร",
+   "do": "db.query",
+   "sql": "select (select count(*) from as_trans where doc_no = :'dp') + (select count(*) from as_trans_detail where doc_no = :'dp')\n + (select count(*) from gl_journal where doc_no = :'dp') + (select count(*) from gl_journal_detail where doc_no = :'dp') as n",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  },
+  {
+   "title": "ลบเอกสารค่าเสื่อมไม่ลบตัวสินทรัพย์",
+   "do": "db.query",
+   "sql": "select count(*)::text n from as_asset_detail where as_code = :'fa'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "1"
+    }
+   ]
+  },
+  {
+   "title": "กดลบซ้ำ (เอกสารถูกลบไปแล้ว)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] button:text-is(\"ลบ\")"
+  },
+  {
+   "title": "หน้าจอแจ้ง \"ไม่พบเอกสารโอนค่าเสื่อมราคา\"",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] div.bg-rose-50",
+   "text": "ไม่พบเอกสารโอนค่าเสื่อมราคา {{dp}}"
+  },
+  {
+   "title": "ข้อผิดพลาดแฝงมีเฉพาะ 4xx ที่ตั้งใจ",
+   "do": "ui.expectClean",
+   "ignore": [
+    "^HTTP 4\\d\\d POST /api/process/workflow/fa-depreciation",
+    "status of 4\\d\\d"
+   ]
+  },
+  {
+   "title": "เปิดเมนูใหม่หลังลบ",
+   "do": "ui.openMenu",
+   "key": "menu_asset_transfers"
+  },
+  {
+   "title": "รายการแสดงแล้ว",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รวมค่าเสื่อมราคา\"))"
+  },
+  {
+   "title": "เอกสารที่ลบไม่อยู่ในรายการ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_asset_transfers\"] table:has(th:text-is(\"รวมค่าเสื่อมราคา\")) tbody tr:has(td:text-is(\"{{dp}}\"))",
+   "visible": false
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบเอกสารค่าเสื่อมทดสอบ (ถ้ายังเหลือ)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/workflow/fa-depreciation",
+   "body": {
+    "menuName": "menu_asset_transfers",
+    "docNo": "{{dp}}",
+    "delete": true
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ลบเอกสารที่สอง (ถ้ามี)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/workflow/fa-depreciation",
+   "body": {
+    "menuName": "menu_asset_transfers",
+    "docNo": "{{dq}}",
+    "delete": true
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ลบสินทรัพย์ทดสอบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/master-detail/delete",
+   "body": {
+    "menuKey": "menu_asset_lists",
+    "key": "{{fa}}"
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือเศษสินทรัพย์/เอกสารค่าเสื่อม/GL ทดสอบใน smldemo",
+   "do": "db.query",
+   "sql": "select (select count(*) from as_asset where code = :'fa') + (select count(*) from as_asset_detail where as_code = :'fa') + (select count(*) from as_asset_result where as_code = :'fa')\n + (select count(*) from as_trans where doc_no like :'pfx') + (select count(*) from as_trans_detail where doc_no like :'pfx' or item_code = :'fa')\n + (select count(*) from gl_journal where doc_no like :'pfx') + (select count(*) from gl_journal_detail where doc_no like :'pfx') as left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,169 @@
+{
+  "id": "cb-other-income-vat",
+  "title": "รายได้อื่นๆ มี VAT แยกนอก ทั้งรับเงินสดและเงินเชื่อ: ยอดก่อนภาษี ภาษีขาย ยอดรวม รายงานภาษีขาย ลูกหนี้คงค้าง และ GL ต้องถูก แล้วลบคืนไม่เหลือเศษ",
+  "module": "tax",
+  "lens": "api",
+  "severityOnFail": "S1",
+  "description": "ทำงานผ่าน API ตัวเดียวกับหน้าจอรายได้อื่นๆ (250): (1) รับเงินสดเต็มจำนวน VAT แยกนอก → หัวเอกสาร ยอดก่อนภาษี/ภาษี/รวม, ภาษีขาย 1 แถว, เงินสดใน cb_trans, รายงานภาษีขาย, GL เดบิตเงินสด เครดิตรายได้ + ภาษีขาย (2) รายได้อื่นเงินเชื่อ → ขึ้นในรายงานใบส่งของค้างชำระของลูกหนี้เต็มยอด และ GL ต้องเดบิตลูกหนี้ ไม่ใช่เงินสด · ลูกค้า ยอดก่อนภาษี และอัตรา VAT ดึงจากบิลขาย VAT แยกนอกจริงล่าสุด รหัสรายได้จาก erp_income_list จริง ภาษีคำนวณใน SQL · รายจ่ายอื่นๆ (260) ไม่ทดสอบเพราะ smldemo ไม่มีรหัสค่าใช้จ่ายจริง (erp_expenses_list ว่าง) · cleanup ลบผ่าน API แล้วตรวจว่าไม่เหลือแถว",
+  "steps": [
+    { "title": "กำหนดเลขรายได้อื่นรับเงินสดทดสอบ", "do": "set", "name": "oi", "value": "UAT-{{run.short}}-OI" },
+    { "title": "กำหนดเลขรายได้อื่นเงินเชื่อทดสอบ", "do": "set", "name": "oc", "value": "UAT-{{run.short}}-OIC" },
+    { "title": "เข้าสู่ระบบแบบ Demo", "do": "ui.demoLogin" },
+    {
+      "title": "ดึงลูกค้า ยอดก่อนภาษี อัตรา VAT จากบิลขาย VAT แยกนอกจริงล่าสุด รหัสรายได้จริง และคำนวณภาษี/ยอดรวมที่ต้องได้ ด้วยวิธีปัดเศษของระบบ (erp_option.round_type: 1 = ปัดครึ่งขึ้น, อื่นๆ = ปัดทีละหลักแบบ SML)",
+      "do": "db.query",
+      "sql": "with s as (select t.cust_code, round(t.total_before_vat, 2) as base, t.vat_rate from ic_trans t join ar_customer c on c.code = t.cust_code where t.trans_flag = 44 and t.doc_no not like 'UAT%' and t.vat_type = 0 and t.vat_rate > 0 and t.total_before_vat > 0 and t.last_status = 0 order by t.doc_date desc, t.roworder desc limit 1), v as (select s.*, case when (select coalesce(round_type, 0) from erp_option limit 1) = 1 then round(s.base * s.vat_rate / 100 + 0.000001, 2) else round(round(round(round(round(round(s.base * s.vat_rate / 100, 7), 6), 5), 4), 3), 2) end as vat from s) select v.cust_code as cust, v.base::text as base, v.vat_rate::text as rate, v.vat::text as vat, (v.base + v.vat)::text as total, (select code from erp_income_list order by code limit 1) as inc, (select code from gl_chart_of_account where name_1 like 'ลูกหนี้การค้า%' order by code limit 1) as ar_acc, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today from v",
+      "rows": 1,
+      "expect": [
+        { "col": "cust", "op": "exists" },
+        { "col": "base", "op": "gt", "value": "0" },
+        { "col": "rate", "op": "gt", "value": "0" },
+        { "col": "inc", "op": "exists" },
+        { "col": "ar_acc", "op": "exists" }
+      ],
+      "save": { "cust": "cust", "base": "base", "rate": "rate", "vat": "vat", "total": "total", "inc": "inc", "ar_acc": "ar_acc", "today": "today" }
+    },
+    {
+      "title": "บันทึกรายได้อื่นๆ (250) รับเงินสด VAT แยกนอก รับเงินสดเต็มจำนวน",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true, "confirmed": true, "docNo": "{{oi}}", "docDate": "{{today}}", "transType": 2, "transFlag": 250, "inquiryType": 1, "custCode": "{{cust}}", "docFormatCode": "OI", "taxDocNo": "{{oi}}", "taxDocDate": "{{today}}", "vatType": 0, "vatRate": "{{rate}}", "remark": "{{run.tag}}",
+        "lines": [{ "itemCode": "{{inc}}", "qty": "1", "standValue": "1", "divideValue": "1", "price": "{{base}}", "sumAmount": "{{base}}", "taxType": 0 }],
+        "pay": { "cash": "{{total}}", "payCashAmount": "{{total}}" }
+      },
+      "expect": [{ "path": "data.docNo", "op": "eq", "value": "{{oi}}" }]
+    },
+    {
+      "title": "หัวเอกสารรายได้อื่น: ยอดก่อนภาษี ภาษี ยอดรวม อัตรา ตรงที่คำนวณ บรรทัดเป็นรหัสรายได้ที่เลือก",
+      "do": "db.query",
+      "sql": "select t.total_before_vat, t.total_vat_value, t.total_amount, t.vat_rate, d.item_code, d.sum_amount from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag where t.doc_no = :'oi' and t.trans_flag = 250",
+      "rows": 1,
+      "expect": [
+        { "col": "total_before_vat", "op": "eq", "value": "{{base}}" },
+        { "col": "total_vat_value", "op": "eq", "value": "{{vat}}" },
+        { "col": "total_amount", "op": "eq", "value": "{{total}}" },
+        { "col": "vat_rate", "op": "eq", "value": "{{rate}}" },
+        { "col": "item_code", "op": "eq", "value": "{{inc}}" },
+        { "col": "sum_amount", "op": "eq", "value": "{{base}}" }
+      ]
+    },
+    {
+      "title": "การรับเงิน: เงินสดใน cb_trans = ยอดรวม",
+      "do": "db.query",
+      "sql": "select cash_amount, total_amount_pay from cb_trans where doc_no = :'oi' and trans_flag = 250",
+      "rows": 1,
+      "expect": [{ "col": "cash_amount", "op": "eq", "value": "{{total}}" }]
+    },
+    {
+      "title": "ภาษีขาย: 1 แถว ฐานภาษี อัตรา และภาษี ตรงที่คำนวณ",
+      "do": "db.query",
+      "sql": "select base_caltax_amount, tax_rate, amount from gl_journal_vat_sale where doc_no = :'oi'",
+      "rows": 1,
+      "expect": [
+        { "col": "base_caltax_amount", "op": "eq", "value": "{{base}}" },
+        { "col": "tax_rate", "op": "eq", "value": "{{rate}}" },
+        { "col": "amount", "op": "eq", "value": "{{vat}}" }
+      ]
+    },
+    {
+      "title": "GL รายได้อื่นรับเงินสด: เดบิตเงินสด = ยอดรวม เครดิตรายได้ = ยอดก่อนภาษี เครดิตภาษีขาย = ภาษี และสมดุล",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit) filter (where account_code in (select code from gl_chart_of_account where name_1 like 'เงินสด%')), 0) as dr_cash, coalesce(sum(credit) filter (where account_code like '4%'), 0) as cr_income, coalesce(sum(credit) filter (where account_code in (select code from gl_chart_of_account where name_1 like 'ภาษีขาย%')), 0) as cr_vat from gl_journal_detail where doc_no = :'oi'",
+      "rows": 1,
+      "expect": [
+        { "col": "n", "op": "gt", "value": "0" },
+        { "col": "diff", "op": "eq", "value": "0" },
+        { "col": "dr_cash", "op": "eq", "value": "{{total}}" },
+        { "col": "cr_income", "op": "eq", "value": "{{base}}" },
+        { "col": "cr_vat", "op": "eq", "value": "{{vat}}" }
+      ]
+    },
+    {
+      "title": "รายงานภาษีขาย (เมนูจริง) แสดงรายได้อื่นนี้ มูลค่า + ภาษี = รวม",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": { "menuKey": "menu_report_vat_sale", "mode": "summary", "dateFrom": "{{today}}", "dateTo": "{{today}}", "fromCode": "", "toCode": "", "orderBy": "", "keyword": "{{oi}}", "viewDetail": false },
+      "expect": [
+        { "path": "data.rows.0.เลขที่เอกสาร", "op": "eq", "value": "{{oi}}" },
+        { "path": "data.rows.0.มูลค่าสินค้า/บริการ", "op": "eq", "value": "{{base}}" },
+        { "path": "data.rows.0.ภาษีมูลค่าเพิ่ม", "op": "eq", "value": "{{vat}}" },
+        { "path": "data.rows.0.รวม", "op": "eq", "value": "{{total}}" }
+      ]
+    },
+    {
+      "title": "บันทึกรายได้อื่นๆ (250) เงินเชื่อ VAT แยกนอก ยังไม่รับเงิน",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true, "confirmed": true, "docNo": "{{oc}}", "docDate": "{{today}}", "transType": 2, "transFlag": 250, "inquiryType": 0, "custCode": "{{cust}}", "docFormatCode": "OI", "taxDocNo": "{{oc}}", "taxDocDate": "{{today}}", "vatType": 0, "vatRate": "{{rate}}", "creditDay": 0, "remark": "{{run.tag}}",
+        "lines": [{ "itemCode": "{{inc}}", "qty": "1", "standValue": "1", "divideValue": "1", "price": "{{base}}", "sumAmount": "{{base}}", "taxType": 0 }]
+      },
+      "expect": [{ "path": "data.docNo", "op": "eq", "value": "{{oc}}" }]
+    },
+    {
+      "title": "รายได้อื่นเงินเชื่อ: หัวเอกสารยอดรวมตรง และภาษีขาย 1 แถวตรงยอด",
+      "do": "db.query",
+      "sql": "select t.total_amount, t.total_vat_value, v.base_caltax_amount, v.amount from ic_trans t join gl_journal_vat_sale v on v.doc_no = t.doc_no where t.doc_no = :'oc' and t.trans_flag = 250",
+      "rows": 1,
+      "expect": [
+        { "col": "total_amount", "op": "eq", "value": "{{total}}" },
+        { "col": "total_vat_value", "op": "eq", "value": "{{vat}}" },
+        { "col": "base_caltax_amount", "op": "eq", "value": "{{base}}" },
+        { "col": "amount", "op": "eq", "value": "{{vat}}" }
+      ]
+    },
+    {
+      "title": "รายงานใบส่งของค้างชำระ: รายได้อื่นเงินเชื่อขึ้นค้างเต็มยอดของลูกค้ารายนี้",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": { "menuKey": "menu_ar_report_invoice_remain_pay", "mode": "summary", "dateFrom": "{{today}}", "dateTo": "{{today}}", "fromCode": "", "toCode": "", "orderBy": "", "keyword": "{{oc}}", "viewDetail": false },
+      "expect": [
+        { "path": "data.rows.0.doc_no", "op": "eq", "value": "{{oc}}" },
+        { "path": "data.rows.0.รหัสลูกหนี้", "op": "eq", "value": "{{cust}}" },
+        { "path": "data.rows.0.ยอดคงเหลือ", "op": "eq", "value": "{{total}}" }
+      ]
+    },
+    {
+      "title": "GL รายได้อื่นเงินเชื่อ: สมดุล เครดิตรายได้ = ยอดก่อนภาษี เครดิตภาษีขาย = ภาษี",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(credit) filter (where account_code like '4%'), 0) as cr_income, coalesce(sum(credit) filter (where account_code in (select code from gl_chart_of_account where name_1 like 'ภาษีขาย%')), 0) as cr_vat from gl_journal_detail where doc_no = :'oc'",
+      "rows": 1,
+      "expect": [
+        { "col": "n", "op": "gt", "value": "0" },
+        { "col": "diff", "op": "eq", "value": "0" },
+        { "col": "cr_income", "op": "eq", "value": "{{base}}" },
+        { "col": "cr_vat", "op": "eq", "value": "{{vat}}" }
+      ]
+    },
+    {
+      "title": "GL รายได้อื่นเงินเชื่อ: ต้องเดบิตลูกหนี้การค้า = ยอดรวม (ยังไม่ได้รับเงิน จึงห้ามเดบิตเงินสด)",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit) filter (where account_code = :'ar_acc'), 0) as dr_ar, coalesce(sum(debit) filter (where account_code in (select code from gl_chart_of_account where name_1 like 'เงินสด%')), 0) as dr_cash from gl_journal_detail where doc_no = :'oc'",
+      "rows": 1,
+      "expect": [{ "col": "dr_ar", "op": "eq", "value": "{{total}}" }, { "col": "dr_cash", "op": "eq", "value": "0" }],
+      "continueOnFail": true
+    },
+    {
+      "title": "หลักฐาน: รายการ GL ทุกบรรทัดของรายได้อื่นทั้งสองใบ",
+      "do": "db.query",
+      "sql": "select doc_no, account_code, debit, credit from gl_journal_detail where doc_no in (:'oi', :'oc') order by doc_no, roworder"
+    }
+  ],
+  "cleanup": [
+    { "title": "ลบรายได้อื่นเงินเชื่อทดสอบ", "do": "api.request", "method": "POST", "path": "/api/process/trans/delete", "body": { "docNo": "{{oc}}", "transFlag": 250 }, "expectStatus": [200, 400, 404, 409, 422] },
+    { "title": "ลบรายได้อื่นรับเงินสดทดสอบ", "do": "api.request", "method": "POST", "path": "/api/process/trans/delete", "body": { "docNo": "{{oi}}", "transFlag": 250 }, "expectStatus": [200, 400, 404, 409, 422] },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo (เอกสาร การรับเงิน GL ภาษีขาย)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'oi', :'oc')) + (select count(*) from ic_trans_detail where doc_no in (:'oi', :'oc')) + (select count(*) from cb_trans where doc_no in (:'oi', :'oc')) + (select count(*) from cb_trans_detail where doc_no in (:'oi', :'oc')) + (select count(*) from cb_chq_list where doc_ref in (:'oi', :'oc')) + (select count(*) from gl_journal where doc_no in (:'oi', :'oc')) + (select count(*) from gl_journal_detail where doc_no in (:'oi', :'oc')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'oi', :'oc')) + (select count(*) from gl_wht_list where doc_no in (:'oi', :'oc')) + (select count(*) from ap_ar_trans_detail where billing_no in (:'oi', :'oc')) as left_rows",
+      "expect": [{ "col": "left_rows", "op": "eq", "value": "0" }]
+    }
+  ]
+}

@@ -1,0 +1,1698 @@
+{
+  "id": "ui-mst-warehouse",
+  "module": "master",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "title": "ทะเบียนคลังสินค้า: เพิ่มกรอกครบ 12 ช่อง ค้นหา กรอง เรียง แก้ไข กันลบเมื่อถูกใช้งาน ลบ ตรวจ DB ครบ",
+  "description": "WarehouseScreen บนจอ menu_setup_ic_wh: เพิ่มคลังกรอกครบทุกช่อง (ชื่อไทย/อังกฤษ ที่อยู่ โทรศัพท์ โทรสาร กลุ่มผู้ใช้ ผู้จัดการคลังและสาขาจาก SmlLookupModal สาขาที่ใช้งาน ละติจูด ลองจิจูด) ตรวจ DB ทุกคอลัมน์ validation รหัส/ชื่อว่าง รหัสซ้ำ เตือนปิดแท็บ ค้นหา เรียง ตัวกรองขั้นสูง เปิดดู แก้ไขด้วยปุ่มแก้ไขและปุ่มดินสอ ล้างสาขา สลับรายการ/ยกเลิก กันลบเมื่อคลังถูกใช้ใน ic_wh_shelf ลบทีละรายการและลบจากรายการซ้ายแล้วพิสูจน์ 0 แถว",
+  "timeoutMs": 600000,
+  "steps": [
+    {
+      "title": "เลือกผู้ใช้ สาขา และคลังจริงที่มีอยู่ใน smldemo ไว้ใช้ทดสอบ (ผู้ใช้ 2 คน สาขา 2 สาขา)",
+      "do": "db.query",
+      "sql": "with u as (select code, name_1, row_number() over (order by code) rn from erp_user where name_1 = btrim(name_1) and name_1 <> '' and code = btrim(code) and code !~ '[\"\\\\]'),\nb as (select code, name_1, row_number() over (order by code) rn from erp_branch_list where name_1 = btrim(name_1) and name_1 <> '' and code = btrim(code) and code !~ '[\"\\\\]'),\nw as (select code, name_1 from ic_warehouse where code !~ '^UAT' and name_1 = btrim(name_1) and name_1 <> '' and code !~ '[\"\\\\]' order by code limit 1)\nselect (select code from u where rn = 1) as mgr1_code, (select name_1 from u where rn = 1) as mgr1_name,\n(select code from u where rn = 2) as mgr2_code, (select name_1 from u where rn = 2) as mgr2_name,\n(select code from b where rn = 1) as br1_code, (select name_1 from b where rn = 1) as br1_name,\n(select code from b where rn = 2) as br2_code, (select name_1 from b where rn = 2) as br2_name,\n(select code from w) as real_code, (select name_1 from w) as real_name",
+      "rows": 1,
+      "save": {
+        "mgr1_code": "mgr1_code",
+        "mgr1_name": "mgr1_name",
+        "mgr2_code": "mgr2_code",
+        "mgr2_name": "mgr2_name",
+        "br1_code": "br1_code",
+        "br1_name": "br1_name",
+        "br2_code": "br2_code",
+        "br2_name": "br2_name",
+        "real_code": "real_code",
+        "real_name": "real_name"
+      },
+      "expect": [
+        {
+          "col": "mgr1_code",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "mgr2_code",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "br1_code",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "br2_code",
+          "op": "ne",
+          "value": ""
+        },
+        {
+          "col": "real_code",
+          "op": "ne",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ก่อนเริ่มยังไม่มีคลังที่ขึ้นต้น UAT ของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_warehouse where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true,
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดจอกำหนดคลังสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_wh"
+    },
+    {
+      "title": "เปิดจอแล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/",
+        "openstreetmap",
+        "arcgisonline",
+        "unpkg",
+        "leaflet",
+        "cdnjs",
+        "jsdelivr",
+        "nominatim"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นช่องค้นหาและตัวนับรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-search-input\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นปุ่มเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"เพิ่มรายการใหม่\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพจอเริ่มต้น",
+      "do": "ui.screenshot",
+      "name": "wh-open"
+    },
+    {
+      "title": "ค้นหาคลังจริงด้วยชื่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{real_name}}"
+    },
+    {
+      "title": "ค้นหาคลังจริงด้วยชื่อ (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "เห็นแถวคลังจริงในรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ {{real_code}}\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดดูคลังจริง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ {{real_code}}\"])"
+    },
+    {
+      "title": "ช่องรหัสแสดงรหัสคลังจริง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_code",
+      "value": "{{real_code}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องชื่อแสดงชื่อคลังจริง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_1",
+      "value": "{{real_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องรหัสถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_code[disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องที่อยู่ถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_address[disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องผู้จัดการคลังถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] >> xpath=.//label[normalize-space(.)=\"ผู้จัดการคลัง:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1][@disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ล้างคำค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"ล้างคำค้นหา\"]"
+    },
+    {
+      "title": "กดเพิ่มรายการใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"เพิ่มรายการใหม่\"]"
+    },
+    {
+      "title": "ปุ่มบันทึกกดไม่ได้เพราะยังไม่มีการแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"บันทึกข้อมูล\"][disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องรหัสพร้อมให้กรอก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_code:not([disabled])",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกเฉพาะชื่อ (เว้นรหัสว่าง)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_1",
+      "value": "ทดสอบ ไม่มีรหัส"
+    },
+    {
+      "title": "กดบันทึกทั้งที่ไม่มีรหัส",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบเตือน ข้อมูลไม่สมบูรณ์ รหัสคลังสินค้า",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ข้อมูลไม่สมบูรณ์ : รหัสคลังสินค้า",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพเตือนไม่มีรหัส",
+      "do": "ui.screenshot",
+      "name": "wh-warn-code"
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "คำเตือนปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[role=dialog]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกรหัสตัวพิมพ์เล็ก (ระบบต้องแปลงเป็นตัวพิมพ์ใหญ่)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_code",
+      "value": "uat{{run.short}}w1"
+    },
+    {
+      "title": "ช่องรหัสแสดงตัวพิมพ์ใหญ่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_code",
+      "value": "UAT{{run.short}}W1",
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบชื่อให้ว่าง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_1",
+      "value": "   "
+    },
+    {
+      "title": "กดบันทึกทั้งที่ชื่อเป็นช่องว่าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบเตือน ข้อมูลไม่สมบูรณ์ ชื่อคลังสินค้า",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ข้อมูลไม่สมบูรณ์ : ชื่อคลังสินค้า (ไทย)",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงปิดคำเตือน (ชื่อ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: ยังไม่มีแถวถูกบันทึกจากการกดบันทึกที่ไม่ครบ",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_warehouse where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปิดแท็บขณะกำลังเพิ่มรายการ",
+      "do": "ui.click",
+      "selector": "[data-testid=\"workspace-tab-close-menu_setup_ic_wh\"]"
+    },
+    {
+      "title": "ระบบเตือนว่ามีข้อมูลที่ยังไม่บันทึก",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกอยู่ต่อ",
+      "do": "ui.click",
+      "selector": "[data-testid=\"tab-warning-keep-btn\"]"
+    },
+    {
+      "title": "หน้าต่างเตือนปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"tab-unsaved-warning-modal\"]",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "รหัสที่กรอกไว้ยังอยู่ครบ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_code",
+      "value": "UAT{{run.short}}W1",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกชื่อภาษาไทย (มีช่องว่างหน้าหลัง)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_1",
+      "value": "  คลังทดสอบ ALPHA {{run.short}}  "
+    },
+    {
+      "title": "กรอกชื่อภาษาอังกฤษ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_2",
+      "value": "UAT WAREHOUSE ALPHA {{run.short}}"
+    },
+    {
+      "title": "กรอกที่อยู่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_address",
+      "value": "99/9 ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110 {{run.short}}"
+    },
+    {
+      "title": "กรอกหมายเลขโทรศัพท์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_telephone",
+      "value": "02-555-0101 ต่อ 12"
+    },
+    {
+      "title": "กรอกหมายเลขโทรสาร",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_fax",
+      "value": "02-555-0102"
+    },
+    {
+      "title": "กรอกกลุ่มผู้ใช้งาน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_user_group",
+      "value": "UG{{run.short}}"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา ผู้จัดการคลัง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"ผู้จัดการคลัง\"]"
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา ผู้จัดการคลัง",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{mgr1_code}}"
+    },
+    {
+      "title": "เลือกรายการ {{mgr1_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{mgr1_code}}\"))"
+    },
+    {
+      "title": "ช่อง ผู้จัดการคลัง แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] >> xpath=.//label[normalize-space(.)=\"ผู้จัดการคลัง:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{mgr1_code}}~{{mgr1_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา สาขา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"สาขา\"]"
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา สาขา",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{br1_code}}"
+    },
+    {
+      "title": "เลือกรายการ {{br1_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{br1_code}}\"))"
+    },
+    {
+      "title": "ช่อง สาขา แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] >> xpath=.//label[normalize-space(.)=\"สาขา:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{br1_code}}~{{br1_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กรอกสาขาที่ใช้งาน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_branch_use",
+      "value": "{{br1_code}},{{br2_code}}"
+    },
+    {
+      "title": "กรอกละติจูด",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_latitude",
+      "value": "13.756331"
+    },
+    {
+      "title": "ออกจากช่องละติจูด",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_latitude",
+      "key": "Tab"
+    },
+    {
+      "title": "กรอกลองจิจูด",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_longitude",
+      "value": "100.501765"
+    },
+    {
+      "title": "ออกจากช่องลองจิจูด",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_longitude",
+      "key": "Tab"
+    },
+    {
+      "title": "ช่องละติจูดแสดงค่าที่กรอก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_latitude",
+      "value": "13.756331",
+      "continueOnFail": true
+    },
+    {
+      "title": "ช่องลองจิจูดแสดงค่าที่กรอก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_longitude",
+      "value": "100.501765",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพก่อนบันทึก A",
+      "do": "ui.screenshot",
+      "name": "wh-before-save-a"
+    },
+    {
+      "title": "กดบันทึก A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบแจ้งบันทึกสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "บันทึกข้อมูลเสร็จเรียบร้อย",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "หัวจอแสดง บันทึกล่าสุด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] header span:has-text(\"บันทึกล่าสุด\")",
+      "continueOnFail": true
+    },
+    {
+      "title": "บันทึก A แล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/",
+        "openstreetmap",
+        "arcgisonline",
+        "unpkg",
+        "leaflet",
+        "cdnjs",
+        "jsdelivr",
+        "nominatim"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: A ครบทุกคอลัมน์ตามที่กรอก (ชื่อถูกตัดช่องว่างหน้าหลัง)",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(fax,'') as fax, coalesce(user_group,'') as user_group, coalesce(wh_manager,'') as wh_manager, coalesce(branch_code,'') as branch_code, coalesce(branch_use,'') as branch_use, coalesce(latitude,0)::numeric(12,6)::text as latitude, coalesce(longitude,0)::numeric(12,6)::text as longitude, coalesce(status,0) as status from ic_warehouse where code = 'UAT' || :'run_short' || 'W1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}W1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "คลังทดสอบ ALPHA {{run.short}}"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT WAREHOUSE ALPHA {{run.short}}"
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": "99/9 ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110 {{run.short}}"
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": "02-555-0101 ต่อ 12"
+        },
+        {
+          "col": "fax",
+          "op": "eq",
+          "value": "02-555-0102"
+        },
+        {
+          "col": "user_group",
+          "op": "eq",
+          "value": "UG{{run.short}}"
+        },
+        {
+          "col": "wh_manager",
+          "op": "eq",
+          "value": "{{mgr1_code}}"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": "{{br1_code}}"
+        },
+        {
+          "col": "branch_use",
+          "op": "eq",
+          "value": "{{br1_code}},{{br2_code}}"
+        },
+        {
+          "col": "latitude",
+          "op": "eq",
+          "value": "13.756331"
+        },
+        {
+          "col": "longitude",
+          "op": "eq",
+          "value": "100.501765"
+        },
+        {
+          "col": "status",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังบันทึกเป็นโหมดดู ช่องรหัสถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_code[disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดเพิ่มรายการใหม่ (ทดสอบรหัสซ้ำ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"เพิ่มรายการใหม่\"]"
+    },
+    {
+      "title": "กรอกรหัสซ้ำกับ A",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_code",
+      "value": "UAT{{run.short}}W1"
+    },
+    {
+      "title": "กรอกชื่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_1",
+      "value": "รหัสซ้ำ ไม่ควรถูกบันทึก"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "ระบบแจ้ง รหัสซ้ำ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "รหัสซ้ำ",
+      "continueOnFail": true
+    },
+    {
+      "title": "ข้อความบอกว่ารหัสมีอยู่แล้ว",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "รหัสคลังสินค้า [UAT{{run.short}}W1] มีอยู่ในระบบแล้ว",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพแจ้งรหัสซ้ำ",
+      "do": "ui.screenshot",
+      "name": "wh-warn-dup"
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: รหัสซ้ำไม่ทำให้ชื่อ A ถูกทับ",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(fax,'') as fax, coalesce(user_group,'') as user_group, coalesce(wh_manager,'') as wh_manager, coalesce(branch_code,'') as branch_code, coalesce(branch_use,'') as branch_use, coalesce(latitude,0)::numeric(12,6)::text as latitude, coalesce(longitude,0)::numeric(12,6)::text as longitude, coalesce(status,0) as status from ic_warehouse where code = 'UAT' || :'run_short' || 'W1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "คลังทดสอบ ALPHA {{run.short}}"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปลี่ยนเป็นรหัส B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_code",
+      "value": "UAT{{run.short}}W2"
+    },
+    {
+      "title": "กรอกชื่อ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_1",
+      "value": "คลังสองทดสอบ BETA {{run.short}}"
+    },
+    {
+      "title": "กรอกชื่ออังกฤษ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_2",
+      "value": "UAT WAREHOUSE BETA {{run.short}}"
+    },
+    {
+      "title": "กดบันทึก B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง (บันทึก B)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: B บันทึกแล้ว ช่องที่ไม่ได้กรอกเป็นค่าว่าง/ศูนย์",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(fax,'') as fax, coalesce(user_group,'') as user_group, coalesce(wh_manager,'') as wh_manager, coalesce(branch_code,'') as branch_code, coalesce(branch_use,'') as branch_use, coalesce(latitude,0)::numeric(12,6)::text as latitude, coalesce(longitude,0)::numeric(12,6)::text as longitude, coalesce(status,0) as status from ic_warehouse where code = 'UAT' || :'run_short' || 'W2'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "คลังสองทดสอบ BETA {{run.short}}"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT WAREHOUSE BETA {{run.short}}"
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "fax",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "user_group",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "wh_manager",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "branch_use",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "latitude",
+          "op": "eq",
+          "value": "0.000000"
+        },
+        {
+          "col": "longitude",
+          "op": "eq",
+          "value": "0.000000"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: มี 2 รายการของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_warehouse where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "2"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยตัวนำหน้ารหัส UAT ของรอบนี้",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "ค้นหาด้วยตัวนำหน้ารหัส UAT ของรอบนี้ (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ตัวนับรายการเป็น 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว A",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว B",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยชื่ออังกฤษ ALPHA",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "ALPHA {{run.short}}"
+    },
+    {
+      "title": "ค้นหาด้วยชื่ออังกฤษ ALPHA (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ตัวนับเป็น 1/1 (ชื่ออังกฤษ)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เห็นแถว A (ค้นจากชื่ออังกฤษ)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาด้วยชื่อไทยของ B",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "คลังสองทดสอบ BETA"
+    },
+    {
+      "title": "ค้นหาด้วยชื่อไทยของ B (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "เห็นแถว B (ค้นจากชื่อไทย)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่เห็นแถว A (ค้นจากชื่อไทยของ B)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ค้นหาคำที่ไม่มีอยู่จริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "ZZNOHITXYZ"
+    },
+    {
+      "title": "ค้นหาคำที่ไม่มีอยู่จริง (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "แสดงข้อความ ไม่พบข้อมูลที่ค้นหา",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] >> text=ไม่พบข้อมูลที่ค้นหา",
+      "continueOnFail": true
+    },
+    {
+      "title": "ตัวนับเป็น 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปุ่มล้างคำค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"ล้างคำค้นหา\"]"
+    },
+    {
+      "title": "ค้นหาใหม่ด้วย UAT ของรอบนี้",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "ค้นหาใหม่ด้วย UAT ของรอบนี้ (Enter)",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "กลับมาเห็น 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกหัวคอลัมน์รหัส (น้อยไปมาก)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "แถวแรกเป็น A",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr td[data-col-key=\"code\"]",
+      "text": "UAT{{run.short}}W1",
+      "nth": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกหัวคอลัมน์รหัสอีกครั้ง (มากไปน้อย)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "แถวแรกเป็น B",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr td[data-col-key=\"code\"]",
+      "text": "UAT{{run.short}}W2",
+      "nth": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกครั้งที่สามเพื่อยกเลิกการเรียง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] th[data-col-key=\"code\"]"
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูง (ชื่อ 1)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "กรอกคำค้นชื่อ 1 = ALPHA",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"คำค้นชื่อ 1\"]",
+      "value": "ALPHA"
+    },
+    {
+      "title": "กดกรองข้อมูล (ชื่อ 1)",
+      "do": "ui.click",
+      "selector": "button:has-text(\"กรองข้อมูล\")"
+    },
+    {
+      "title": "กรองด้วยชื่อ 1 เหลือ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เหลือเฉพาะแถว A",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W1\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูงเพื่อล้าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "กดล้างตัวกรอง",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ล้างตัวกรอง\")"
+    },
+    {
+      "title": "ล้างตัวกรองแล้วกลับเป็น 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูง (ช่วงรหัส)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "ช่วงรหัสจาก = B",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP01\"]",
+      "value": "UAT{{run.short}}W2"
+    },
+    {
+      "title": "ช่วงรหัสถึง = B",
+      "do": "ui.fill",
+      "selector": "input[placeholder=\"เช่น EMP99\"]",
+      "value": "UAT{{run.short}}W2"
+    },
+    {
+      "title": "กดกรองข้อมูล (ช่วงรหัส)",
+      "do": "ui.click",
+      "selector": "button:has-text(\"กรองข้อมูล\")"
+    },
+    {
+      "title": "กรองช่วงรหัสแล้วเหลือ 1/1",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "continueOnFail": true
+    },
+    {
+      "title": "เหลือเฉพาะแถว B",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W2\"])",
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว A ถูกกรองออก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดตัวกรองขั้นสูงเพื่อล้าง (ช่วงรหัส)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-filter-btn\"]"
+    },
+    {
+      "title": "กดล้างตัวกรอง (ช่วงรหัส)",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ล้างตัวกรอง\")"
+    },
+    {
+      "title": "ล้างตัวกรองแล้วกลับเป็น 2/2",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "2/2",
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกแถว A เพื่อเปิดดู",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W1\"])"
+    },
+    {
+      "title": "รหัสแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_code",
+      "value": "UAT{{run.short}}W1",
+      "continueOnFail": true
+    },
+    {
+      "title": "ชื่อแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_1",
+      "value": "คลังทดสอบ ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ชื่ออังกฤษแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_2",
+      "value": "UAT WAREHOUSE ALPHA {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ที่อยู่แสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_address",
+      "value": "99/9 ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110 {{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "โทรศัพท์แสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_telephone",
+      "value": "02-555-0101 ต่อ 12",
+      "continueOnFail": true
+    },
+    {
+      "title": "โทรสารแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_fax",
+      "value": "02-555-0102",
+      "continueOnFail": true
+    },
+    {
+      "title": "กลุ่มผู้ใช้งานแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_user_group",
+      "value": "UG{{run.short}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ผู้จัดการคลังแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] >> xpath=.//label[normalize-space(.)=\"ผู้จัดการคลัง:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{mgr1_code}}~{{mgr1_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "สาขาแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] >> xpath=.//label[normalize-space(.)=\"สาขา:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{br1_code}}~{{br1_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "สาขาที่ใช้งานแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_branch_use",
+      "value": "{{br1_code}},{{br2_code}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ละติจูดแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_latitude",
+      "value": "13.756331",
+      "continueOnFail": true
+    },
+    {
+      "title": "ลองจิจูดแสดงกลับ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_longitude",
+      "value": "100.501765",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องชื่อถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_1[disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "โหมดดู ช่องละติจูดถูกล็อก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_latitude[disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพเปิดดู A",
+      "do": "ui.screenshot",
+      "name": "wh-view-a"
+    },
+    {
+      "title": "กดแก้ไขข้อมูล A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "ระบบถามว่าต้องการ Lock รายการก่อนแก้ไขหรือไม่",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการ Lock รายการนี้ก่อนแก้ไขหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงเข้าโหมดแก้ไข",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ช่องชื่อพร้อมแก้ไข (ไม่ถูกล็อก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_1:not([disabled])",
+      "continueOnFail": true
+    },
+    {
+      "title": "รหัสแก้ไขไม่ได้ในโหมดแก้ไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_code[disabled]",
+      "continueOnFail": true
+    },
+    {
+      "title": "แก้ชื่อไทย",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_1",
+      "value": "คลังทดสอบ ALPHA {{run.short}} แก้ไข"
+    },
+    {
+      "title": "แก้ที่อยู่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_address",
+      "value": "99/9 ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110 {{run.short}} แก้"
+    },
+    {
+      "title": "แก้หมายเลขโทรศัพท์",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_telephone",
+      "value": "02-555-0199"
+    },
+    {
+      "title": "แก้กลุ่มผู้ใช้งาน",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_user_group",
+      "value": "UGX{{run.short}}"
+    },
+    {
+      "title": "แก้ลองจิจูด",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_longitude",
+      "value": "100.600001"
+    },
+    {
+      "title": "ออกจากช่องลองจิจูด",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_longitude",
+      "key": "Tab"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา ผู้จัดการคลัง (เปลี่ยนเป็นคนที่สอง)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"ผู้จัดการคลัง\"]"
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา ผู้จัดการคลัง (เปลี่ยนเป็นคนที่สอง)",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{mgr2_code}}"
+    },
+    {
+      "title": "เลือกรายการ {{mgr2_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{mgr2_code}}\"))"
+    },
+    {
+      "title": "ช่อง ผู้จัดการคลัง (เปลี่ยนเป็นคนที่สอง) แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] >> xpath=.//label[normalize-space(.)=\"ผู้จัดการคลัง:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{mgr2_code}}~{{mgr2_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "ล้างสาขา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] >> xpath=.//label[normalize-space(.)=\"สาขา:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": ""
+    },
+    {
+      "title": "ออกจากช่องสาขา",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] >> xpath=.//label[normalize-space(.)=\"สาขา:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "key": "Tab"
+    },
+    {
+      "title": "กดบันทึกการแก้ไข",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง (บันทึกการแก้ไข)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: ช่องที่แก้เปลี่ยนตามที่แก้ ส่วนที่ไม่แตะคงเดิม",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(fax,'') as fax, coalesce(user_group,'') as user_group, coalesce(wh_manager,'') as wh_manager, coalesce(branch_code,'') as branch_code, coalesce(branch_use,'') as branch_use, coalesce(latitude,0)::numeric(12,6)::text as latitude, coalesce(longitude,0)::numeric(12,6)::text as longitude, coalesce(status,0) as status from ic_warehouse where code = 'UAT' || :'run_short' || 'W1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "code",
+          "op": "eq",
+          "value": "UAT{{run.short}}W1"
+        },
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "คลังทดสอบ ALPHA {{run.short}} แก้ไข"
+        },
+        {
+          "col": "name_2",
+          "op": "eq",
+          "value": "UAT WAREHOUSE ALPHA {{run.short}}"
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": "99/9 ถนนทดสอบ แขวงทดสอบ เขตทดสอบ กรุงเทพมหานคร 10110 {{run.short}} แก้"
+        },
+        {
+          "col": "telephone",
+          "op": "eq",
+          "value": "02-555-0199"
+        },
+        {
+          "col": "fax",
+          "op": "eq",
+          "value": "02-555-0102"
+        },
+        {
+          "col": "user_group",
+          "op": "eq",
+          "value": "UGX{{run.short}}"
+        },
+        {
+          "col": "wh_manager",
+          "op": "eq",
+          "value": "{{mgr2_code}}"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "branch_use",
+          "op": "eq",
+          "value": "{{br1_code}},{{br2_code}}"
+        },
+        {
+          "col": "latitude",
+          "op": "eq",
+          "value": "13.756331"
+        },
+        {
+          "col": "longitude",
+          "op": "eq",
+          "value": "100.600001"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "หน้าจอแสดงลองจิจูดที่แก้แล้ว",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_longitude",
+      "value": "100.600001",
+      "continueOnFail": true
+    },
+    {
+      "title": "หน้าจอแสดงผู้จัดการคลังคนที่สอง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] >> xpath=.//label[normalize-space(.)=\"ผู้จัดการคลัง:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{mgr2_code}}~{{mgr2_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปุ่มดินสอแก้ไขแถว B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"แก้ไขรายการ UAT{{run.short}}W2\"]"
+    },
+    {
+      "title": "ระบบถามว่าต้องการ Lock รายการก่อนแก้ไขหรือไม่ (ดินสอ)",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการ Lock รายการนี้ก่อนแก้ไขหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงเข้าโหมดแก้ไข B",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "หน้าจอโหลดข้อมูล B",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_code",
+      "value": "UAT{{run.short}}W2",
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหา สาขา B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"สาขา\"]"
+    },
+    {
+      "title": "พิมพ์รหัสค้นหา สาขา B",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{br2_code}}"
+    },
+    {
+      "title": "เลือกรายการ {{br2_code}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tbody tr:has(td[data-col-key=\"code\"]:text-is(\"{{br2_code}}\"))"
+    },
+    {
+      "title": "ช่อง สาขา B แสดงรหัสและชื่อ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] >> xpath=.//label[normalize-space(.)=\"สาขา:\"]/following-sibling::*[1]/descendant-or-self::*[self::textarea or self::input or self::select][1]",
+      "value": "{{br2_code}}~{{br2_name}}",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดบันทึก B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"บันทึกข้อมูล\"]"
+    },
+    {
+      "title": "กดตกลง (บันทึก B)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: B มีสาขาตามที่เลือก ส่วนอื่นยังว่าง",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(fax,'') as fax, coalesce(user_group,'') as user_group, coalesce(wh_manager,'') as wh_manager, coalesce(branch_code,'') as branch_code, coalesce(branch_use,'') as branch_use, coalesce(latitude,0)::numeric(12,6)::text as latitude, coalesce(longitude,0)::numeric(12,6)::text as longitude, coalesce(status,0) as status from ic_warehouse where code = 'UAT' || :'run_short' || 'W2'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_1",
+          "op": "eq",
+          "value": "คลังสองทดสอบ BETA {{run.short}}"
+        },
+        {
+          "col": "branch_code",
+          "op": "eq",
+          "value": "{{br2_code}}"
+        },
+        {
+          "col": "wh_manager",
+          "op": "eq",
+          "value": ""
+        },
+        {
+          "col": "address",
+          "op": "eq",
+          "value": ""
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกแถว A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W1\"])"
+    },
+    {
+      "title": "กดแก้ไขข้อมูล A อีกครั้ง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"แก้ไขข้อมูล\"]"
+    },
+    {
+      "title": "ระบบถามว่าต้องการ Lock รายการก่อนแก้ไขหรือไม่",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการ Lock รายการนี้ก่อนแก้ไขหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงเข้าโหมดแก้ไข",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ช่องชื่อพร้อมแก้ไข (ไม่ถูกล็อก)",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_name_1:not([disabled])",
+      "continueOnFail": true
+    },
+    {
+      "title": "แก้โทรสารแต่ยังไม่บันทึก",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_fax",
+      "value": "ต้องไม่ถูกบันทึก"
+    },
+    {
+      "title": "คลิกแถว B ขณะมีข้อมูลค้าง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W2\"])"
+    },
+    {
+      "title": "ระบบถามก่อนยกเลิกการแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "มีการแก้ไขข้อมูลบางส่วน",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกยกเลิก (อยู่ที่เดิม)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ยกเลิก\")"
+    },
+    {
+      "title": "ข้อความที่แก้ค้างไว้ยังอยู่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_fax",
+      "value": "ต้องไม่ถูกบันทึก",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดปิดหน้าจอ (ยกเลิกการแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"ปิดหน้าจอ / ยกเลิกการแก้ไข (Esc)\"]"
+    },
+    {
+      "title": "ระบบถามก่อนทิ้งการแก้ไข",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "มีการแก้ไขข้อมูลบางส่วน",
+      "continueOnFail": true
+    },
+    {
+      "title": "เลือกตกลง (ทิ้งการแก้ไข)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "โทรสารกลับเป็นค่าที่บันทึกไว้",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] #wh_fax",
+      "value": "02-555-0102",
+      "continueOnFail": true
+    },
+    {
+      "title": "DB: โทรสารของ A ไม่ถูกเปลี่ยนโดยการแก้ค้าง",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(fax,'') as fax, coalesce(user_group,'') as user_group, coalesce(wh_manager,'') as wh_manager, coalesce(branch_code,'') as branch_code, coalesce(branch_use,'') as branch_use, coalesce(latitude,0)::numeric(12,6)::text as latitude, coalesce(longitude,0)::numeric(12,6)::text as longitude, coalesce(status,0) as status from ic_warehouse where code = 'UAT' || :'run_short' || 'W1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "fax",
+          "op": "eq",
+          "value": "02-555-0102"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "สร้างแถวอ้างอิงที่เก็บของในคลัง A (รหัสชั้นวางและสินค้า UAT ของรอบนี้) เพื่อทดสอบการกันลบ",
+      "do": "db.exec",
+      "sql": "insert into ic_wh_shelf (wh_code, shelf_code, ic_code) values ('UAT' || :'run_short' || 'W1', 'UAT' || :'run_short' || 'SH', 'UAT' || :'run_short' || 'ITEM')",
+      "affected": 1
+    },
+    {
+      "title": "คลิกแถว A",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W1\"])"
+    },
+    {
+      "title": "กดลบรายการ A ที่ถูกใช้งานอยู่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "ระบบไม่ให้ลบเพราะมีการใช้งานแล้ว",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "มีการใช้งานรหัสดังกล่าวไปแล้ว",
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพกันลบคลังที่ถูกใช้งาน",
+      "do": "ui.screenshot",
+      "name": "wh-delete-blocked"
+    },
+    {
+      "title": "กดตกลง",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: A ยังอยู่หลังถูกกันลบ",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(fax,'') as fax, coalesce(user_group,'') as user_group, coalesce(wh_manager,'') as wh_manager, coalesce(branch_code,'') as branch_code, coalesce(branch_use,'') as branch_use, coalesce(latitude,0)::numeric(12,6)::text as latitude, coalesce(longitude,0)::numeric(12,6)::text as longitude, coalesce(status,0) as status from ic_warehouse where code = 'UAT' || :'run_short' || 'W1'",
+      "rows": 1,
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบแถวอ้างอิงที่เก็บของที่สร้างไว้",
+      "do": "db.exec",
+      "sql": "delete from ic_wh_shelf where shelf_code = 'UAT' || :'run_short' || 'SH'",
+      "affected": 1
+    },
+    {
+      "title": "DB: ไม่เหลือแถวอ้างอิงที่เก็บของ",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_wh_shelf where shelf_code = 'UAT' || :'run_short' || 'SH'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "คลิกแถว B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W2\"])"
+    },
+    {
+      "title": "กดลบรายการ B",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันการลบ B",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการลบ [UAT{{run.short}}W2] จริงหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดยกเลิกการลบก่อน",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ยกเลิก\")"
+    },
+    {
+      "title": "DB: ยกเลิกการลบแล้ว B ยังอยู่",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(fax,'') as fax, coalesce(user_group,'') as user_group, coalesce(wh_manager,'') as wh_manager, coalesce(branch_code,'') as branch_code, coalesce(branch_use,'') as branch_use, coalesce(latitude,0)::numeric(12,6)::text as latitude, coalesce(longitude,0)::numeric(12,6)::text as longitude, coalesce(status,0) as status from ic_warehouse where code = 'UAT' || :'run_short' || 'W2'",
+      "rows": 1,
+      "continueOnFail": true
+    },
+    {
+      "title": "กดลบรายการ B อีกครั้ง",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] button[title=\"ลบรายการ\"]"
+    },
+    {
+      "title": "กดตกลงยืนยันการลบ",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "ระบบแจ้งลบสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ลบข้อมูลเสร็จเรียบร้อย",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลง (ลบ B สำเร็จ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: B ถูกลบ ไม่เหลือแถว",
+      "do": "db.query",
+      "sql": "select code, coalesce(name_1,'') as name_1, coalesce(name_2,'') as name_2, coalesce(address,'') as address, coalesce(telephone,'') as telephone, coalesce(fax,'') as fax, coalesce(user_group,'') as user_group, coalesce(wh_manager,'') as wh_manager, coalesce(branch_code,'') as branch_code, coalesce(branch_use,'') as branch_use, coalesce(latitude,0)::numeric(12,6)::text as latitude, coalesce(longitude,0)::numeric(12,6)::text as longitude, coalesce(status,0) as status from ic_warehouse where code = 'UAT' || :'run_short' || 'W2'",
+      "rows": 0,
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว B หายจากรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W2\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ติ๊กเลือกแถว A ในรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W1\"]) td[data-col-key=\"__check__\"]"
+    },
+    {
+      "title": "กดปุ่มลบรายการที่เลือกในรายการซ้าย",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-testid=\"sml-nav-delete-btn\"]"
+    },
+    {
+      "title": "ระบบถามยืนยันการลบ A",
+      "do": "ui.expectText",
+      "selector": "[role=dialog]",
+      "text": "ต้องการลบ [UAT{{run.short}}W1] จริงหรือไม่",
+      "continueOnFail": true
+    },
+    {
+      "title": "กดตกลงยืนยันการลบ",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "กดตกลง (ลบ A สำเร็จ)",
+      "do": "ui.click",
+      "selector": "[role=dialog] button:has-text(\"ตกลง\")"
+    },
+    {
+      "title": "DB: A ถูกลบ ไม่เหลือแถวของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_warehouse where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "แถว A หายจากรายการ",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_ic_wh\"] [data-datalist-panel] tbody tr:has(button[title=\"แก้ไขรายการ UAT{{run.short}}W1\"])",
+      "visible": false,
+      "continueOnFail": true
+    },
+    {
+      "title": "ลบแล้วไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/",
+        "openstreetmap",
+        "arcgisonline",
+        "unpkg",
+        "leaflet",
+        "cdnjs",
+        "jsdelivr",
+        "nominatim"
+      ],
+      "continueOnFail": true
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบแถวอ้างอิงที่เก็บของที่ค้าง (ชั้นวาง UAT ของรอบนี้)",
+      "do": "db.exec",
+      "sql": "delete from ic_wh_shelf where shelf_code = 'UAT' || :'run_short' || 'SH'"
+    },
+    {
+      "title": "ลบคลังของสคริปต์นี้ที่ค้างจากรอบนี้หรือรอบที่ถูกขัดจังหวะ (รหัสรูปแบบ UAT+6 ตัว+W1/W2 เท่านั้น)",
+      "do": "db.exec",
+      "sql": "delete from ic_warehouse where code ~ '^UAT[0-9A-Z]{6}W[12]$'"
+    },
+    {
+      "title": "DB: ไม่เหลือคลังของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_warehouse where code like 'UAT' || :'run_short' || '%'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "DB: ไม่เหลือแถวอ้างอิงที่เก็บของของรอบนี้",
+      "do": "db.query",
+      "sql": "select count(*) as cnt from ic_wh_shelf where shelf_code = 'UAT' || :'run_short' || 'SH'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "cnt",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

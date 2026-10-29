@@ -1,0 +1,1514 @@
+{
+ "module": "reports",
+ "lens": "screen",
+ "severityOnFail": "S1",
+ "timeoutMs": 900000,
+ "id": "ui-rpt-stock-movement",
+ "title": "รายงานเคลื่อนไหวสินค้า + รายงานยอดคงเหลือสินค้า บนหน้าจอ: รับเข้า 5 ขายออก 2 คงเหลือ 3 ตรงทุกเงื่อนไข และพิมพ์ PDF",
+ "description": "เลือกสินค้าจริงที่ยังไม่เคยมีความเคลื่อนไหว (สุ่มตามรอบ) แล้วบันทึกใบซื้อเชื่อ PU เมื่อวาน 5 หน่วย (ผู้จำหน่าย/ราคาทุนจากใบซื้อจริงล่าสุด) และบิลขายเชื่อ SI วันนี้ 2 หน่วย (ลูกค้า/ราคา/คลัง/ที่เก็บจากบิลขายจริงล่าสุด) · เปิด menu_item_transfer ผ่านหน้าจอ: ช่วงวันที่ จาก-ถึงรหัสสินค้า คำค้นหา คลัง พื้นที่เก็บ ช่วงรหัสสินค้าเพิ่มเติม แสดงหมายเหตุ → จำนวนเพิ่ม 5 / ลด 2 / ยอดคงเหลือสะสม 5 แล้ว 3, รวมท้ายตารางยอดคงเหลือต้องเป็นยอดปลายงวด 3 (ไม่ใช่ผลรวมยอดสะสม), เริ่มวันนี้ต้องมีแถวยอดยกมา 5, เงื่อนไขที่ไม่ตรงต้องตัดออก, เรียงตามยอดคงเหลือ, จัดกลุ่มตามสินค้า, พิมพ์ PDF · menu_item_balance: ณ วันนี้ 3 หน่วย มูลค่า 3×ราคาทุน, ณ เมื่อวาน 5 หน่วย, ก่อนมีเอกสารไม่มีแถวจนติ๊กแสดงยอดศูนย์, แยกคลัง/ที่เก็บ · ลบเอกสารผ่าน API แล้วตรวจว่าไม่เหลือแถว",
+ "steps": [
+  {
+   "title": "กำหนดเลขใบซื้อทดสอบ (รับเข้า)",
+   "do": "set",
+   "name": "pu",
+   "value": "UAT-{{run.short}}-STP"
+  },
+  {
+   "title": "กำหนดเลขบิลขายทดสอบ (ขายออก)",
+   "do": "set",
+   "name": "si",
+   "value": "UAT-{{run.short}}-STS"
+  },
+  {
+   "title": "เก็บรหัสรอบสำหรับสุ่มสินค้า",
+   "do": "set",
+   "name": "rs",
+   "value": "{{run.short}}"
+  },
+  {
+   "title": "วันที่วันนี้/เมื่อวาน/เดือนก่อน (ปฏิทินไทย พ.ศ. สำหรับช่องวันที่)",
+   "do": "db.query",
+   "sql": "with b as (select (now() at time zone 'Asia/Bangkok')::date d), x as (select d, d - 1 as y, (date_trunc('month', d) - interval '1 month')::date as pf, (date_trunc('month', d)::date - 1) as pt, (date_trunc('month', d) + interval '1 month')::date as nf, (date_trunc('month', d) + interval '2 month')::date - 1 as nt from b) select to_char(d, 'YYYY-MM-DD') as today, to_char(d, 'DD/MM/') || (extract(year from d)::int + 543) as today_th, to_char(y, 'DD/MM/') || (extract(year from y)::int + 543) as yday_th, to_char(pf, 'DD/MM/') || (extract(year from pf)::int + 543) as pm_from_th, to_char(pt, 'DD/MM/') || (extract(year from pt)::int + 543) as pm_to_th, to_char(nf, 'DD/MM/') || (extract(year from nf)::int + 543) as nm_from_th, to_char(nt, 'DD/MM/') || (extract(year from nt)::int + 543) as nm_to_th, to_char(y, 'YYYY-MM-DD') as yday from x",
+   "rows": 1,
+   "save": {
+    "today": "today",
+    "today_th": "today_th",
+    "yday_th": "yday_th",
+    "pm_from_th": "pm_from_th",
+    "pm_to_th": "pm_to_th",
+    "nm_from_th": "nm_from_th",
+    "nm_to_th": "nm_to_th",
+    "yday": "yday"
+   }
+  },
+  {
+   "title": "วันที่ 2 วันก่อน (ก่อนมีเอกสารทดสอบ)",
+   "do": "db.query",
+   "sql": "select to_char((now() at time zone 'Asia/Bangkok')::date - 2, 'DD/MM/') || (extract(year from (now() at time zone 'Asia/Bangkok')::date - 2)::int + 543) as d2ago_th",
+   "rows": 1,
+   "save": {
+    "d2ago_th": "d2ago_th"
+   }
+  },
+  {
+   "title": "เลือกสินค้าจริงที่ยังไม่เคยมีความเคลื่อนไหว หน่วยมาตรฐานอัตรา 1:1 (สุ่มตามรอบ)",
+   "do": "db.query",
+   "sql": "select i.code as item, i.unit_standard as unit, u.stand_value::text as stand, u.divide_value::text as divide from ic_inventory i join ic_unit_use u on u.ic_code = i.code and u.code = i.unit_standard where coalesce(i.item_type, 0) = 0 and coalesce(i.tax_type, 0) = 0 and i.code not like 'UAT%' and i.code ~ '^[A-Za-z0-9._/-]+$' and coalesce(nullif(i.unit_cost, ''), i.unit_standard) = i.unit_standard and u.stand_value > 0 and u.stand_value = u.divide_value and not exists (select 1 from ic_trans_detail d where d.item_code = i.code) order by md5(i.code || :'rs') limit 1",
+   "rows": 1,
+   "save": {
+    "item": "item",
+    "unit": "unit",
+    "stand": "stand",
+    "divide": "divide"
+   }
+  },
+  {
+   "title": "เลือกผู้จำหน่าย/ราคาทุน/อัตราภาษีจากใบซื้อเชื่อจริงล่าสุด",
+   "do": "db.query",
+   "sql": "select t.cust_code as supp, '^' || regexp_replace(t.cust_code, '(.)', '\\1' || chr(8203) || '*', 'g') as supp_rx, coalesce(nullif(t.doc_format_code, ''), 'PU') as pu_fmt, d.price::text as pu_price, t.vat_rate::text as pu_rate from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag join ap_supplier s on s.code = t.cust_code where t.trans_flag = 12 and t.inquiry_type = 0 and t.vat_type = 0 and t.vat_rate > 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 and d.price > 0 and d.price = round(d.price, 2) order by t.doc_date desc, t.roworder desc limit 1",
+   "rows": 1,
+   "save": {
+    "supp": "supp",
+    "supp_rx": "supp_rx",
+    "pu_fmt": "pu_fmt",
+    "pu_price": "pu_price",
+    "pu_rate": "pu_rate"
+   }
+  },
+  {
+   "title": "เลือกลูกค้า/ราคาขาย/คลัง/ที่เก็บ/อัตราภาษีจากบิลขายเชื่อจริงล่าสุด",
+   "do": "db.query",
+   "sql": "select t.cust_code as cust, '^' || regexp_replace(t.cust_code, '(.)', '\\1' || chr(8203) || '*', 'g') as cust_rx, coalesce(nullif(t.doc_format_code, ''), 'SI') as si_fmt, d.price::text as si_price, t.vat_rate::text as si_rate, d.wh_code as wh, d.shelf_code as shelf from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag join ar_customer c on c.code = t.cust_code join ic_shelf sh on sh.code = d.shelf_code and sh.whcode = d.wh_code where t.trans_flag = 44 and t.inquiry_type = 0 and t.vat_type = 0 and t.vat_rate > 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 and d.price > 0 and d.price = round(d.price, 2) and d.wh_code ~ '^[A-Za-z0-9._-]+$' and d.shelf_code ~ '^[A-Za-z0-9._-]+$' order by t.doc_date desc, t.roworder desc limit 1",
+   "rows": 1,
+   "save": {
+    "cust": "cust",
+    "cust_rx": "cust_rx",
+    "si_fmt": "si_fmt",
+    "si_price": "si_price",
+    "si_rate": "si_rate",
+    "wh": "wh",
+    "shelf": "shelf"
+   }
+  },
+  {
+   "title": "คำนวณยอดที่คาด: ซื้อ 5 × ราคาทุน, ขาย 2 × ราคาขาย, คงเหลือ 3 × ราคาทุน (ทุนเฉลี่ยมีใบซื้อใบเดียว)",
+   "do": "db.query",
+   "sql": "with c as (select round(5 * :'pu_price'::numeric, 2) as pb, round(2 * :'si_price'::numeric, 2) as sb) select pb::text as pu_base, round(pb * :'pu_rate'::numeric / 100, 2)::text as pu_vat, sb::text as si_base, round(sb * :'si_rate'::numeric / 100, 2)::text as si_vat, round(3 * :'pu_price'::numeric, 2)::text as val3, pb::text as val5, to_char(round(3 * :'pu_price'::numeric, 2), 'FM999,999,999,990.00') as val3_f from c",
+   "rows": 1,
+   "save": {
+    "pu_base": "pu_base",
+    "pu_vat": "pu_vat",
+    "si_base": "si_base",
+    "si_vat": "si_vat",
+    "val3": "val3",
+    "val5": "val5",
+    "val3_f": "val3_f"
+   }
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "บันทึกใบซื้อเชื่อ PU เมื่อวาน รับเข้า 5 หน่วย",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/save",
+   "body": {
+    "isNew": true,
+    "confirmed": true,
+    "docNo": "{{pu}}",
+    "docDate": "{{yday}}",
+    "transType": 1,
+    "transFlag": 12,
+    "inquiryType": 0,
+    "custCode": "{{supp}}",
+    "docFormatCode": "{{pu_fmt}}",
+    "taxDocNo": "{{pu}}",
+    "taxDocDate": "{{yday}}",
+    "vatType": 0,
+    "vatRate": "{{pu_rate}}",
+    "remark": "UAT-{{run.short}}-RMK",
+    "lines": [
+     {
+      "itemCode": "{{item}}",
+      "unitCode": "{{unit}}",
+      "whCode": "{{wh}}",
+      "shelfCode": "{{shelf}}",
+      "standValue": "{{stand}}",
+      "divideValue": "{{divide}}",
+      "qty": "5",
+      "price": "{{pu_price}}",
+      "sumAmount": "{{pu_base}}",
+      "taxType": 0
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "data.docNo",
+     "op": "eq",
+     "value": "{{pu}}"
+    }
+   ]
+  },
+  {
+   "title": "บันทึกบิลขายเชื่อ SI วันนี้ ขายออก 2 หน่วย",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/save",
+   "body": {
+    "isNew": true,
+    "confirmed": true,
+    "docNo": "{{si}}",
+    "docDate": "{{today}}",
+    "transType": 2,
+    "transFlag": 44,
+    "inquiryType": 0,
+    "custCode": "{{cust}}",
+    "docFormatCode": "{{si_fmt}}",
+    "taxDocNo": "{{si}}",
+    "taxDocDate": "{{today}}",
+    "vatType": 0,
+    "vatRate": "{{si_rate}}",
+    "remark": "UAT-{{run.short}}-RMK",
+    "lines": [
+     {
+      "itemCode": "{{item}}",
+      "unitCode": "{{unit}}",
+      "whCode": "{{wh}}",
+      "shelfCode": "{{shelf}}",
+      "standValue": "{{stand}}",
+      "divideValue": "{{divide}}",
+      "qty": "2",
+      "price": "{{si_price}}",
+      "sumAmount": "{{si_base}}",
+      "taxType": 0
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "data.docNo",
+     "op": "eq",
+     "value": "{{si}}"
+    }
+   ]
+  },
+  {
+   "title": "บรรทัดสินค้าในฐานข้อมูล: มีเฉพาะเอกสารทดสอบ 2 บรรทัด จำนวน 5 และ 2 ที่คลัง/ที่เก็บเดียวกัน",
+   "do": "db.query",
+   "sql": "select count(*) as n, coalesce(sum(qty) filter (where trans_flag = 12), 0)::text as q_in, coalesce(sum(qty) filter (where trans_flag = 44), 0)::text as q_out, count(*) filter (where wh_code = :'wh' and shelf_code = :'shelf' and doc_no in (:'pu', :'si')) as at_wh from ic_trans_detail where item_code = :'item' and coalesce(last_status, 0) = 0",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "n",
+     "op": "eq",
+     "value": "2"
+    },
+    {
+     "col": "q_in",
+     "op": "eq",
+     "value": "5"
+    },
+    {
+     "col": "q_out",
+     "op": "eq",
+     "value": "2"
+    },
+    {
+     "col": "at_wh",
+     "op": "eq",
+     "value": "2"
+    }
+   ]
+  },
+  {
+   "title": "เปิดเมนู รายงานเคลื่อนไหวสินค้า",
+   "do": "ui.openMenu",
+   "key": "menu_item_transfer"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสสินค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{item}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสสินค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{item}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = รหัสสินค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{item}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางชั้นเดียว (ไม่แยกหัวกลุ่ม)",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวม 2 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(2 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ stock-movement-flat",
+   "do": "ui.screenshot",
+   "name": "stock-movement-flat",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงค่าเริ่มต้นตามวันที่: แถวแรกคือใบซื้อ (เมื่อวาน)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{pu}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แถวที่สองคือบิลขาย (วันนี้)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr >> nth=1",
+   "op": "contains",
+   "text": "{{si}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบซื้อ: รหัสสินค้า",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\") >> td >> nth=1",
+   "op": "eq",
+   "text": "{{item}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบซื้อ: ประเภทรายวัน ซื้อสินค้า",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\") >> td >> nth=4",
+   "op": "matches",
+   "text": "^ซ\\u200b*ื\\u200b*้\\u200b*อ\\u200b*ส\\u200b*ิ\\u200b*น\\u200b*ค\\u200b*้\\u200b*า$",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบซื้อ: เลขที่เอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\") >> td >> nth=5",
+   "op": "eq",
+   "text": "{{pu}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบซื้อ: ชื่อลูกค้า/เจ้าหนี้ มีรหัสผู้จำหน่าย",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\") >> td >> nth=6",
+   "op": "matches",
+   "text": "{{supp_rx}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบซื้อ: คลัง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{wh}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบซื้อ: พื้นที่เก็บ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\") >> td >> nth=8",
+   "op": "eq",
+   "text": "{{shelf}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบซื้อ: จำนวนเพิ่ม 5",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\") >> td >> nth=10",
+   "op": "eq",
+   "text": "5",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบซื้อ: จำนวนลด ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\") >> td >> nth=11",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ใบซื้อ: ยอดคงเหลือสะสม 5",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\") >> td >> nth=12",
+   "op": "eq",
+   "text": "5",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บิลขาย: ประเภทรายวัน ขายสินค้า/บริการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{si}}\") >> td >> nth=4",
+   "op": "matches",
+   "text": "^ข\\u200b*า\\u200b*ย\\u200b*ส\\u200b*ิ\\u200b*น\\u200b*ค\\u200b*้\\u200b*า\\u200b*\\/\\u200b*บ\\u200b*ร\\u200b*ิ\\u200b*ก\\u200b*า\\u200b*ร$",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บิลขาย: ชื่อลูกค้า/เจ้าหนี้ มีรหัสลูกค้า",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{si}}\") >> td >> nth=6",
+   "op": "matches",
+   "text": "{{cust_rx}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บิลขาย: จำนวนเพิ่ม ว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{si}}\") >> td >> nth=10",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บิลขาย: จำนวนลด 2",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{si}}\") >> td >> nth=11",
+   "op": "eq",
+   "text": "2",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "บิลขาย: ยอดคงเหลือสะสม 3",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{si}}\") >> td >> nth=12",
+   "op": "eq",
+   "text": "3",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมจำนวนเพิ่ม 5",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "5",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมจำนวนลด 2",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tfoot tr >> td >> nth=2",
+   "op": "eq",
+   "text": "2",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง (ตารางชั้นเดียว): ยอดคงเหลือ = ยอดปลายงวด 3 ไม่ใช่ผลรวมยอดสะสม",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tfoot tr >> td >> nth=3",
+   "op": "eq",
+   "text": "3",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "มีข้อมูล ปุ่ม ส่งออก CSV กดได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] button:has-text(\"ส่งออก CSV\"):not([disabled])",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงตาม ยอดคงเหลือ (ประมวลผลทันที)",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] select:has(option:has-text(\"ค่าเริ่มต้นตามระบบ\"))",
+   "value": "ยอดคงเหลือ",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงยอดคงเหลือน้อยไปมาก: แถวแรกคือบิลขาย (3)",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{si}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับไปเรียงค่าเริ่มต้น",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] select:has(option:has-text(\"ค่าเริ่มต้นตามระบบ\"))",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "เรียงค่าเริ่มต้นอีกครั้ง: แถวแรกคือใบซื้อ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr >> nth=0",
+   "op": "contains",
+   "text": "{{pu}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "จัดกลุ่มอัตโนมัติ (ตามสินค้า)",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "รวมกลุ่มสินค้า: จำนวนเพิ่ม 5",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{item}} (2\") >> td >> nth=1",
+   "op": "eq",
+   "text": "5",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รวมกลุ่มสินค้า: จำนวนลด 2",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{item}} (2\") >> td >> nth=2",
+   "op": "eq",
+   "text": "2",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "รวมกลุ่มสินค้า: ยอดคงเหลือปลายงวด 3",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{item}} (2\") >> td >> nth=3",
+   "op": "eq",
+   "text": "3",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง (จัดกลุ่ม): ยอดคงเหลือ 3",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tfoot tr >> td >> nth=3",
+   "op": "eq",
+   "text": "3",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ stock-movement-group",
+   "do": "ui.screenshot",
+   "name": "stock-movement-group",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับเป็นตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "ติ๊ก แสดงหมายเหตุ",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] label:has-text(\"แสดงหมายเหตุ\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "แสดงหมายเหตุ: ใบซื้อมีหมายเหตุของเอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\") >> td >> nth=6",
+   "op": "eq",
+   "text": "UAT-{{run.short}}-RMK",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แสดงหมายเหตุ: บิลขายมีหมายเหตุของเอกสาร",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{si}}\") >> td >> nth=6",
+   "op": "eq",
+   "text": "UAT-{{run.short}}-RMK",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แสดงหมายเหตุ: ยอดคงเหลือบิลขายเลื่อนไป 1 คอลัมน์ ยังเป็น 3",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{si}}\") >> td >> nth=13",
+   "op": "eq",
+   "text": "3",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เอาติ๊ก แสดงหมายเหตุ ออก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] label:has-text(\"แสดงหมายเหตุ\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่ติ๊กแสดงหมายเหตุ: ไม่มีคอลัมน์หมายเหตุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table thead th:has-text(\"หมายเหตุ\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "เริ่มวันนี้: ไม่มีแถวใบซื้อ (เมื่อวาน)",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เริ่มวันนี้: แถวยอดยกมา ยอดคงเหลือ 5",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"ยอดยกมา\") >> td >> nth=12",
+   "op": "eq",
+   "text": "5",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เริ่มวันนี้: บิลขาย ยอดคงเหลือ 3",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{si}}\") >> td >> nth=12",
+   "op": "eq",
+   "text": "3",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ stock-movement-opening",
+   "do": "ui.screenshot",
+   "name": "stock-movement-opening",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับเป็นเมื่อวาน-วันนี้: ใบซื้อกลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คลัง = รหัสคลังอื่น",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"รหัสคลัง คั่นด้วย , (ว่าง = ทุกคลัง)\"]",
+   "value": "{{wh}}ZZ",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องคลัง",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"รหัสคลัง คั่นด้วย , (ว่าง = ทุกคลัง)\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "คลังไม่ตรง: ไม่มีบิลขาย",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{si}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีข้อมูล ปุ่ม ส่งออก CSV ต้องกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] button:has-text(\"ส่งออก CSV\")[disabled]",
+   "continueOnFail": true
+  },
+  {
+   "title": "คลัง = คลังของเอกสาร",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"รหัสคลัง คั่นด้วย , (ว่าง = ทุกคลัง)\"]",
+   "value": "{{wh}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องคลัง",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"รหัสคลัง คั่นด้วย , (ว่าง = ทุกคลัง)\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "คลังตรง: บิลขายกลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{si}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คลังตรง: ใบซื้อกลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างช่องคลัง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"รหัสคลัง คั่นด้วย , (ว่าง = ทุกคลัง)\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "พื้นที่เก็บ = รหัสอื่น",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"รหัสพื้นที่เก็บ คั่นด้วย , (ว่าง = ทุกที่เก็บ)\"]",
+   "value": "{{shelf}}ZZ",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องพื้นที่เก็บ",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"รหัสพื้นที่เก็บ คั่นด้วย , (ว่าง = ทุกที่เก็บ)\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "พื้นที่เก็บไม่ตรง: ไม่มีใบซื้อ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "พื้นที่เก็บ = ที่เก็บของเอกสาร",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"รหัสพื้นที่เก็บ คั่นด้วย , (ว่าง = ทุกที่เก็บ)\"]",
+   "value": "{{shelf}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องพื้นที่เก็บ",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"รหัสพื้นที่เก็บ คั่นด้วย , (ว่าง = ทุกที่เก็บ)\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "พื้นที่เก็บตรง: ใบซื้อกลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างช่องพื้นที่เก็บ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"รหัสพื้นที่เก็บ คั่นด้วย , (ว่าง = ทุกที่เก็บ)\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = (ว่าง)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = (ว่าง)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสสินค้าเพิ่มเติม = รหัสอื่น",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "value": "{{item}}Z",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องช่วงรหัสสินค้า",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสสินค้าไม่ครอบ: ไม่มีใบซื้อ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสสินค้าเพิ่มเติม = สินค้าทดสอบ (จาก..ถึง)",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "value": "{{item}}..{{item}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องช่วงรหัสสินค้า",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสสินค้าครอบ: ใบซื้อกลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ช่วงรหัสสินค้าครอบ: บิลขายกลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{si}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างช่วงรหัสสินค้าเพิ่มเติม",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder^=\"คั่นด้วย , เช่น A001..A099\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = 0",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "0",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัสสินค้าต่ำกว่ารหัสทดสอบ: ไม่มีใบซื้อ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสสินค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{item}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสสินค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{item}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = UAT-NOPE-ค่าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "UAT-NOPE-{{run.short}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหาไม่ตรง: ไม่มีใบซื้อ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\")",
+   "visible": false,
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = รหัสสินค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{item}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหาตรง: ใบซื้อกลับมา",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tbody tr:has-text(\"{{pu}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ครบทุกเงื่อนไข: รวม 2 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(2 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดแท็บ รูปแบบรายงาน (Studio)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] button:has-text(\"รูปแบบรายงาน (\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งชื่อหัวรายงานกำหนดเอง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"เช่น รายงานตรวจนับสินค้าคงคลังประจำเดือน...\"]",
+   "value": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งคำโปรยหัวกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"เช่น สำหรับฝ่ายบริหารและผู้สอบบัญชี...\"]",
+   "value": "UAT-{{run.short}}-SUB",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตั้งหมายเหตุท้ายกระดาษ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] input[placeholder=\"เช่น เอกสารภายในองค์กร ห้ามเผยแพร่...\"]",
+   "value": "UAT-{{run.short}}-FOOT",
+   "continueOnFail": true
+  },
+  {
+   "title": "หัวรายงานบนจอเปลี่ยนเป็นชื่อที่ตั้ง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] h1",
+   "op": "contains",
+   "text": "UAT-{{run.short}}-TITLE",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม พิมพ์รายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_transfer\"] button:has-text(\"พิมพ์รายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าต่างตั้งค่าหน้ากระดาษเปิด",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"][aria-label=\"หน้าต่างตั้งค่าหน้ากระดาษและพิมพ์รายงาน PDF ส่วนกลาง\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวนอน",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวนอน ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวนอน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวนอน: มีเลขเอกสาร ยอดเงิน หัว/ท้ายรายงานที่ตั้ง",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{pu}}",
+    "{{si}}",
+    "{{item}}",
+    "UAT-{{run.short}}-TITLE",
+    "UAT-{{run.short}}-SUB",
+    "UAT-{{run.short}}-FOOT"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "เลือกแนวพิมพ์ แนวตั้ง",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ปุ่ม แนวตั้ง ถูกเลือก",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button.bg-brand-600:has-text(\"แนวตั้ง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "รอสร้าง PDF ใหม่",
+   "do": "wait",
+   "ms": 2000
+  },
+  {
+   "title": "ปุ่ม ดาวน์โหลด PDF พร้อม",
+   "do": "ui.expectVisible",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+   "timeout": 90000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ดาวน์โหลด PDF แนวตั้ง: ยังมีเลขเอกสารและยอดเงินครบ",
+   "do": "ui.pdf",
+   "selector": "[role=\"dialog\"] button:has-text(\"ดาวน์โหลด PDF\")",
+   "timeout": 90000,
+   "contains": [
+    "{{pu}}",
+    "{{si}}",
+    "{{item}}",
+    "UAT-{{run.short}}-TITLE"
+   ],
+   "continueOnFail": true
+  },
+  {
+   "title": "ปิดหน้าต่างพิมพ์",
+   "do": "ui.click",
+   "selector": "[role=\"dialog\"] button:has-text(\"ปิดหน้าต่าง\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอพิมพ์ไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  },
+  {
+   "title": "เปิดเมนู รายงานยอดคงเหลือสินค้า",
+   "do": "ui.openMenu",
+   "key": "menu_item_balance"
+  },
+  {
+   "title": "ตั้งแต่วันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 0,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "จากรหัส = รหัสสินค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] input[placeholder=\"เริ่มต้น...\"]",
+   "value": "{{item}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงรหัส = รหัสสินค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] input[placeholder=\"สิ้นสุด...\"]",
+   "value": "{{item}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "คำค้นหา = รหัสสินค้าทดสอบ",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+   "value": "{{item}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ยอดคงเหลือ: รวม 1 รายการ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tfoot tr >> td >> nth=0",
+   "op": "contains",
+   "text": "(1 ",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ณ วันนี้: รหัสสินค้า",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tbody tr:has-text(\"{{item}}\") >> td >> nth=1",
+   "op": "eq",
+   "text": "{{item}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ณ วันนี้: ยอดคงเหลือ 3",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tbody tr:has-text(\"{{item}}\") >> td >> nth=4",
+   "op": "eq",
+   "text": "3",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ณ วันนี้: ต้นทุนเฉลี่ย = ราคาทุนใบซื้อ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tbody tr:has-text(\"{{item}}\") >> td >> nth=5",
+   "op": "eq",
+   "text": "{{pu_price}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ณ วันนี้: มูลค่าคงเหลือ = 3 × ราคาทุน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tbody tr:has-text(\"{{item}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{val3}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมยอดคงเหลือ 3",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tfoot tr >> td >> nth=1",
+   "op": "eq",
+   "text": "3",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ท้ายตาราง: รวมมูลค่าคงเหลือ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tfoot tr >> td >> nth=4",
+   "op": "eq",
+   "text": "{{val3}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ stock-balance-today",
+   "do": "ui.screenshot",
+   "name": "stock-balance-today",
+   "continueOnFail": true
+  },
+  {
+   "title": "มีข้อมูล ปุ่ม ส่งออก CSV กดได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] button:has-text(\"ส่งออก CSV\"):not([disabled])",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = เมื่อวาน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{yday_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ณ เมื่อวาน (ก่อนขาย): ยอดคงเหลือ 5",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tbody tr:has-text(\"{{item}}\") >> td >> nth=4",
+   "op": "eq",
+   "text": "5",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ณ เมื่อวาน: มูลค่าคงเหลือ = 5 × ราคาทุน",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tbody tr:has-text(\"{{item}}\") >> td >> nth=7",
+   "op": "eq",
+   "text": "{{val5}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = 2 วันก่อน",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{d2ago_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ไม่มีข้อมูล ปุ่ม ส่งออก CSV ต้องกดไม่ได้",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] button:has-text(\"ส่งออก CSV\")[disabled]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ติ๊ก แสดงสินค้ายอดเป็นศูนย์",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] label:has-text(\"แสดงสินค้ายอดเป็นศูนย์\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "แสดงยอดศูนย์: มีแถวสินค้าทดสอบ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tbody tr:has-text(\"{{item}}\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แสดงยอดศูนย์: ยอดคงเหลือ 0 แสดงว่าง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tbody tr:has-text(\"{{item}}\") >> td >> nth=4",
+   "op": "empty",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "เอาติ๊ก แสดงสินค้ายอดเป็นศูนย์ ออก",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] label:has-text(\"แสดงสินค้ายอดเป็นศูนย์\") input[type=\"checkbox\"]",
+   "continueOnFail": true
+  },
+  {
+   "title": "ถึงวันที่ = วันนี้",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] input[placeholder=\"DD/MM/YYYY\"]",
+   "nth": 1,
+   "value": "{{today_th}}",
+   "continueOnFail": true
+  },
+  {
+   "title": "กดปุ่ม ประมวลผลรายงาน",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] button:has-text(\"ประมวลผลรายงาน\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "คลัง = รหัสคลังอื่น",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] input[placeholder=\"รหัสคลัง คั่นด้วย , (ว่าง = ทุกคลัง)\"]",
+   "value": "{{wh}}ZZ",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องคลัง",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] input[placeholder=\"รหัสคลัง คั่นด้วย , (ว่าง = ทุกคลัง)\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางแสดง ไม่พบข้อมูลตามเงื่อนไขที่ระบุ",
+   "do": "ui.expectVisible",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่ระบุ\")",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างช่องคลัง",
+   "do": "ui.fill",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] input[placeholder=\"รหัสคลัง คั่นด้วย , (ว่าง = ทุกคลัง)\"]",
+   "value": "",
+   "continueOnFail": true
+  },
+  {
+   "title": "กด Enter ในช่องคลัง",
+   "do": "ui.press",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] input[placeholder=\"รหัสคลัง คั่นด้วย , (ว่าง = ทุกคลัง)\"]",
+   "key": "Enter",
+   "continueOnFail": true
+  },
+  {
+   "title": "ล้างคลัง: ยอดคงเหลือ 3 กลับมา",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tbody tr:has-text(\"{{item}}\") >> td >> nth=4",
+   "op": "eq",
+   "text": "3",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "กด แสดงรายละเอียดสินค้า (แยกคลัง/ที่เก็บ)",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] button:has-text(\"แสดงรายละเอียดสินค้า\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "ตารางชั้นเดียว",
+   "do": "ui.select",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] select[aria-label=\"เลือกคอลัมน์จัดกลุ่มชั้นที่ 1\"]",
+   "value": "__flat__",
+   "continueOnFail": true
+  },
+  {
+   "title": "แยกคลัง: คลัง",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tbody tr:has-text(\"{{item}}\") >> td >> nth=4",
+   "op": "eq",
+   "text": "{{wh}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แยกคลัง: พื้นที่เก็บ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tbody tr:has-text(\"{{item}}\") >> td >> nth=6",
+   "op": "eq",
+   "text": "{{shelf}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แยกคลัง: ยอดคงเหลือ 3",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tbody tr:has-text(\"{{item}}\") >> td >> nth=8",
+   "op": "eq",
+   "text": "3",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "แยกคลัง: มูลค่าคงเหลือ",
+   "do": "ui.expectText",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] table tbody tr:has-text(\"{{item}}\") >> td >> nth=11",
+   "op": "eq",
+   "text": "{{val3}}",
+   "timeout": 30000,
+   "continueOnFail": true
+  },
+  {
+   "title": "ภาพหน้าจอ stock-balance-detail",
+   "do": "ui.screenshot",
+   "name": "stock-balance-detail",
+   "continueOnFail": true
+  },
+  {
+   "title": "กลับไป สรุป",
+   "do": "ui.click",
+   "selector": "[data-workspace-tab-panel=\"menu_item_balance\"] button:has-text(\"สรุปตามเอกสาร\")",
+   "continueOnFail": true
+  },
+  {
+   "title": "หน้าจอไม่มีข้อผิดพลาดแฝง",
+   "do": "ui.expectClean",
+   "continueOnFail": true
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบบิลขายทดสอบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/delete",
+   "body": {
+    "docNo": "{{si}}",
+    "transFlag": 44
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ลบใบซื้อทดสอบ",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/trans/delete",
+   "body": {
+    "docNo": "{{pu}}",
+    "transFlag": 12
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือแถวของเอกสารทดสอบในทุกตารางที่แตะ",
+   "do": "db.query",
+   "sql": "select (select count(*) from ic_trans where doc_no in (:'si', :'pu')) + (select count(*) from ic_trans_detail where doc_no in (:'si', :'pu')) + (select count(*) from ap_ar_trans where doc_no in (:'si', :'pu')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'si', :'pu')) + (select count(*) from cb_trans where doc_no in (:'si', :'pu')) + (select count(*) from cb_trans_detail where doc_no in (:'si', :'pu')) + (select count(*) from gl_journal where doc_no in (:'si', :'pu')) + (select count(*) from gl_journal_detail where doc_no in (:'si', :'pu')) + (select count(*) from gl_journal_vat_sale where doc_no in (:'si', :'pu')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'si', :'pu')) + (select count(*) from ic_trans_shipment where doc_no in (:'si', :'pu')) as left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}

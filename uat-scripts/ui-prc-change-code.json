@@ -1,0 +1,445 @@
+{
+  "id": "ui-prc-change-code",
+  "title": "หน้าจอเปลี่ยนรหัสลูกหนี้ (เฉพาะลูกหนี้ทดสอบของเรา)",
+  "module": "master",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "สร้างลูกหนี้ทดสอบ UAT{{run.short}}1 ผ่าน API ที่หน้าจอลูกหนี้ใช้ แล้วใช้หน้าจอ menu_change_code_customer ค้นหาด้วยรหัส/ชื่อ คลิกแถวใส่รหัสเดิม ตรวจข้อความเตือน (ไม่ระบุรหัส, รหัสใหม่เหมือนเดิม, รหัสใหม่ซ้ำลูกหนี้จริง, รหัสเดิมไม่มีอยู่) ทุกกรณีฐานข้อมูลต้องไม่เปลี่ยน แล้วเปลี่ยนเป็น UAT{{run.short}}2 ตรวจ ar_customer/ar_customer_detail/master_logs และหน้าจอประวัติแก้ไขข้อมูลหลัก ประมวลผลนี้ UPDATE เฉพาะ WHERE code = รหัสเดิม (workflow.go ChangeCode) จึงกระทบแค่ลูกหนี้ของเรา",
+  "timeoutMs": 300000,
+  "steps": [
+    {
+      "title": "กำหนดรหัสลูกหนี้ทดสอบเดิม",
+      "do": "set",
+      "name": "c1",
+      "value": "UAT{{run.short}}1"
+    },
+    {
+      "title": "กำหนดรหัสลูกหนี้ทดสอบใหม่",
+      "do": "set",
+      "name": "c2",
+      "value": "UAT{{run.short}}2"
+    },
+    {
+      "title": "กำหนดชื่อลูกหนี้ทดสอบ",
+      "do": "set",
+      "name": "cname",
+      "value": "{{run.tag}} ลูกหนี้ทดสอบเปลี่ยนรหัส"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "รหัสทดสอบทั้งสองยังไม่มี และเลือกรหัสลูกหนี้จริง 1 รหัสไว้ทดสอบรหัสซ้ำ",
+      "do": "db.query",
+      "sql": "select (select count(*) from ar_customer where upper(code) in (upper(:'c1'), upper(:'c2')))::text n, (select code from ar_customer where code not like 'UAT%' and code ~ '^[A-Z0-9-]+$' order by code limit 1) realcode",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "realcode",
+          "op": "exists"
+        }
+      ],
+      "save": {
+        "realcode": "realcode"
+      }
+    },
+    {
+      "title": "สร้างลูกหนี้ทดสอบผ่าน API (คำสั่ง SQL แบบเดียวกับหน้าจอลูกหนี้)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/query/execBatch",
+      "body": {
+        "sql": [
+          "INSERT INTO ar_customer (code, name_1) VALUES ('{{c1}}', '{{cname}}')",
+          "INSERT INTO ar_customer_detail (ar_code) VALUES ('{{c1}}')"
+        ]
+      },
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        }
+      ]
+    },
+    {
+      "title": "ลูกหนี้ทดสอบอยู่ในฐานข้อมูลครบ 2 ตาราง",
+      "do": "db.query",
+      "sql": "select (select count(*) from ar_customer where code = :'c1')::text h, (select count(*) from ar_customer_detail where ar_code = :'c1')::text d",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "h",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "d",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอเปลี่ยนรหัสลูกหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_change_code_customer"
+    },
+    {
+      "title": "ปุ่มเริ่มเปลี่ยนรหัสแสดงอยู่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] button:has-text(\"เริ่มเปลี่ยนรหัส\")"
+    },
+    {
+      "title": "ค้นหาด้วยรหัสลูกหนี้ทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] div:has(> label:text-is(\"ค้นหา\")) input",
+      "value": "{{c1}}"
+    },
+    {
+      "title": "กดค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] button:has-text(\"ค้นหา\")"
+    },
+    {
+      "title": "ค้นด้วยรหัสพบ 1 แถว",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] span:has-text(\"รายการ (\")",
+      "text": "รายการ (1 แถว)",
+      "op": "eq"
+    },
+    {
+      "title": "แถวที่พบเป็นลูกหนี้ของเรา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] tbody tr",
+      "text": "{{c1}}"
+    },
+    {
+      "title": "ค้นหาด้วยชื่อบางส่วน (เลขรอบทดสอบที่อยู่ในชื่อเท่านั้น)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] div:has(> label:text-is(\"ค้นหา\")) input",
+      "value": "{{run.tag}}"
+    },
+    {
+      "title": "กดค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] button:has-text(\"ค้นหา\")"
+    },
+    {
+      "title": "ค้นด้วยชื่อพบลูกหนี้ของเรา 1 แถว",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] span:has-text(\"รายการ (\")",
+      "text": "รายการ (1 แถว)",
+      "op": "eq"
+    },
+    {
+      "title": "แถวที่พบเป็นลูกหนี้ของเรา",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] tbody tr",
+      "text": "{{c1}}"
+    },
+    {
+      "title": "ค้นหาคำที่ไม่มีอยู่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] div:has(> label:text-is(\"ค้นหา\")) input",
+      "value": "{{run.tag}}-NOPE"
+    },
+    {
+      "title": "กดค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] button:has-text(\"ค้นหา\")"
+    },
+    {
+      "title": "ไม่พบข้อมูลตามเงื่อนไข",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] td:has-text(\"ไม่พบข้อมูลตามเงื่อนไขที่เลือก\")"
+    },
+    {
+      "title": "ยังไม่ระบุรหัส กดเริ่มเปลี่ยนรหัส",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] button:has-text(\"เริ่มเปลี่ยนรหัส\")"
+    },
+    {
+      "title": "ต้องเตือนให้ระบุรหัสเดิมและรหัสใหม่",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] div.bg-rose-50",
+      "text": "กรุณาระบุรหัสเดิมและรหัสใหม่"
+    },
+    {
+      "title": "ค้นหาลูกหนี้ของเราอีกครั้ง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] div:has(> label:text-is(\"ค้นหา\")) input",
+      "value": "{{c1}}"
+    },
+    {
+      "title": "กดค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] button:has-text(\"ค้นหา\")"
+    },
+    {
+      "title": "คลิกแถวลูกหนี้ของเรา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] tbody tr:has-text(\"{{c1}}\") td:first-child"
+    },
+    {
+      "title": "คลิกแถวแล้วรหัสเดิมถูกใส่ให้อัตโนมัติ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] input[placeholder=\"รหัสลูกหนี้เดิม\"]",
+      "value": "{{c1}}"
+    },
+    {
+      "title": "ใส่รหัสใหม่เหมือนรหัสเดิม",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] input[placeholder=\"รหัสลูกหนี้ใหม่\"]",
+      "value": "{{c1}}"
+    },
+    {
+      "title": "กดเริ่มเปลี่ยนรหัส (ยืนยัน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] button:has-text(\"เริ่มเปลี่ยนรหัส\")"
+    },
+    {
+      "title": "ต้องแจ้งว่ารหัสใหม่ต้องไม่เหมือนรหัสเดิม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] div.bg-rose-50",
+      "text": "รหัสใหม่ต้องไม่เหมือนรหัสเดิม"
+    },
+    {
+      "title": "ใส่รหัสใหม่ซ้ำกับลูกหนี้จริงที่มีอยู่แล้ว",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] input[placeholder=\"รหัสลูกหนี้ใหม่\"]",
+      "value": "{{realcode}}"
+    },
+    {
+      "title": "กดเริ่มเปลี่ยนรหัส (ยืนยัน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] button:has-text(\"เริ่มเปลี่ยนรหัส\")"
+    },
+    {
+      "title": "ต้องแจ้งว่ารหัสลูกหนี้ใหม่มีอยู่แล้ว",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] div.bg-rose-50",
+      "text": "รหัสลูกหนี้ใหม่ {{realcode}} มีอยู่แล้ว"
+    },
+    {
+      "title": "ใส่รหัสเดิมที่ไม่มีอยู่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] input[placeholder=\"รหัสลูกหนี้เดิม\"]",
+      "value": "{{c1}}X"
+    },
+    {
+      "title": "ใส่รหัสใหม่ทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] input[placeholder=\"รหัสลูกหนี้ใหม่\"]",
+      "value": "{{c2}}"
+    },
+    {
+      "title": "กดเริ่มเปลี่ยนรหัส (ยืนยัน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] button:has-text(\"เริ่มเปลี่ยนรหัส\")"
+    },
+    {
+      "title": "ต้องแจ้งว่าไม่พบรหัสลูกหนี้เดิม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] div.bg-rose-50",
+      "text": "ไม่พบรหัสลูกหนี้เดิม {{c1}}X"
+    },
+    {
+      "title": "ทุกกรณีที่ถูกปฏิเสธ ฐานข้อมูลไม่เปลี่ยน (ลูกหนี้ของเรา/ลูกหนี้จริงคงเดิม ไม่มีประวัติเปลี่ยนรหัส)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ar_customer where code = :'c1')::text c1n, (select count(*) from ar_customer where upper(code) = upper(:'c2'))::text c2n, (select count(*) from ar_customer where code = :'realcode')::text realn, (select count(*) from master_logs where menu_name = 'menu_change_code_customer' and code in (:'c1', :'c2', :'realcode') and date_time > now() - interval '1 hour')::text logs",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "c1n",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "c2n",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "realn",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "logs",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ใส่รหัสเดิมเป็นลูกหนี้ของเรา",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] input[placeholder=\"รหัสลูกหนี้เดิม\"]",
+      "value": "{{c1}}"
+    },
+    {
+      "title": "รหัสใหม่ยังเป็นรหัสทดสอบใหม่",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] input[placeholder=\"รหัสลูกหนี้ใหม่\"]",
+      "value": "{{c2}}"
+    },
+    {
+      "title": "กดเริ่มเปลี่ยนรหัส (ยืนยัน)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] button:has-text(\"เริ่มเปลี่ยนรหัส\")"
+    },
+    {
+      "title": "แสดงผลเปลี่ยนรหัสเดิม → รหัสใหม่",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] header",
+      "text": "{{c1}} → {{c2}}"
+    },
+    {
+      "title": "แสดงจำนวนแถว/ตารางที่เปลี่ยน (หัวลูกหนี้ + รายละเอียดลูกหนี้)",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] header",
+      "text": "(2 แถวใน 2 ตาราง)",
+      "continueOnFail": true
+    },
+    {
+      "title": "หลังเปลี่ยนสำเร็จช่องรหัสเดิมถูกล้าง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] input[placeholder=\"รหัสลูกหนี้เดิม\"]",
+      "value": ""
+    },
+    {
+      "title": "ฐานข้อมูล: รหัสใหม่อยู่ทั้งหัวและรายละเอียด ชื่อเดิมไม่เปลี่ยน รหัสเดิมหายหมด",
+      "do": "db.query",
+      "sql": "select (select count(*) from ar_customer where code = :'c1')::text old_h, (select count(*) from ar_customer_detail where ar_code = :'c1')::text old_d, (select count(*) from ar_customer where code = :'c2' and name_1 = :'cname')::text new_h, (select count(*) from ar_customer_detail where ar_code = :'c2')::text new_d",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "old_h",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "old_d",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "new_h",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "new_d",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "มีประวัติแก้ไขข้อมูลหลัก (master_logs) รหัสใหม่ อ้างรหัสเดิม 1 รายการ",
+      "do": "db.query",
+      "sql": "select count(*)::text n from master_logs where menu_name = 'menu_change_code_customer' and function_code = 2 and code = :'c2' and convert_from(data1, 'UTF8') = :'c1'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "title": "ค้นหารหัสใหม่ในหน้าจอ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] div:has(> label:text-is(\"ค้นหา\")) input",
+      "value": "{{c2}}"
+    },
+    {
+      "title": "กดค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] button:has-text(\"ค้นหา\")"
+    },
+    {
+      "title": "ตารางแสดงลูกหนี้รหัสใหม่",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_change_code_customer\"] tbody tr",
+      "text": "{{c2}}"
+    },
+    {
+      "title": "ตรวจหน้าจอเปลี่ยนรหัสไม่มีข้อผิดพลาดแฝง (ยกเว้น 4xx จากกรณีที่ตั้งใจให้ถูกปฏิเสธ)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "change-code",
+        "status of 4\\d\\d"
+      ]
+    },
+    {
+      "title": "เปิดหน้าจอประวัติแก้ไขข้อมูลหลัก",
+      "do": "ui.openMenu",
+      "key": "menu_audit_master"
+    },
+    {
+      "title": "ค้นหาด้วยรหัสลูกหนี้ใหม่",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_audit_master\"] div:has(> label:text-is(\"ค้นหา\")) input",
+      "value": "{{c2}}"
+    },
+    {
+      "title": "กดค้นหา",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_audit_master\"] button:has-text(\"ค้นหา\")"
+    },
+    {
+      "title": "ประวัติแสดงรายการแก้ไขของรหัสใหม่",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_audit_master\"] tbody tr:has-text(\"{{c2}}\")",
+      "text": "แก้ไข"
+    },
+    {
+      "title": "ตรวจหน้าจอประวัติไม่มีข้อผิดพลาดแฝง",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบลูกหนี้ทดสอบ (ทั้งรหัสเดิมและรหัสใหม่) ผ่าน API",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/query/execBatch",
+      "body": {
+        "sql": [
+          "DELETE FROM ar_customer_detail WHERE ar_code IN ('{{c1}}', '{{c2}}')",
+          "DELETE FROM ar_customer WHERE code IN ('{{c1}}', '{{c2}}')"
+        ]
+      },
+      "expectStatus": [
+        200,
+        400,
+        403,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือลูกหนี้ทดสอบใน smldemo",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ar_customer where upper(code) in (upper(:'c1'), upper(:'c2'))) + (select count(*) from ar_customer_detail where upper(ar_code) in (upper(:'c1'), upper(:'c2'))) + (select count(*) from ar_dealer where ar_code in (:'c1', :'c2')) + (select count(*) from ar_contactor where ar_code in (:'c1', :'c2')))::text left_rows",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "left_rows",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

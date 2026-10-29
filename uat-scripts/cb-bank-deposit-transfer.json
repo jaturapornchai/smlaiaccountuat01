@@ -1,0 +1,168 @@
+{
+  "id": "cb-bank-deposit-transfer",
+  "title": "ฝากเงินสดเข้าธนาคาร แล้วโอนเงินระหว่างสมุดธนาคาร: ยอดเข้า-ออกของแต่ละสมุดและ GL ต้องตรง แล้วลบคืนไม่เหลือเศษ",
+  "module": "gl",
+  "lens": "api",
+  "severityOnFail": "S1",
+  "description": "ทำงานผ่าน API ตัวเดียวกับหน้าจอ: บันทึกฝากเงิน (401) เงินสดเข้าสมุดธนาคารเล่มแรก → บันทึกโอนเงินระหว่างธนาคาร (422) ครึ่งหนึ่งจากเล่มแรกไปเล่มที่สอง · ตรวจหัว/บรรทัดเอกสาร ยอดโอนในบรรทัด แถวรับโอน (420) ที่ระบบสร้างคู่ให้ GL ต้องลงบัญชีเงินฝากตามผังของสมุดที่เลือก และรายงาน Bank Statement ต้องแสดงเงินเข้า/เงินออกของแต่ละสมุดตรงยอด · สมุดธนาคาร/ผังบัญชีดึงจาก erp_pass_book ที่ผังบัญชีมีจริง ยอดเงินดึงจากบิลขายเงินสดจริงล่าสุด ยอดโอน = ครึ่งหนึ่ง (คำนวณใน SQL) · cleanup ลบ 422 → 401 ผ่าน API แล้วตรวจว่าไม่เหลือแถวในเอกสาร การชำระ และ GL",
+  "steps": [
+    { "title": "กำหนดเลขบันทึกฝากเงินทดสอบ", "do": "set", "name": "dm", "value": "UAT-{{run.short}}-DM" },
+    { "title": "กำหนดเลขบันทึกโอนเงินระหว่างธนาคารทดสอบ", "do": "set", "name": "tm", "value": "UAT-{{run.short}}-TM" },
+    { "title": "เข้าสู่ระบบแบบ Demo", "do": "ui.demoLogin" },
+    {
+      "title": "ดึงสมุดธนาคาร 2 เล่มที่ผังบัญชีเงินฝากมีจริง และยอดเงินจากบิลขายเงินสดจริงล่าสุด (ยอดโอน = ครึ่งหนึ่ง)",
+      "do": "db.query",
+      "sql": "with b as (select p.code, p.account_code_1 as acc from erp_pass_book p join gl_chart_of_account c on c.code = p.account_code_1 where coalesce(p.code, '') <> '' order by p.code limit 2), s as (select total_amount from ic_trans where trans_flag = 44 and inquiry_type = 1 and doc_no not like 'UAT%' and coalesce(is_cancel, 0) = 0 and last_status = 0 and total_amount > 0 order by doc_date desc, roworder desc limit 1) select (select code from b order by code limit 1) as book1, (select acc from b order by code limit 1) as acc1, (select code from b order by code offset 1 limit 1) as book2, (select acc from b order by code offset 1 limit 1) as acc2, (select round(total_amount, 2)::text from s) as amt, (select round(total_amount / 2, 2)::text from s) as trf, (select (round(total_amount, 2) - round(total_amount / 2, 2))::text from s) as left1, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today",
+      "rows": 1,
+      "expect": [
+        { "col": "book1", "op": "exists" },
+        { "col": "book2", "op": "exists" },
+        { "col": "amt", "op": "gt", "value": "0" },
+        { "col": "trf", "op": "gt", "value": "0" }
+      ],
+      "save": { "book1": "book1", "acc1": "acc1", "book2": "book2", "acc2": "acc2", "amt": "amt", "trf": "trf", "left1": "left1", "today": "today" }
+    },
+    {
+      "title": "บันทึกฝากเงิน (401) เงินสดเข้าสมุดเล่มแรก ชำระด้วยเงินสด",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true, "confirmed": true, "docNo": "{{dm}}", "docDate": "{{today}}", "transType": 2, "transFlag": 401, "inquiryType": 0,
+        "custCode": "", "docFormatCode": "DM", "remark": "{{run.tag}}",
+        "lines": [{ "itemCode": "{{book1}}", "qty": "1", "standValue": "1", "divideValue": "1", "price": "{{amt}}", "sumAmount": "{{amt}}", "taxType": 0, "remark": "{{run.tag}}" }],
+        "pay": { "cash": "{{amt}}" }
+      },
+      "expect": [{ "path": "data.docNo", "op": "eq", "value": "{{dm}}" }]
+    },
+    {
+      "title": "บันทึกฝากเงิน: ยอดหัวเอกสาร = ยอดฝาก บรรทัดเป็นสมุดเล่มแรก และแท็บชำระเป็นเงินสดเต็มจำนวน",
+      "do": "db.query",
+      "sql": "select t.total_amount, d.item_code, d.sum_amount, (select c.cash_amount from cb_trans c where c.doc_no = :'dm' and c.trans_flag = 401) as cash from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag where t.doc_no = :'dm' and t.trans_flag = 401",
+      "rows": 1,
+      "expect": [
+        { "col": "total_amount", "op": "eq", "value": "{{amt}}" },
+        { "col": "item_code", "op": "eq", "value": "{{book1}}" },
+        { "col": "sum_amount", "op": "eq", "value": "{{amt}}" },
+        { "col": "cash", "op": "eq", "value": "{{amt}}" }
+      ]
+    },
+    {
+      "title": "GL ฝากเงิน: เดบิตบัญชีเงินฝากตามผังของสมุดเล่มแรก = ยอดฝาก เครดิตบัญชีเงินสด = ยอดฝาก และสมดุล",
+      "do": "db.query",
+      "sql": "select (select count(*) from gl_journal where doc_no = :'dm') as head, count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit) filter (where account_code = :'acc1'), 0) as dr_bank, coalesce(sum(credit) filter (where account_code in (select code from gl_chart_of_account where name_1 like 'เงินสด%')), 0) as cr_cash, coalesce(sum(debit) filter (where account_code = :'acc2'), 0) as dr_other_bank from gl_journal_detail where doc_no = :'dm'",
+      "rows": 1,
+      "expect": [
+        { "col": "head", "op": "eq", "value": "1" },
+        { "col": "n", "op": "gt", "value": "0" },
+        { "col": "diff", "op": "eq", "value": "0" },
+        { "col": "dr_bank", "op": "eq", "value": "{{amt}}" },
+        { "col": "cr_cash", "op": "eq", "value": "{{amt}}" },
+        { "col": "dr_other_bank", "op": "eq", "value": "0" }
+      ]
+    },
+    {
+      "title": "รายงาน Bank Statement (ค้นเลขบันทึกฝาก): สมุดเล่มแรกมีเงินเข้า = ยอดฝาก 1 รายการ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": { "menuKey": "_menu_bank_statement", "mode": "summary", "dateFrom": "{{today}}", "dateTo": "{{today}}", "fromCode": "", "toCode": "", "orderBy": "", "keyword": "{{dm}}", "viewDetail": false },
+      "expect": [
+        { "path": "data.rows.0.รหัสสมุด", "op": "eq", "value": "{{book1}}" },
+        { "path": "data.rows.0.เลขที่เอกสาร", "op": "eq", "value": "{{dm}}" },
+        { "path": "data.rows.0.เงินเข้า", "op": "eq", "value": "{{amt}}" },
+        { "path": "data.rows.0.เงินออก", "op": "eq", "value": "0" },
+        { "path": "data.rows.1", "op": "empty" }
+      ]
+    },
+    {
+      "title": "บันทึกโอนเงินระหว่างธนาคาร (422) ครึ่งหนึ่งของยอดฝาก จากสมุดเล่มแรกไปเล่มที่สอง",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true, "confirmed": true, "docNo": "{{tm}}", "docDate": "{{today}}", "transType": 0, "transFlag": 422, "inquiryType": 0,
+        "custCode": "", "docFormatCode": "TM", "remark": "{{run.tag}}",
+        "lines": [{ "itemCode": "{{book1}}", "itemCode2": "{{book2}}", "qty": "1", "standValue": "1", "divideValue": "1", "price": "{{trf}}", "sumAmount": "{{trf}}", "taxType": 0, "remark": "{{run.tag}}" }]
+      },
+      "expect": [{ "path": "data.docNo", "op": "eq", "value": "{{tm}}" }]
+    },
+    {
+      "title": "บันทึกโอน (422): ยอดหัวเอกสารและยอดโอนในบรรทัด = ยอดโอน สมุดโอนออก/โอนเข้าถูกเล่ม",
+      "do": "db.query",
+      "sql": "select t.total_amount, d.item_code, d.item_code_2, d.sum_amount, d.transfer_amount, coalesce(d.fee_amount, 0) as fee from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag where t.doc_no = :'tm' and t.trans_flag = 422",
+      "rows": 1,
+      "expect": [
+        { "col": "total_amount", "op": "eq", "value": "{{trf}}" },
+        { "col": "item_code", "op": "eq", "value": "{{book1}}" },
+        { "col": "item_code_2", "op": "eq", "value": "{{book2}}" },
+        { "col": "sum_amount", "op": "eq", "value": "{{trf}}" },
+        { "col": "transfer_amount", "op": "eq", "value": "{{trf}}" },
+        { "col": "fee", "op": "eq", "value": "0" }
+      ]
+    },
+    {
+      "title": "ระบบสร้างแถวรับโอน (420) คู่กัน: สมุดเล่มที่สองรับเงิน = ยอดโอน",
+      "do": "db.query",
+      "sql": "select d.item_code, d.item_code_2, d.transfer_amount, (select count(*) from ic_trans h where h.doc_no = :'tm' and h.trans_flag = 420) as head from ic_trans_detail d where d.doc_no = :'tm' and d.trans_flag = 420",
+      "rows": 1,
+      "expect": [
+        { "col": "item_code", "op": "eq", "value": "{{book2}}" },
+        { "col": "item_code_2", "op": "eq", "value": "{{book1}}" },
+        { "col": "transfer_amount", "op": "eq", "value": "{{trf}}" },
+        { "col": "head", "op": "eq", "value": "1" }
+      ]
+    },
+    {
+      "title": "GL โอนเงิน: เดบิตบัญชีเงินฝากของเล่มที่สอง เครดิตบัญชีเงินฝากของเล่มแรก = ยอดโอน และสมดุล",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit) filter (where account_code = :'acc2'), 0) as dr_in, coalesce(sum(credit) filter (where account_code = :'acc1'), 0) as cr_out, coalesce(sum(debit), 0) as dr_total from gl_journal_detail where doc_no = :'tm'",
+      "rows": 1,
+      "expect": [
+        { "col": "n", "op": "gt", "value": "0" },
+        { "col": "diff", "op": "eq", "value": "0" },
+        { "col": "dr_in", "op": "eq", "value": "{{trf}}" },
+        { "col": "cr_out", "op": "eq", "value": "{{trf}}" },
+        { "col": "dr_total", "op": "eq", "value": "{{trf}}" }
+      ]
+    },
+    {
+      "title": "รายงาน Bank Statement (ค้นเลขบันทึกโอน): เล่มแรกเงินออก = ยอดโอน เล่มที่สองเงินเข้า = ยอดโอน",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": { "menuKey": "_menu_bank_statement", "mode": "summary", "dateFrom": "{{today}}", "dateTo": "{{today}}", "fromCode": "", "toCode": "", "orderBy": "", "keyword": "{{tm}}", "viewDetail": false },
+      "expect": [
+        { "path": "data.rows.0.รหัสสมุด", "op": "eq", "value": "{{book1}}" },
+        { "path": "data.rows.0.เงินเข้า", "op": "eq", "value": "0" },
+        { "path": "data.rows.0.เงินออก", "op": "eq", "value": "{{trf}}" },
+        { "path": "data.rows.1.รหัสสมุด", "op": "eq", "value": "{{book2}}" },
+        { "path": "data.rows.1.เงินเข้า", "op": "eq", "value": "{{trf}}" },
+        { "path": "data.rows.1.เงินออก", "op": "eq", "value": "0" },
+        { "path": "data.rows.2", "op": "empty" }
+      ]
+    },
+    {
+      "title": "ยอดสุทธิใน GL ของเอกสารรอบนี้: บัญชีเงินฝากเล่มแรก = ยอดฝาก − ยอดโอน, เล่มที่สอง = ยอดโอน",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit - credit) filter (where account_code = :'acc1'), 0) as net1, coalesce(sum(debit - credit) filter (where account_code = :'acc2'), 0) as net2 from gl_journal_detail where doc_no in (:'dm', :'tm')",
+      "rows": 1,
+      "expect": [
+        { "col": "net1", "op": "eq", "value": "{{left1}}" },
+        { "col": "net2", "op": "eq", "value": "{{trf}}" }
+      ]
+    }
+  ],
+  "cleanup": [
+    { "title": "ลบบันทึกโอนเงินทดสอบ (422)", "do": "api.request", "method": "POST", "path": "/api/process/trans/delete", "body": { "docNo": "{{tm}}", "transFlag": 422 }, "expectStatus": [200, 400, 404, 409, 422] },
+    { "title": "ลบบันทึกฝากเงินทดสอบ (401)", "do": "api.request", "method": "POST", "path": "/api/process/trans/delete", "body": { "docNo": "{{dm}}", "transFlag": 401 }, "expectStatus": [200, 400, 404, 409, 422] },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo (เอกสาร แถวรับโอน การชำระ GL)",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'dm', :'tm')) + (select count(*) from ic_trans_detail where doc_no in (:'dm', :'tm')) + (select count(*) from cb_trans where doc_no in (:'dm', :'tm')) + (select count(*) from cb_trans_detail where doc_no in (:'dm', :'tm')) + (select count(*) from cb_chq_list where doc_ref in (:'dm', :'tm')) + (select count(*) from gl_journal where doc_no in (:'dm', :'tm')) + (select count(*) from gl_journal_detail where doc_no in (:'dm', :'tm')) as left_rows",
+      "expect": [{ "col": "left_rows", "op": "eq", "value": "0" }]
+    }
+  ]
+}

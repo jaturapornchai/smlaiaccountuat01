@@ -1,0 +1,913 @@
+{
+  "id": "cb-ui-other-income",
+  "title": "หน้าจอรายได้อื่นๆ (ขายสด VAT แยกนอก): กรอกครบผ่านหน้าจอ ตรวจฐานข้อมูล ภาษีขาย GL รายงานภาษีขาย PDF และลบ",
+  "module": "gl",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "ทดสอบผ่านหน้าจอจริง: รายได้อื่นๆ (250) เลือกลูกค้า รหัสรายได้ พนักงานขาย ผ่านหน้าต่างค้นหา (ชื่อต้องเติมเอง) ผู้ติดต่อ เลขที่ใบกำกับ ประเภทขายสด ภาษีแยกนอก อัตราตามบิลจริง · ยอดก่อนภาษี/ภาษี/รวมบนจอต้องตรงที่คำนวณตาม round_type · แท็บรับชำระคำนวณเงินสดครบ · ตรวจหัว/บรรทัด/cb_trans/ภาษีขาย/GL · ค้นในรายการเปิดซ้ำค่าตรง เปิดหน้าต่างพิมพ์ฟอร์ม · รายงานภาษีขาย ดาวน์โหลด PDF · ลบผ่านหน้าจอแล้วเหลือ 0 แถว · ลูกค้า/ยอด/อัตรา/รหัสรายได้ดึงจากข้อมูลจริงตอนรัน",
+  "timeoutMs": 900000,
+  "steps": [
+    {
+      "title": "กำหนดเลขรายได้อื่นทดสอบ",
+      "do": "set",
+      "name": "oi",
+      "value": "UAT-{{run.short}}-UOI"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "วันที่วันนี้ (ค.ศ./พ.ศ.)",
+      "do": "db.query",
+      "sql": "select to_char(current_date, 'YYYY-MM-DD') as today, to_char(current_date, 'DD/MM/') || (extract(year from current_date)::int + 543)::text as today_be",
+      "rows": 1,
+      "save": {
+        "today": "today",
+        "today_be": "today_be"
+      }
+    },
+    {
+      "title": "ดึงลูกค้า ยอดก่อนภาษี อัตรา VAT จากบิลขาย VAT แยกนอกจริงล่าสุด (คำนวณภาษีตาม erp_option.round_type) พนักงานขายของบิลนั้น (ไม่มีใช้ผู้ใช้จริงคนแรก) และรหัสรายได้จริง",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "with s as (select t.cust_code, c.name_1 as cname, round(t.total_before_vat, 2) as base, t.vat_rate, t.sale_code from ic_trans t join ar_customer c on c.code = t.cust_code where t.trans_flag = 44 and t.doc_no not like 'UAT%' and t.vat_type = 0 and t.vat_rate > 0 and t.total_before_vat > 0 and t.last_status = 0 and t.cust_code ~ '^[A-Za-z0-9_.-]+$' and coalesce(c.name_1, '') <> '' order by t.doc_date desc, t.roworder desc limit 1),\nv as (select s.*, case when (select coalesce(round_type, 0) from erp_option limit 1) = 1 then round(s.base * s.vat_rate / 100 + 0.000001, 2) else round(round(round(round(round(round(s.base * s.vat_rate / 100, 7), 6), 5), 4), 3), 2) end as vat from s),\nu as (select code, name_1 from erp_user where code ~ '^[A-Za-z0-9_.-]+$' and coalesce(name_1, '') <> '' order by (code = (select sale_code from s)) desc, code limit 1),\ni as (select code, name_1 from erp_income_list where code ~ '^[A-Za-z0-9_.-]+$' and coalesce(name_1, '') <> '' order by code limit 1)\nselect v.cust_code as cust, v.cname, v.base::text as base, v.vat_rate::text as rate, v.vat::text as vat, (v.base + v.vat)::text as total,\n to_char(v.base, 'FM999,999,999,990.00') as base_fmt, to_char(v.vat, 'FM999,999,999,990.00') as vat_fmt, to_char(v.base + v.vat, 'FM999,999,999,990.00') as total_fmt,\n u.code as sale, i.code as inc, i.name_1 as inc_name\nfrom v cross join u cross join i",
+      "save": {
+        "cust": "cust",
+        "cname": "cname",
+        "base": "base",
+        "rate": "rate",
+        "vat": "vat",
+        "total": "total",
+        "base_fmt": "base_fmt",
+        "vat_fmt": "vat_fmt",
+        "total_fmt": "total_fmt",
+        "sale": "sale",
+        "inc": "inc",
+        "inc_name": "inc_name"
+      }
+    },
+    {
+      "title": "เปิดเมนู",
+      "do": "ui.openMenu",
+      "key": "menu_cash_income_other"
+    },
+    {
+      "title": "กดเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] button:text-is(\"เพิ่มใหม่\")"
+    },
+    {
+      "title": "หน้าจออยู่ในโหมดเพิ่มรายการใหม่",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] header span:text-is(\"เพิ่มรายการใหม่\")"
+    },
+    {
+      "title": "ระบบรันเลขที่เอกสารให้อัตโนมัติ (ไม่ว่าง)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "",
+      "op": "ne"
+    },
+    {
+      "title": "วันที่เอกสารตั้งต้น = วันนี้ (พ.ศ.)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> label:has-text(\"วันที่เอกสาร\")) input",
+      "value": "{{today_be}}"
+    },
+    {
+      "title": "กรอกเลขที่เอกสารทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{oi}}"
+    },
+    {
+      "title": "เลขที่ใบกำกับภาษีถูกเติมอัตโนมัติ (UniversalTransScreen.tsx:1825)",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] input[placeholder=\"เลขที่ใบกำกับภาษี...\"]",
+      "value": "",
+      "op": "ne"
+    },
+    {
+      "title": "เลขที่ใบกำกับภาษี = เลขที่เอกสารทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] input[placeholder=\"เลขที่ใบกำกับภาษี...\"]",
+      "value": "{{oi}}"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาลูกหนี้/ลูกค้า (ด้วยรหัส)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> label:has-text(\"ลูกหนี้/ลูกค้า:\")) > button[title=\"ค้นหา\"]",
+      "nth": 0
+    },
+    {
+      "title": "หน้าต่างค้นหาลูกหนี้/ลูกค้า (ด้วยรหัส)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาลูกหนี้/ลูกค้า (ด้วยรหัส): {{cust}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{cust}}"
+    },
+    {
+      "title": "ผลค้นหามีแถว {{cust}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{cust}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกแถว {{cust}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{cust}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "หน้าต่างค้นหาลูกหนี้/ลูกค้า (ด้วยรหัส)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสลูกค้า = ที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> label:has-text(\"ลูกหนี้/ลูกค้า:\")) > input[placeholder=\"รหัส...\"]",
+      "value": "{{cust}}"
+    },
+    {
+      "title": "ชื่อลูกค้าเติมอัตโนมัติ = ar_customer.name_1",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> label:has-text(\"ลูกหนี้/ลูกค้า:\")) > textarea",
+      "value": "{{cname}}"
+    },
+    {
+      "title": "ผู้ติดต่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> label:text-is(\"ผู้ติดต่อ:\")) > input",
+      "value": "ผู้ติดต่อ {{run.short}}"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหารหัสรายได้ แถว 1 (ด้วยรหัส)",
+      "do": "ui.click",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cash_income_other\"]//table[thead//th[normalize-space()=\"รหัสรายได้\"]]/tbody/tr[1]//button[@title=\"ค้นหาสินค้า\"]",
+      "nth": 0
+    },
+    {
+      "title": "หน้าต่างค้นหารหัสรายได้ แถว 1 (ด้วยรหัส)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหารหัสรายได้ แถว 1 (ด้วยรหัส): {{inc}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{inc}}"
+    },
+    {
+      "title": "ผลค้นหามีแถว {{inc}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{inc}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกแถว {{inc}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{inc}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "หน้าต่างค้นหารหัสรายได้ แถว 1 (ด้วยรหัส)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสรายได้ = ที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cash_income_other\"]//table[thead//th[normalize-space()=\"รหัสรายได้\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสรายได้\"]/preceding-sibling::th)+1]//input",
+      "value": "{{inc}}"
+    },
+    {
+      "title": "ชื่อรายได้เติมอัตโนมัติ = erp_income_list.name_1",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cash_income_other\"]//table[thead//th[normalize-space()=\"ชื่อรายได้\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"ชื่อรายได้\"]/preceding-sibling::th)+1]//textarea",
+      "value": "{{inc_name}}"
+    },
+    {
+      "title": "คำอธิบายรายการ",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cash_income_other\"]//table[thead//th[normalize-space()=\"คำอธิบายรายการ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"คำอธิบายรายการ\"]/preceding-sibling::th)+1]//input",
+      "value": "รายได้อื่น {{run.short}}"
+    },
+    {
+      "title": "จำนวนเงิน (ก่อนภาษี)",
+      "do": "ui.fill",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cash_income_other\"]//table[thead//th[normalize-space()=\"จำนวนเงิน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวนเงิน\"]/preceding-sibling::th)+1]//input",
+      "value": "{{base}}"
+    },
+    {
+      "title": "ออกจากช่องจำนวนเงิน",
+      "do": "ui.press",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cash_income_other\"]//table[thead//th[normalize-space()=\"จำนวนเงิน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวนเงิน\"]/preceding-sibling::th)+1]//input",
+      "key": "Tab"
+    },
+    {
+      "title": "เปิดหน้าต่างค้นหาพนักงานขาย (ด้วยรหัส)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] button[title=\"ค้นหาพนักงาน\"]",
+      "nth": 0
+    },
+    {
+      "title": "หน้าต่างค้นหาพนักงานขาย (ด้วยรหัส)เปิดขึ้น",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]"
+    },
+    {
+      "title": "พิมพ์ค้นหาพนักงานขาย (ด้วยรหัส): {{sale}}",
+      "do": "ui.fill",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "value": "{{sale}}"
+    },
+    {
+      "title": "ผลค้นหามีแถว {{sale}}",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{sale}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "เลือกแถว {{sale}}",
+      "do": "ui.click",
+      "selector": "div.fixed.inset-0.z-50 tr[data-row-index]:has(td:text-is(\"{{sale}}\"))",
+      "timeout": 20000
+    },
+    {
+      "title": "หน้าต่างค้นหาพนักงานขาย (ด้วยรหัส)ปิดหลังเลือก",
+      "do": "ui.expectVisible",
+      "selector": "div.fixed.inset-0.z-50 input[placeholder^=\"พิมพ์คำค้นหา\"]",
+      "visible": false
+    },
+    {
+      "title": "รหัสพนักงานขาย = ที่เลือก",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] input[placeholder=\"พนักงาน...\"]",
+      "value": "{{sale}}"
+    },
+    {
+      "title": "เลือกประเภท 1: ขายสด",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [role=\"radiogroup\"] > span:has(> span:text-is(\"1: ขายสด\"))"
+    },
+    {
+      "title": "ประเภท 1: ขายสด ถูกเลือก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [role=\"radiogroup\"] > span:has(> span:text-is(\"1: ขายสด\")) > input:checked"
+    },
+    {
+      "title": "เลือกภาษี 0: แยกนอก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [role=\"radiogroup\"] > span:has(> span:text-is(\"0: แยกนอก\"))"
+    },
+    {
+      "title": "ภาษี 0: แยกนอก ถูกเลือก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [role=\"radiogroup\"] > span:has(> span:text-is(\"0: แยกนอก\")) > input:checked"
+    },
+    {
+      "title": "อัตราภาษีตามบิลขายจริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] input[title=\"อัตราภาษี (%)\"]",
+      "value": "{{rate}}"
+    },
+    {
+      "title": "ออกจากช่องอัตราภาษี",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] input[title=\"อัตราภาษี (%)\"]",
+      "key": "Tab"
+    },
+    {
+      "title": "ล้างส่วนลดก่อนภาษี (กันค่าตั้งต้นของลูกค้า)",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] label:text-is(\"ส่วนลดก่อนภาษี:\") + input",
+      "value": ""
+    },
+    {
+      "title": "หมายเหตุเอกสาร",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}}"
+    },
+    {
+      "title": "ยอดเงินก่อนภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] label:text-is(\"ยอดเงินก่อนภาษี:\") + div",
+      "text": "{{base_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "ยอดภาษีมูลค่าเพิ่ม = คำนวณตาม round_type",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] label:text-is(\"ยอดภาษีมูลค่าเพิ่ม:\") + div",
+      "text": "{{vat_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "รวมมูลค่าทั้งสิ้น = ก่อนภาษี + ภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] label:has-text(\"รวมมูลค่าทั้งสิ้น:\") + div",
+      "text": "{{total_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดแท็บ การรับ/จ่ายชำระเงิน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] button:text-is(\"การรับ/จ่ายชำระเงิน\")"
+    },
+    {
+      "title": "ยอดตามเอกสาร = ยอดรวมหลังภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> span:text-is(\"1. ยอดตามเอกสาร\")) > span.font-mono",
+      "text": "{{total_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "ปุ่มคำนวณเงินสดแสดงส่วนที่เหลือ = ยอดรวม",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] button:has-text(\"คำนวณยอดเงินสด\")",
+      "text": "{{total_fmt}}"
+    },
+    {
+      "title": "กดคำนวณยอดเงินสด",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] button:has-text(\"คำนวณยอดเงินสด\")"
+    },
+    {
+      "title": "แสดงป้ายยอดชำระครบถ้วน",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] :text(\"ยอดรับ/จ่ายชำระครบถ้วนตรงตามยอดสุทธิ\")"
+    },
+    {
+      "title": "กลับแท็บรายการ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] button:text-is(\"รายการ\")"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] button:text-is(\"บันทึก\")"
+    },
+    {
+      "title": "บันทึกสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] span.whitespace-pre-line",
+      "text": "บันทึกเอกสาร {{oi}} เรียบร้อยแล้ว",
+      "timeout": 30000
+    },
+    {
+      "title": "หน้าต่างถามพิมพ์ฟอร์ม: กด ยังไม่พิมพ์",
+      "do": "ui.click",
+      "selector": "button:has-text(\"ยังไม่พิมพ์\")",
+      "optional": true,
+      "timeout": 5000
+    },
+    {
+      "title": "หน้าจอกลับเป็นโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "DB หัวเอกสาร 250: ขายสด VAT แยกนอก อัตรา ยอด ลูกค้า ผู้ติดต่อ พนักงานขาย ใบกำกับ หมายเหตุ",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "select trans_flag::text as flag, inquiry_type::text as inq, vat_type::text as vt, vat_rate::text as rate, total_before_vat::text as base, total_vat_value::text as vat, total_amount::text as total, cust_code, contactor, sale_code, tax_doc_no, to_char(tax_doc_date, 'YYYY-MM-DD') as tdd, to_char(doc_date, 'YYYY-MM-DD') as d, remark, doc_format_code as fmt from ic_trans where doc_no = :'oi'",
+      "expect": [
+        {
+          "col": "flag",
+          "op": "eq",
+          "value": "250"
+        },
+        {
+          "col": "inq",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "vt",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "base",
+          "op": "eq",
+          "value": "{{base}}"
+        },
+        {
+          "col": "vat",
+          "op": "eq",
+          "value": "{{vat}}"
+        },
+        {
+          "col": "total",
+          "op": "eq",
+          "value": "{{total}}"
+        },
+        {
+          "col": "cust_code",
+          "op": "eq",
+          "value": "{{cust}}"
+        },
+        {
+          "col": "contactor",
+          "op": "eq",
+          "value": "ผู้ติดต่อ {{run.short}}"
+        },
+        {
+          "col": "sale_code",
+          "op": "eq",
+          "value": "{{sale}}"
+        },
+        {
+          "col": "tax_doc_no",
+          "op": "eq",
+          "value": "{{oi}}"
+        },
+        {
+          "col": "tdd",
+          "op": "eq",
+          "value": "{{today}}"
+        },
+        {
+          "col": "d",
+          "op": "eq",
+          "value": "{{today}}"
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "{{run.tag}}"
+        },
+        {
+          "col": "fmt",
+          "op": "eq",
+          "value": "OI"
+        }
+      ]
+    },
+    {
+      "title": "DB บรรทัด 250: รหัส/ชื่อรายได้ คำอธิบาย ยอด",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "select item_code, item_name, remark, sum_amount::text as amt from ic_trans_detail where doc_no = :'oi' and trans_flag = 250",
+      "expect": [
+        {
+          "col": "item_code",
+          "op": "eq",
+          "value": "{{inc}}"
+        },
+        {
+          "col": "item_name",
+          "op": "eq",
+          "value": "{{inc_name}}"
+        },
+        {
+          "col": "remark",
+          "op": "eq",
+          "value": "รายได้อื่น {{run.short}}"
+        },
+        {
+          "col": "amt",
+          "op": "eq",
+          "value": "{{base}}"
+        }
+      ]
+    },
+    {
+      "title": "DB การรับเงิน: เงินสดใน cb_trans = ยอดรวม",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "select cash_amount::text as cash from cb_trans where doc_no = :'oi' and trans_flag = 250",
+      "expect": [
+        {
+          "col": "cash",
+          "op": "eq",
+          "value": "{{total}}"
+        }
+      ]
+    },
+    {
+      "title": "DB ภาษีขาย: 1 แถว ฐานภาษี อัตรา ภาษี",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "select base_caltax_amount::text as base, tax_rate::text as rate, amount::text as vat from gl_journal_vat_sale where doc_no = :'oi'",
+      "expect": [
+        {
+          "col": "base",
+          "op": "eq",
+          "value": "{{base}}"
+        },
+        {
+          "col": "rate",
+          "op": "eq",
+          "value": "{{rate}}"
+        },
+        {
+          "col": "vat",
+          "op": "eq",
+          "value": "{{vat}}"
+        }
+      ]
+    },
+    {
+      "title": "GL รายได้อื่นรับเงินสด: 1 หัว สมดุล เดบิตเงินสด = ยอดรวม เครดิตรายได้ = ก่อนภาษี เครดิตภาษีขาย = ภาษี",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "select (select count(*) from gl_journal where doc_no = :'oi')::text as head, (coalesce(sum(debit), 0) - coalesce(sum(credit), 0))::text as diff, coalesce(sum(debit) filter (where account_code in (select code from gl_chart_of_account where name_1 like 'เงินสด%')), 0)::text as dr_cash, coalesce(sum(credit) filter (where account_code like '4%'), 0)::text as cr_income, coalesce(sum(credit) filter (where account_code in (select code from gl_chart_of_account where name_1 like 'ภาษีขาย%')), 0)::text as cr_vat from gl_journal_detail where doc_no = :'oi'",
+      "expect": [
+        {
+          "col": "head",
+          "op": "eq",
+          "value": "1"
+        },
+        {
+          "col": "diff",
+          "op": "eq",
+          "value": "0"
+        },
+        {
+          "col": "dr_cash",
+          "op": "eq",
+          "value": "{{total}}"
+        },
+        {
+          "col": "cr_income",
+          "op": "eq",
+          "value": "{{base}}"
+        },
+        {
+          "col": "cr_vat",
+          "op": "eq",
+          "value": "{{vat}}"
+        }
+      ]
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงหลังบันทึก",
+      "do": "ui.expectClean"
+    },
+    {
+      "title": "เปิดเมนูใหม่",
+      "do": "ui.openMenu",
+      "key": "menu_cash_income_other"
+    },
+    {
+      "title": "ค้นเลขที่ที่ไม่มีอยู่จริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{oi}}-NONE"
+    },
+    {
+      "title": "กด Enter",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "รายการว่าง 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "ค้นเลขที่เอกสารทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{oi}}"
+    },
+    {
+      "title": "กด Enter",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบ 1 รายการ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถวเลขที่เอกสารในรายการ (เปิดแบบดูข้อมูล; ปุ่มดินสอจะเปิดโหมดแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] span[title=\"{{oi}}\"]"
+    },
+    {
+      "title": "เปิดในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{oi}}"
+    },
+    {
+      "title": "เปิดซ้ำ: รหัสลูกค้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> label:has-text(\"ลูกหนี้/ลูกค้า:\")) > input[placeholder=\"รหัส...\"]",
+      "value": "{{cust}}"
+    },
+    {
+      "title": "เปิดซ้ำ: ชื่อลูกค้า",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> label:has-text(\"ลูกหนี้/ลูกค้า:\")) > textarea",
+      "value": "{{cname}}"
+    },
+    {
+      "title": "เปิดซ้ำ: เลขที่ใบกำกับภาษี",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] input[placeholder=\"เลขที่ใบกำกับภาษี...\"]",
+      "value": "{{oi}}"
+    },
+    {
+      "title": "เปิดซ้ำ: พนักงานขาย",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] input[placeholder=\"พนักงาน...\"]",
+      "value": "{{sale}}"
+    },
+    {
+      "title": "เปิดซ้ำ: ขายสด",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [role=\"radiogroup\"] > span:has(> span:text-is(\"1: ขายสด\")) > input:checked"
+    },
+    {
+      "title": "เปิดซ้ำ: ภาษีแยกนอก",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [role=\"radiogroup\"] > span:has(> span:text-is(\"0: แยกนอก\")) > input:checked"
+    },
+    {
+      "title": "เปิดซ้ำ: รหัสรายได้",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cash_income_other\"]//table[thead//th[normalize-space()=\"รหัสรายได้\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"รหัสรายได้\"]/preceding-sibling::th)+1]//input",
+      "value": "{{inc}}"
+    },
+    {
+      "title": "เปิดซ้ำ: คำอธิบายรายการ",
+      "do": "ui.expectValue",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cash_income_other\"]//table[thead//th[normalize-space()=\"คำอธิบายรายการ\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"คำอธิบายรายการ\"]/preceding-sibling::th)+1]//input",
+      "value": "รายได้อื่น {{run.short}}"
+    },
+    {
+      "title": "เปิดซ้ำ: จำนวนเงิน (ข้อความในโหมดดู)",
+      "do": "ui.expectText",
+      "selector": "xpath=//div[@data-workspace-tab-panel=\"menu_cash_income_other\"]//table[thead//th[normalize-space()=\"จำนวนเงิน\"]]/tbody/tr[1]/td[count(ancestor::table[1]/thead/tr/th[normalize-space()=\"จำนวนเงิน\"]/preceding-sibling::th)+1]",
+      "text": "{{base_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: ยอดภาษี",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] label:text-is(\"ยอดภาษีมูลค่าเพิ่ม:\") + div",
+      "text": "{{vat_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: รวมมูลค่าทั้งสิ้น",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] label:has-text(\"รวมมูลค่าทั้งสิ้น:\") + div",
+      "text": "{{total_fmt}}",
+      "op": "eq"
+    },
+    {
+      "title": "เปิดซ้ำ: หมายเหตุ",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> label:text-is(\"หมายเหตุ:\")) > input",
+      "value": "{{run.tag}}"
+    },
+    {
+      "title": "เปิดหน้าต่างพิมพ์ฟอร์ม (ไม่กดสั่งพิมพ์ เพราะสั่งพิมพ์ = window.print + บันทึกประวัติ ไม่มีไฟล์ PDF ให้ดาวน์โหลด)",
+      "do": "ui.click",
+      "selector": "[data-testid=\"trans-open-doc-form-print-btn\"]"
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มเปิด",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "ฟอร์มอยู่ในโหมดข้อมูลที่บันทึกแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"doc-form-mode-badge-saved\"]",
+      "timeout": 30000
+    },
+    {
+      "title": "ตัวอย่างฟอร์มแสดงเลขที่เอกสาร",
+      "do": "ui.expectText",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "text": "{{oi}}",
+      "timeout": 30000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ภาพหน้าต่างพิมพ์ฟอร์ม",
+      "do": "ui.screenshot",
+      "name": "form-oi"
+    },
+    {
+      "title": "ปิดหน้าต่างพิมพ์ฟอร์ม",
+      "do": "ui.click",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"] button:has(span:text-is(\"ปิด\"))"
+    },
+    {
+      "title": "หน้าต่างพิมพ์ฟอร์มปิดแล้ว",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"global-doc-form-print-modal\"]",
+      "visible": false
+    },
+    {
+      "title": "เปิดรายงาน",
+      "do": "ui.openMenu",
+      "key": "menu_report_vat_sale"
+    },
+    {
+      "title": "ค้นเงื่อนไข {{oi}}",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] input[placeholder=\"ค้นหารหัส / ชื่อ / เงื่อนไขเพิ่มเติม...\"]",
+      "value": "{{oi}}"
+    },
+    {
+      "title": "กดประมวลผลรายงาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] button:has-text(\"ประมวลผลรายงาน\")"
+    },
+    {
+      "title": "รายงานแสดงเลขที่เอกสารทดสอบ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"]",
+      "text": "{{oi}}",
+      "timeout": 60000
+    },
+    {
+      "title": "กดพิมพ์รายงาน",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_report_vat_sale\"] button:has-text(\"พิมพ์รายงาน\")"
+    },
+    {
+      "title": "ดาวน์โหลด PDF รายงาน มีเลขที่และยอดเงินของเอกสารทดสอบ",
+      "do": "ui.pdf",
+      "selector": "button:has-text(\"ดาวน์โหลด PDF\"):not([disabled])",
+      "contains": [
+        "{{oi}}",
+        "{{base_fmt}}",
+        "{{vat_fmt}}"
+      ],
+      "timeout": 120000
+    },
+    {
+      "title": "เปิดเมนูใหม่",
+      "do": "ui.openMenu",
+      "key": "menu_cash_income_other"
+    },
+    {
+      "title": "ค้นเลขที่ที่ไม่มีอยู่จริง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{oi}}-NONE"
+    },
+    {
+      "title": "กด Enter",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "รายการว่าง 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "ค้นเลขที่เอกสารทดสอบ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{oi}}"
+    },
+    {
+      "title": "กด Enter",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "พบ 1 รายการ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "1/1",
+      "op": "eq"
+    },
+    {
+      "title": "คลิกแถวเลขที่เอกสารในรายการ (เปิดแบบดูข้อมูล; ปุ่มดินสอจะเปิดโหมดแก้ไข)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] span[title=\"{{oi}}\"]"
+    },
+    {
+      "title": "เปิดในโหมดดูข้อมูล",
+      "do": "ui.expectVisible",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] header span:text-is(\"โหมดดูข้อมูล\")"
+    },
+    {
+      "title": "เลขที่เอกสารตรง",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] div:has(> label:has-text(\"เลขที่เอกสาร\")) > input[type=\"text\"]",
+      "value": "{{oi}}"
+    },
+    {
+      "title": "กดลบ (ยืนยันอัตโนมัติ)",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] button:text-is(\"ลบ\")"
+    },
+    {
+      "title": "ลบสำเร็จ",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] span.whitespace-pre-line",
+      "text": "ลบเอกสาร {{oi}} เรียบร้อยแล้ว",
+      "timeout": 30000
+    },
+    {
+      "title": "ลบผ่านหน้าจอแล้วไม่เหลือแถว (หัว บรรทัด การรับเงิน GL ภาษีขาย)",
+      "do": "db.query",
+      "rows": 1,
+      "sql": "select ((select count(*) from ic_trans where doc_no = :'oi') + (select count(*) from ic_trans_detail where doc_no = :'oi') + (select count(*) from cb_trans where doc_no = :'oi') + (select count(*) from cb_trans_detail where doc_no = :'oi') + (select count(*) from gl_journal where doc_no = :'oi') + (select count(*) from gl_journal_detail where doc_no = :'oi') + (select count(*) from gl_journal_vat_sale where doc_no = :'oi'))::text as n",
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "title": "ค้นในรายการอีกครั้ง",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-search-input\"]",
+      "value": "{{oi}}"
+    },
+    {
+      "title": "กด Enter",
+      "do": "ui.press",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-search-input\"]",
+      "key": "Enter"
+    },
+    {
+      "title": "ไม่พบแล้ว 0/0",
+      "do": "ui.expectText",
+      "selector": "[data-workspace-tab-panel=\"menu_cash_income_other\"] [data-testid=\"sml-datalist-counter\"]",
+      "text": "0/0",
+      "op": "eq"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงตลอดการลบ",
+      "do": "ui.expectClean"
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบรายได้อื่นทดสอบ (ถ้ายังเหลือ)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": {
+        "docNo": "{{oi}}",
+        "transFlag": 250
+      },
+      "expectStatus": [
+        200,
+        400,
+        404,
+        409,
+        422
+      ]
+    },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบ",
+      "do": "db.query",
+      "sql": "select ((select count(*) from ic_trans where doc_no = :'oi') + (select count(*) from ic_trans_detail where doc_no = :'oi') + (select count(*) from cb_trans where doc_no = :'oi') + (select count(*) from cb_trans_detail where doc_no = :'oi') + (select count(*) from gl_journal where doc_no = :'oi') + (select count(*) from gl_journal_detail where doc_no = :'oi') + (select count(*) from gl_journal_vat_sale where doc_no = :'oi'))::text as n",
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": "0"
+        }
+      ]
+    }
+  ]
+}

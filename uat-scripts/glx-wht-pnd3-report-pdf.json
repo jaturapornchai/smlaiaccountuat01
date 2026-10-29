@@ -1,0 +1,336 @@
+{
+ "id": "glx-wht-pnd3-report-pdf",
+ "title": "ภาษีหัก ณ ที่จ่าย: เอกสารหัก ณ ที่จ่ายขึ้นรายงาน ภ.ง.ด.3 ยอดตรง ไม่หลุดไป ภ.ง.ด.53 และ PDF มีเลขผู้เสียภาษี/ยอดภาษี",
+ "module": "tax",
+ "lens": "api",
+ "severityOnFail": "S1",
+ "description": "บันทึกสมุดรายวันทั่วไป UAT-<รอบ>-WH พร้อมแท็บภาษีหัก ณ ที่จ่าย (whtIn, trans_flag 1502) ผ่าน POST /api/process/doc/save · ข้อมูลจริงทั้งหมด: ผู้ขายที่มีเลขผู้เสียภาษีและสถานะบุคคลธรรมดา (ap_status 0 → ภ.ง.ด.3), อัตราภาษีหัก ณ ที่จ่ายที่ตั้งไว้จริง (tms_fleet_vehicle.wht_tax_rate เพราะ erp_option.wht_rate = 0 และไม่มีตารางอัตราอื่น) ฐานภาษี = ค่าจ้างจริงของรถคันเดียวกัน (base_rate_baht) ภาษี = round(ฐาน × อัตรา ÷ 100, 2) คำนวณใน SQL · GL: เดบิตค่าใช้จ่าย = ฐาน, เครดิตเจ้าหนี้ = ฐาน − ภาษี, เครดิตภาษีหัก ณ ที่จ่ายค้างจ่าย = ภาษี (เลือกบัญชีตามกฎเดียวกับ ERP resolveChartAccount 2111… และ 2122…, service.go:1504,1579) · ตรวจ gl_wht_list/gl_wht_list_detail (ภาษี = ฐาน × อัตรา จากค่าที่เก็บ) → รายงาน menu_gl_wht_report_in_3 กรองเลขเอกสารของเรา แถวตรงทุกช่อง → menu_gl_wht_report_in_53 ต้องไม่มีแถวนี้ → PDF (ปุ่มพิมพ์) มีเลขเอกสาร เลขผู้เสียภาษี ฐานและภาษี · แยกแบบตามผู้มีเงินได้: บุคคลธรรมดา ภ.ง.ด.3 / นิติบุคคล ภ.ง.ด.53 ตามคำสั่งกรมสรรพากร ท.ป.4/2528 https://www.rd.go.th/3479.html (สคริปต์ไม่ยืนยันอัตราตามกฎหมาย อ่านอัตราจาก DB เท่านั้น) · cleanup ลบผ่าน /api/process/doc/delete (ลบแท็บภาษีด้วย) แล้วตรวจว่าไม่เหลือแถว",
+ "timeoutMs": 300000,
+ "steps": [
+  {
+   "title": "กำหนดเลขเอกสารรายวันทดสอบ",
+   "do": "set",
+   "name": "jw",
+   "value": "UAT-{{run.short}}-WH"
+  },
+  {
+   "title": "กำหนดเลขที่เอกสารหัก ณ ที่จ่ายทดสอบ",
+   "do": "set",
+   "name": "tx",
+   "value": "UAT-{{run.short}}-WT"
+  },
+  {
+   "title": "เข้าสู่ระบบแบบ Demo",
+   "do": "ui.demoLogin"
+  },
+  {
+   "title": "เลือกผู้ขาย อัตราภาษีหัก ณ ที่จ่าย ฐานภาษี บัญชี และสมุดรายวันจากข้อมูลจริง",
+   "do": "db.query",
+   "sql": "with v as (select vehicle_code, ownership_type, base_rate_baht, wht_tax_rate from tms_fleet_vehicle\n  where coalesce(wht_tax_rate, 0) > 0 and coalesce(base_rate_baht, 0) > 0 and coalesce(ownership_type, '') <> '' order by roworder desc limit 1),\ns as (select m.code, d.tax_id from ap_supplier m join ap_supplier_detail d on d.ap_code = m.code\n  where coalesce(m.ap_status, 0) = 0 and coalesce(d.tax_id, '') <> '' and (select count(*) from ap_supplier_detail x where x.ap_code = m.code) = 1 order by m.code limit 1),\nleaf as (select c.code, coalesce(c.name_1, '') nm, c.account_type t from gl_chart_of_account c where not exists (select 1 from gl_chart_of_account k where k.main_code = c.code)),\nused as (select l.code, l.nm, l.t, count(*) n from leaf l join gl_journal_detail d on d.account_code = l.code and d.doc_no not like 'UAT%' group by 1, 2, 3)\nselect to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') qd, s.code supp, s.tax_id taxid, v.ownership_type inc,\n round(v.base_rate_baht, 2)::text base, round(v.wht_tax_rate, 2)::text rate, round(round(v.base_rate_baht, 2) * v.wht_tax_rate / 100, 2)::text tax,\n to_char(round(v.base_rate_baht, 2), 'FM999,999,999,990.00') basef, to_char(round(round(v.base_rate_baht, 2) * v.wht_tax_rate / 100, 2), 'FM999,999,999,990.00') taxf,\n (round(v.base_rate_baht, 2) - round(round(v.base_rate_baht, 2) * v.wht_tax_rate / 100, 2))::text net,\n e.code exp, e.nm expname, a.code liab, a.nm liabname, w.code whacc, w.nm whname, b.code book\nfrom v, s,\n (select * from used where t = 4 order by n desc, code limit 1) e,\n (select code, coalesce(name_1, '') nm from gl_chart_of_account, (values (0, '2111'), (1, '2110'), (2, '2100')) p(o, c)\n where code = p.c or code like p.c || '-%' order by p.o, (code = p.c) desc, code limit 1) a,\n (select code, coalesce(name_1, '') nm from gl_chart_of_account, (values (0, '2122'), (1, '2123'), (2, '2120')) p(o, c)\n where code = p.c or code like p.c || '-%' order by p.o, (code = p.c) desc, code limit 1) w,\n (select code from gl_journal_book order by code limit 1) b",
+   "rows": 1,
+   "save": {
+    "qd": "qd",
+    "supp": "supp",
+    "taxid": "taxid",
+    "inc": "inc",
+    "base": "base",
+    "rate": "rate",
+    "tax": "tax",
+    "basef": "basef",
+    "taxf": "taxf",
+    "exp": "exp",
+    "expname": "expname",
+    "liab": "liab",
+    "liabname": "liabname",
+    "whacc": "whacc",
+    "whname": "whname",
+    "net": "net",
+    "book": "book"
+   }
+  },
+  {
+   "title": "บันทึกรายวันพร้อมแท็บภาษีหัก ณ ที่จ่าย",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/save",
+   "body": {
+    "kind": "gl_journal",
+    "isNew": true,
+    "docNo": "{{jw}}",
+    "docDate": "{{qd}}",
+    "transFlag": 0,
+    "bookCode": "{{book}}",
+    "docFormatCode": "JV",
+    "remark": "{{run.tag}}",
+    "glLines": [
+     {
+      "accountCode": "{{exp}}",
+      "accountName": "{{expname}}",
+      "debit": "{{base}}",
+      "credit": "0",
+      "remark": "{{run.tag}}"
+     },
+     {
+      "accountCode": "{{liab}}",
+      "accountName": "{{liabname}}",
+      "debit": "0",
+      "credit": "{{net}}",
+      "remark": "{{run.tag}}"
+     },
+     {
+      "accountCode": "{{whacc}}",
+      "accountName": "{{whname}}",
+      "debit": "0",
+      "credit": "{{tax}}",
+      "remark": "{{run.tag}}"
+     }
+    ],
+    "whtIn": [
+     {
+      "taxDocNo": "{{tx}}",
+      "dueDate": "{{qd}}",
+      "custCode": "{{supp}}",
+      "lines": [
+       {
+        "incomeType": "{{inc}}",
+        "amount": "{{base}}",
+        "taxRate": "{{rate}}",
+        "taxValue": "{{tax}}"
+       }
+      ]
+     }
+    ]
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    }
+   ]
+  },
+  {
+   "title": "หัวเอกสารหัก ณ ที่จ่าย: เลขผู้เสียภาษี ประเภทบุคคล ฐานและภาษีตรง",
+   "do": "db.query",
+   "sql": "select tax_number, coalesce(cust_tax_type, -1)::text ctype, amount::text amt, tax_value::text tv, trans_flag::text tf, tax_doc_no from gl_wht_list where doc_no = :'jw'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "tax_number",
+     "op": "eq",
+     "value": "{{taxid}}"
+    },
+    {
+     "col": "ctype",
+     "op": "eq",
+     "value": "0"
+    },
+    {
+     "col": "amt",
+     "op": "eq",
+     "value": "{{base}}"
+    },
+    {
+     "col": "tv",
+     "op": "eq",
+     "value": "{{tax}}"
+    },
+    {
+     "col": "tf",
+     "op": "eq",
+     "value": "1502"
+    },
+    {
+     "col": "tax_doc_no",
+     "op": "eq",
+     "value": "{{tx}}"
+    }
+   ]
+  },
+  {
+   "title": "รายละเอียดหัก ณ ที่จ่าย: ภาษีที่เก็บ = round(ฐาน × อัตรา ÷ 100, 2) จากค่าที่เก็บเอง",
+   "do": "db.query",
+   "sql": "select amount::text amt, tax_rate::text rate, tax_value::text tv, round(amount * tax_rate / 100, 2)::text calc, cust_code, to_char(due_date, 'YYYY-MM-DD') due from gl_wht_list_detail where doc_no = :'jw'",
+   "rows": 1,
+   "expect": [
+    {
+     "col": "amt",
+     "op": "eq",
+     "value": "{{base}}"
+    },
+    {
+     "col": "rate",
+     "op": "eq",
+     "value": "{{rate}}"
+    },
+    {
+     "col": "tv",
+     "op": "eq",
+     "value": "{{tax}}"
+    },
+    {
+     "col": "calc",
+     "op": "eq",
+     "value": "{{tax}}"
+    },
+    {
+     "col": "cust_code",
+     "op": "eq",
+     "value": "{{supp}}"
+    },
+    {
+     "col": "due",
+     "op": "eq",
+     "value": "{{qd}}"
+    }
+   ]
+  },
+  {
+   "title": "รายงาน ภ.ง.ด.3: แถวของเรามีเลขผู้เสียภาษี อัตรา ฐาน และภาษีตรง",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/report/run",
+   "body": {
+    "menuKey": "menu_gl_wht_report_in_3",
+    "mode": "summary",
+    "dateFrom": "{{qd}}",
+    "dateTo": "{{qd}}",
+    "fromCode": "{{jw}}",
+    "toCode": "{{jw}}",
+    "orderBy": "",
+    "keyword": "",
+    "viewDetail": false
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    },
+    {
+     "path": "data.rows.0.เลขที่เอกสาร",
+     "op": "eq",
+     "value": "{{jw}}"
+    },
+    {
+     "path": "data.rows.0.เลขประจำตัวผู้เสียภาษี",
+     "op": "eq",
+     "value": "{{taxid}}"
+    },
+    {
+     "path": "data.rows.0.อัตราภาษี",
+     "op": "eq",
+     "value": "{{rate}}"
+    },
+    {
+     "path": "data.rows.0.จำนวนเงิน",
+     "op": "eq",
+     "value": "{{base}}"
+    },
+    {
+     "path": "data.rows.0.ภาษีที่หัก",
+     "op": "eq",
+     "value": "{{tax}}"
+    },
+    {
+     "path": "data.rows.0.สถานะ",
+     "op": "empty"
+    },
+    {
+     "path": "data.rows.1.เลขที่เอกสาร",
+     "op": "empty"
+    },
+    {
+     "path": "data.totals.ภาษีที่หัก",
+     "op": "eq",
+     "value": "{{tax}}"
+    },
+    {
+     "path": "data.totals.จำนวนเงิน",
+     "op": "eq",
+     "value": "{{base}}"
+    }
+   ]
+  },
+  {
+   "title": "รายงาน ภ.ง.ด.53: ต้องไม่มีเอกสารของผู้ขายบุคคลธรรมดานี้",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/report/run",
+   "body": {
+    "menuKey": "menu_gl_wht_report_in_53",
+    "mode": "summary",
+    "dateFrom": "{{qd}}",
+    "dateTo": "{{qd}}",
+    "fromCode": "{{jw}}",
+    "toCode": "{{jw}}",
+    "orderBy": "",
+    "keyword": "",
+    "viewDetail": false
+   },
+   "expect": [
+    {
+     "path": "ok",
+     "op": "eq",
+     "value": true
+    },
+    {
+     "path": "data.rows.0.เลขที่เอกสาร",
+     "op": "empty"
+    }
+   ]
+  },
+  {
+   "title": "พิมพ์รายงาน ภ.ง.ด.3 เป็น PDF มีเลขเอกสาร เลขผู้เสียภาษี ฐาน และภาษี",
+   "do": "report.pdf",
+   "body": {
+    "menuKey": "menu_gl_wht_report_in_3",
+    "mode": "summary",
+    "dateFrom": "{{qd}}",
+    "dateTo": "{{qd}}",
+    "fromCode": "{{jw}}",
+    "toCode": "{{jw}}",
+    "orderBy": "",
+    "keyword": "",
+    "viewDetail": false
+   },
+   "contains": [
+    "{{jw}}",
+    "{{taxid}}",
+    "{{basef}}",
+    "{{taxf}}"
+   ]
+  }
+ ],
+ "cleanup": [
+  {
+   "title": "ลบรายวันทดสอบ (ลบแท็บภาษีหัก ณ ที่จ่ายด้วย)",
+   "do": "api.request",
+   "method": "POST",
+   "path": "/api/process/doc/delete",
+   "body": {
+    "kind": "gl_journal",
+    "docNo": "{{jw}}"
+   },
+   "expectStatus": [
+    200,
+    400,
+    404,
+    409,
+    422
+   ]
+  },
+  {
+   "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo",
+   "do": "db.query",
+   "sql": "select (select count(*) from gl_journal where doc_no = :'jw') + (select count(*) from gl_journal_detail where doc_no = :'jw') + (select count(*) from gl_journal_vat_buy where doc_no = :'jw') + (select count(*) from gl_journal_vat_sale where doc_no = :'jw') + (select count(*) from gl_wht_list_detail where doc_no = :'jw') + (select count(*) from gl_wht_list where doc_no = :'jw' or tax_doc_no = :'tx') as left_rows",
+   "expect": [
+    {
+     "col": "left_rows",
+     "op": "eq",
+     "value": "0"
+    }
+   ]
+  }
+ ]
+}
