@@ -21,12 +21,15 @@ async function ping(url: string, label: string): Promise<Check> {
 
 // ถามชื่อฐานข้อมูลที่ต่ออยู่จริงด้วย psql แบบอ่านอย่างเดียว แล้วเทียบกับรายการที่อนุญาต — รหัสผ่านส่งผ่าน env เท่านั้น
 // psql แบบอ่านอย่างเดียว (ฐาน Demo ใน .env.local) — รหัสผ่านส่งผ่าน env เท่านั้น · คืน stdout แบบ -At
-export async function psqlRead(sql: string, timeout = 8000): Promise<string> {
+export const psqlRead = (sql: string, timeout = 8000) => psql(sql, { timeout });
+
+// write:true เฉพาะ test-db.ts (สร้าง/ลบฐาน uat_*) — ที่อื่นอ่านอย่างเดียว
+export async function psql(sql: string, { db = process.env.UAT_PG_DATABASE, write = false, timeout = 8000 } = {}): Promise<string> {
   const e = process.env;
-  const { stdout } = await run(e.UAT_PSQL || "C:/Program Files/PostgreSQL/18/bin/psql.exe", ["-At", "-F", "|", "-c", sql], {
+  const { stdout } = await run(e.UAT_PSQL || "C:/Program Files/PostgreSQL/18/bin/psql.exe", ["-X", "-v", "ON_ERROR_STOP=1", "-At", "-F", "|", "-c", sql], {
     timeout,
     maxBuffer: 4 << 20,
-    env: { ...e, PGHOST: e.UAT_PG_HOST, PGPORT: e.UAT_PG_PORT || "5432", PGUSER: e.UAT_PG_USER, PGPASSWORD: e.UAT_PG_PASSWORD || "", PGDATABASE: e.UAT_PG_DATABASE, PGOPTIONS: "-c default_transaction_read_only=on" },
+    env: { ...e, PGHOST: e.UAT_PG_HOST, PGPORT: e.UAT_PG_PORT || "5432", PGUSER: e.UAT_PG_USER, PGPASSWORD: e.UAT_PG_PASSWORD || "", PGDATABASE: db, PGOPTIONS: write ? "" : "-c default_transaction_read_only=on" },
   });
   return stdout;
 }

@@ -1,0 +1,320 @@
+{
+  "id": "smoke-ap-menu-1",
+  "title": "สำรวจเปิดเมนูทุกตัว: เจ้าหนี้",
+  "module": "purchase",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 560000,
+  "description": "เปิดเมนูกลุ่ม เจ้าหนี้ 20 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดเจ้าหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_ap_detail",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดเจ้าหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู รายละเอียดเจ้าหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_ap_detail_2",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายละเอียดเจ้าหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลคู่ค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ap_partner_detail",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลคู่ค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ที่อยู่จัดส่งสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ap_transport_label",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ที่อยู่จัดส่งสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู พิมพ์ที่อยู่จัดส่งสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ap_transport_label_print",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า พิมพ์ที่อยู่จัดส่งสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู นำเข้าที่อยู่จัดส่งเจ้าหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_import_ap_transport_label",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า นำเข้าที่อยู่จัดส่งเจ้าหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ตั้งหนี้ยกมา (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_debt_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ตั้งหนี้ยกมา (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู เพิ่มหนี้ยกมา (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_increase_debt",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า เพิ่มหนี้ยกมา (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ลดหนี้ยกมา (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_cn_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ลดหนี้ยกมา (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ตั้งหนี้อื่นๆ (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_debt_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ตั้งหนี้อื่นๆ (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู เพิ่มหนี้อื่นๆ (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_increase_debt_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า เพิ่มหนี้อื่นๆ (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ลดหนี้อื่นๆ (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_cn_debt_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ลดหนี้อื่นๆ (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ใบรับวางบิล (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_pay_bill",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ใบรับวางบิล (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู จ่ายชำระหนี้ (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_debt_billing",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า จ่ายชำระหนี้ (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกรูปภาพเอกสารเจ้าหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_ap_doc_picture",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกรูปภาพเอกสารเจ้าหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกตั้งหนี้อื่นๆ (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_cancel_debt_balance_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกตั้งหนี้อื่นๆ (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกเพิ่มหนี้อื่นๆ (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_cancel_increase_debt_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกเพิ่มหนี้อื่นๆ (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกลดหนี้อื่นๆ (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_cancel_cn_debt_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกลดหนี้อื่นๆ (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกใบรับวางบิล (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_cancel_pay_bill",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกใบรับวางบิล (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกจ่ายชำระหนี้ (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_cancel_debt_billing",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกจ่ายชำระหนี้ (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

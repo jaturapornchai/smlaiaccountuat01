@@ -61,7 +61,7 @@
 6. คำสั่งผ่าน MCP (`src/app/api/mcp/route.ts`, `src/lib/mcp.ts`)
    - ปลายทาง `POST /api/mcp` (JSON-RPC) รองรับ MCP 2026-07-28 และ 2025-11-25 / 2025-06-18 / 2025-03-26
    - ยืนยันตัวด้วย `Authorization: Bearer <UAT_MCP_TOKEN>`
-   - tools 8 ตัว (คำอธิบายเป็นอังกฤษสั้น ผลลัพธ์เป็นบรรทัดสั้น เพื่อประหยัด token):
+   - tools 9 ตัว (คำอธิบายเป็นอังกฤษสั้น ผลลัพธ์เป็นบรรทัดสั้น เพื่อประหยัด token):
 
      | tool | ใช้ทำอะไร |
      |---|---|
@@ -72,6 +72,7 @@
      | `runs` | ดูรอบการรัน / ผลละเอียด / หยุด (`action:"stop"`) / ส่งเข้า IssueMate (`action:"issue"`) |
      | `events` | ฟีดเหตุการณ์แบบรอได้ (long-poll) ส่ง `after` = cursor ครั้งก่อน |
      | `notify` | ส่งข้อความขึ้นหน้าเว็บ |
+     | `test_db` | ฐานทดสอบส่วนตัวของ AI: `create` คัดลอก smldemo เป็น `uat_<ชื่อ>` (ไม่กี่วินาที สูงสุด 5 ฐาน) แล้วใช้ `database:"uat_<ชื่อ>"` ในขั้น `db.*` แก้ข้อมูลได้อิสระ · `list` · `drop` (ลบได้เฉพาะฐานที่สร้างจาก tool นี้) |
      | `command` | สั่งงานตรวจเป็นภาษาไทย (`text`, เลือก `botIds` ได้) → AI กระจายงาน เขียนสคริปต์ แล้วรันจริง |
 
    - ฝั่ง IssueMate ระบบแค่คอมเมนต์ (`converse_on_issue`) ไม่เปลี่ยนสถานะ issue
@@ -122,6 +123,7 @@
 | `UAT_PG_ALLOW_DB` | รายชื่อฐานที่อนุญาต คั่นด้วย `,` (ค่าเริ่มต้น `smldemo`) — ใส่ได้เฉพาะ `smldemo`, `smluatadmin`, `smlerpmainuatadmin` ชื่ออื่นถูกตัดทิ้ง |
 | `UAT_ADMIN_PROVIDER`, `UAT_ADMIN_USER`, `UAT_ADMIN_PASSWORD` | บัญชีผู้ดูแลระบบสำหรับ `ui.adminLogin` (ตั้งในไฟล์ env ของเซิร์ฟเวอร์เท่านั้น ห้ามใส่ในสคริปต์/หน้าเว็บ/issue) |
 | `UAT_PSQL`, `UAT_PLAYWRIGHT` | ตำแหน่ง psql.exe และ Playwright ที่มีในเครื่อง |
+| `UAT_PG_DUMP` | ตำแหน่ง pg_dump สำหรับ `runner/make-test-template.sh` (สร้างแม่แบบ `uat_template` ของ `test_db`) |
 | `UAT_HEADED` | `1` = เปิดหน้าต่าง Chrome ให้เห็น |
 | `OLLAMA_API_URL`, `OLLAMA_API_KEY` | สมองของบอท (Ollama Cloud) |
 | `OLLAMA_MODEL` | ว่างไว้ = `deepseek-v4.1-flash` |
@@ -234,6 +236,7 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 ถ้าไม่ใส่ `lens` ระบบเลือกให้เอง: มีขั้น `db.*` = data, ไม่มี = screen
 
 ## Limitation
+- `test_db` คัดลอกจากแม่แบบ `uat_template` ไม่ใช่ smldemo สด (smldemo มีคนต่ออยู่ตลอดจึงเป็นแม่แบบตรงๆ ไม่ได้) — อยากได้ข้อมูลล่าสุดให้รัน `sh runner/make-test-template.sh` บนเซิร์ฟเวอร์ (ใช้เวลาหลายนาที) · ฐานละ ~600 MB จึงจำกัด 5 ฐาน · ฐานใหม่จะโผล่ให้เลือกในจอ ERP ได้เมื่อมี provider `uatadmin` (ฐาน `smlerpmainuatadmin`) แล้วเท่านั้น ถ้ายังไม่มีใช้ได้จากขั้น `db.*` อย่างเดียว
 - ปุ่ม Google ใช้ได้เมื่อเพิ่ม `https://uat.smlwork.com` ใน Authorized JavaScript origins ของ Client ID นั้นใน Google Cloud Console แล้ว
 - ใครก็เปิดดูได้ รวมถึง SQL ในสคริปต์ ผลคิวรีของฐาน Demo และภาพหน้าจอ Demo (ไม่มีรหัสผ่าน/token: ตัวรันปิดค่าลับจาก env เป็น `***`)
 - สถานะบอทอยู่ในหน่วยความจำ รีสตาร์ทแล้วสถิติเริ่มใหม่ แต่ผลรอบที่จบแล้วยังอ่านจาก `runs/` ได้
@@ -246,4 +249,4 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 - กันส่งซ้ำใช้ไฟล์ในเครื่อง: ถ้าสคริปต์ยังพังที่ขั้นเดิมตลอด จะไม่เปิด issue ซ้ำ (รายการถูกล้างเองเมื่อสคริปต์กลับมาผ่าน)
 - ฟีดเหตุการณ์ของแอนิเมชันและ tool `events` อยู่ในหน่วยความจำ (เก็บ 200 รายการล่าสุด) รีสตาร์ทแล้วเริ่มนับใหม่
 - สั่งงานหลายบอทพร้อมกันระบบจะทยอยทีละ 5 ตัว กันโดน rate limit ของ Ollama Cloud
-- สคริปต์ในเครื่องมี 41 ชุด ครบทุกบอททั้ง 30 ตัว (สคริปต์ `ask-*` จากคำสั่งอยู่บนเซิร์ฟเวอร์เท่านั้น) (`uat-scripts/`) — สคริปต์ตรวจตามเมนู/ตาราง/API ที่มีจริงในขณะเขียน ถ้าระบบ ERP เปลี่ยนต้องแก้สคริปต์ตาม
+- สคริปต์ในเครื่องมี 68 ชุด: 41 ชุดครบทุกบอททั้ง 30 ตัว + `smoke-*` 27 ชุดเปิดครบ 703 เมนู/รายงาน (สร้างจาก `node runner/gen-menu-smoke.mjs`) (สคริปต์ `ask-*` จากคำสั่งอยู่บนเซิร์ฟเวอร์เท่านั้น) (`uat-scripts/`) — สคริปต์ตรวจตามเมนู/ตาราง/API ที่มีจริงในขณะเขียน ถ้าระบบ ERP เปลี่ยนต้องแก้สคริปต์ตาม

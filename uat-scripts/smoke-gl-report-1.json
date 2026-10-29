@@ -1,0 +1,575 @@
+{
+  "id": "smoke-gl-report-1",
+  "title": "สำรวจเปิดรายงานทุกตัว: บัญชี",
+  "module": "reports",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 985000,
+  "description": "เปิดรายงานกลุ่ม บัญชี 37 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดรายงาน รายงาน ภาษีขาย",
+      "do": "ui.openMenu",
+      "key": "menu_report_vat_sale",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงาน ภาษีขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงาน ภาษีขาย (แสดงมูลค่าอัตราภาษีศูนย์)",
+      "do": "ui.openMenu",
+      "key": "menu_report_except_vat_sale",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงาน ภาษีขาย (แสดงมูลค่าอัตราภาษีศูนย์)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานภาษีขาย (รูปแบบใหม่)",
+      "do": "ui.openMenu",
+      "key": "menu_report_vat_sale_2557",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานภาษีขาย (รูปแบบใหม่)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานภาษีขาย (มาตรฐาน)",
+      "do": "ui.openMenu",
+      "key": "menu_report_vat_sale_standard",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานภาษีขาย (มาตรฐาน)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานภาษีขาย (รูปแบบใหม่แสดงมูลค่าอัตราภาษีศูนย์)",
+      "do": "ui.openMenu",
+      "key": "menu_report_except_vat_sale_with_tax",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานภาษีขาย (รูปแบบใหม่แสดงมูลค่าอัตราภาษีศูนย์)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสรุปภาษีขาย",
+      "do": "ui.openMenu",
+      "key": "menu_report_sum_vat_sale",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสรุปภาษีขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงาน ภาษีซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_report_vat_buy",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงาน ภาษีซื้อ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงาน ภาษีซื้อ (แสดงมูลค่าอัตราภาษีศูนย์)",
+      "do": "ui.openMenu",
+      "key": "menu_report_except_vat_buy",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงาน ภาษีซื้อ (แสดงมูลค่าอัตราภาษีศูนย์)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงาน ภาษีซื้อ (รูปแบบใหม่)",
+      "do": "ui.openMenu",
+      "key": "menu_report_vat_buy_2557",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงาน ภาษีซื้อ (รูปแบบใหม่)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานภาษีซื้อ (มาตรฐาน)",
+      "do": "ui.openMenu",
+      "key": "menu_report_vat_buy_standard",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานภาษีซื้อ (มาตรฐาน)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสรุปภาษี",
+      "do": "ui.openMenu",
+      "key": "menu_gl_vat_report_sum",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสรุปภาษี",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานภาษีขายต่างประเทศ",
+      "do": "ui.openMenu",
+      "key": "menu_gl_vat_report_sale_inter",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานภาษีขายต่างประเทศ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานภาษีซื้อต่างประเทศ",
+      "do": "ui.openMenu",
+      "key": "menu_gl_vat_report_buy_inter",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานภาษีซื้อต่างประเทศ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสรุปภาษีต่างประเทศ",
+      "do": "ui.openMenu",
+      "key": "menu_gl_vat_report_inter_sum",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสรุปภาษีต่างประเทศ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานภาษีหัก ณ. ที่จ่าย  (ภงด.53)",
+      "do": "ui.openMenu",
+      "key": "menu_gl_wht_report_in_53",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานภาษีหัก ณ. ที่จ่าย  (ภงด.53)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานภาษีหัก ณ. ที่จ่าย  (ภงด.3)",
+      "do": "ui.openMenu",
+      "key": "menu_gl_wht_report_in_3",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานภาษีหัก ณ. ที่จ่าย  (ภงด.3)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานภาษีถูกหัก ณ. ที่จ่าย",
+      "do": "ui.openMenu",
+      "key": "menu_gl_wht_report_sum",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานภาษีถูกหัก ณ. ที่จ่าย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรายละเอียดผังบัญชี",
+      "do": "ui.openMenu",
+      "key": "menu_report_chart_of_account",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรายละเอียดผังบัญชี",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน ใบปะหน้าเอกสาร",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_slip",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ใบปะหน้าเอกสาร",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานข้อมูลรายวัน",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_journal",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานข้อมูลรายวัน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานข้อมูลรายวันแบบสรุป",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_journal_sum",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานข้อมูลรายวันแบบสรุป",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานบัญชีแยกประเภท",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_sheet",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานบัญชีแยกประเภท",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานบัญชีแยกประเภท (แบบสรุป)",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_sheet_sum",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานบัญชีแยกประเภท (แบบสรุป)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานงบทดลอง (มาตรฐาน)",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_trial_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานงบทดลอง (มาตรฐาน)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานงบทดลอง (แยกแผนก)",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_trial_balance_depart",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานงบทดลอง (แยกแผนก)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานงบทดลอง (แยกสาขา)",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_trial_balance_branch",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานงบทดลอง (แยกสาขา)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกระดาษทำการ",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_balance_sheet",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกระดาษทำการ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานงบดุล",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานงบดุล",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน งบดุล",
+      "do": "ui.openMenu",
+      "key": "menu_singha_report_balancesheet_asset",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า งบดุล",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน งบกำไรขาดทุน",
+      "do": "ui.openMenu",
+      "key": "menu_singha_report_profit_and_lost",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า งบกำไรขาดทุน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน งบกำไรขาดทุน (แยกสาขา)",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_profit_and_lost_branch_1",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า งบกำไรขาดทุน (แยกสาขา)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน งบกำไรขาดทุน (แยกสาขา-แผนก)",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_trial_balance_branch_depart",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า งบกำไรขาดทุน (แยกสาขา-แผนก)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน งบกำไรขาดทุน (13 ช่อง)",
+      "do": "ui.openMenu",
+      "key": "menu_report_profit_and_lost_sum_year",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า งบกำไรขาดทุน (13 ช่อง)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน งบกำไรขาดทุน (13 ช่อง) ตามแผนก",
+      "do": "ui.openMenu",
+      "key": "menu_report_profit_and_lost_sum_year_by_department",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า งบกำไรขาดทุน (13 ช่อง) ตามแผนก",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน งบกระแสเงินสด",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_other_1",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า งบกระแสเงินสด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานงบการเงิน",
+      "do": "ui.openMenu",
+      "key": "menu_financial_report",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานงบการเงิน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานอื่น ๆ",
+      "do": "ui.openMenu",
+      "key": "menu_fastreport_other_gl",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานอื่น ๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

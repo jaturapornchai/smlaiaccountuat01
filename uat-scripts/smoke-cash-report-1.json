@@ -1,0 +1,620 @@
+{
+  "id": "smoke-cash-report-1",
+  "title": "สำรวจเปิดรายงานทุกตัว: เงินสด/ธนาคาร (ชุด 1/2)",
+  "module": "reports",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 1060000,
+  "description": "เปิดรายงานกลุ่ม เงินสด/ธนาคาร 40 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเคลื่อนไหวเงินสด",
+      "do": "ui.openMenu",
+      "key": "_menu_cash_movements",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเคลื่อนไหวเงินสด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสรุปการรับเงิน",
+      "do": "ui.openMenu",
+      "key": "menu_summary_received",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสรุปการรับเงิน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสรุปการจ่ายเงิน",
+      "do": "ui.openMenu",
+      "key": "menu_summary_payment",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสรุปการจ่ายเงิน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานจ่ายเงินสดย่อย",
+      "do": "ui.openMenu",
+      "key": "menu_report_cb_petty_cash_request",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานจ่ายเงินสดย่อย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรับเงินสดย่อย",
+      "do": "ui.openMenu",
+      "key": "menu_report_cb_petty_cash_return",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรับเงินสดย่อย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเคลื่อนไหวเงินสดย่อย",
+      "do": "ui.openMenu",
+      "key": "menu_sub_cash_movements",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเคลื่อนไหวเงินสดย่อย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสถานะเงินสดย่อย",
+      "do": "ui.openMenu",
+      "key": "menu_peety_cash_status",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสถานะเงินสดย่อย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรายได้อื่นๆ",
+      "do": "ui.openMenu",
+      "key": "menu_cash_income_other_report",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรายได้อื่นๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเพิ่มหนี้รายได้อื่นๆ",
+      "do": "ui.openMenu",
+      "key": "menu_cash_income_other_debit_report",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเพิ่มหนี้รายได้อื่นๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานลดหนี้รายได้อื่นๆ",
+      "do": "ui.openMenu",
+      "key": "menu_cash_income_other_credit_report",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานลดหนี้รายได้อื่นๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานค่าใช้จ่ายอื่นๆ",
+      "do": "ui.openMenu",
+      "key": "menu_cash_expense_other_report",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานค่าใช้จ่ายอื่นๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเพิ่มหนี้ค่าใช้จ่ายอื่นๆ",
+      "do": "ui.openMenu",
+      "key": "menu_cash_expense_other_debit_report",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเพิ่มหนี้ค่าใช้จ่ายอื่นๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานลดหนี้ค่าใช้จ่ายอื่นๆ",
+      "do": "ui.openMenu",
+      "key": "menu_cash_expense_other_credit_report",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานลดหนี้ค่าใช้จ่ายอื่นๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยอดเงินคงเหลือสมุดฝากธนาคาร",
+      "do": "ui.openMenu",
+      "key": "menu_book_bank_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยอดเงินคงเหลือสมุดฝากธนาคาร",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงาน Bank Statement",
+      "do": "ui.openMenu",
+      "key": "_menu_bank_statement",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงาน Bank Statement",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงาน Statement ล่วงหน้า",
+      "do": "ui.openMenu",
+      "key": "menu_statement_advance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงาน Statement ล่วงหน้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการฝากเงิน",
+      "do": "ui.openMenu",
+      "key": "menu_report_cash_payin",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการฝากเงิน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการถอนเงิน",
+      "do": "ui.openMenu",
+      "key": "menu_report_cash_withdraw",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการถอนเงิน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการโอนเงินระหว่างธนาคาร",
+      "do": "ui.openMenu",
+      "key": "menu_cb_report_transfer_bank",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการโอนเงินระหว่างธนาคาร",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรายการรับบัตรเครดิต",
+      "do": "ui.openMenu",
+      "key": "menu_cb_report_credit_card_receive",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรายการรับบัตรเครดิต",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรายละเอียดบัตรเครดิต - ตามวันที่รับ",
+      "do": "ui.openMenu",
+      "key": "menu_report_chq_card_enddate_card",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรายละเอียดบัตรเครดิต - ตามวันที่รับ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานขึ้นเงินบัตรเครดิต",
+      "do": "ui.openMenu",
+      "key": "menu_cb_report_credit_card_pass",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานขึ้นเงินบัตรเครดิต",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเช็ครับยกมา",
+      "do": "ui.openMenu",
+      "key": "menu_cb_report_chq_in_receive_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเช็ครับยกมา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานทะเบียนเช็ครับ",
+      "do": "ui.openMenu",
+      "key": "menu_cb_report_chq_in_receive",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานทะเบียนเช็ครับ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรายละเอียดเช็ครับ - ตามวันที่รับ - ตามสถานะเช็ค",
+      "do": "ui.openMenu",
+      "key": "menu_cb_report_chq_in_receive_by_date",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรายละเอียดเช็ครับ - ตามวันที่รับ - ตามสถานะเช็ค",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรายละเอียดเช็ครับ - ตามวันที่ครบกำหนด",
+      "do": "ui.openMenu",
+      "key": "menu_report_chq_receive_due_date",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรายละเอียดเช็ครับ - ตามวันที่ครบกำหนด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานนำฝาก (เช็ครับ)",
+      "do": "ui.openMenu",
+      "key": "menu_bank_report_chq_in_deposit",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานนำฝาก (เช็ครับ)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเช็คผ่าน (เช็ครับ)",
+      "do": "ui.openMenu",
+      "key": "menu_bank_report_chq_in_pass",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเช็คผ่าน (เช็ครับ)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรับคืน (เช็ครับ)",
+      "do": "ui.openMenu",
+      "key": "menu_bank_report_chq_in_return",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรับคืน (เช็ครับ)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเช็คขาดสิทธิ์ (เช็ครับ)",
+      "do": "ui.openMenu",
+      "key": "menu_bank_report_chq_in_pass_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเช็คขาดสิทธิ์ (เช็ครับ)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการเปลี่ยนเช็ค (เช็ครับ)",
+      "do": "ui.openMenu",
+      "key": "menu_bank_report_chq_in_change",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการเปลี่ยนเช็ค (เช็ครับ)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเช็คจ่ายยกมา",
+      "do": "ui.openMenu",
+      "key": "menu_cb_report_chq_out_payment_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเช็คจ่ายยกมา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานทะเบียนเช็คจ่าย",
+      "do": "ui.openMenu",
+      "key": "menu_cb_report_chq_out_payment",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานทะเบียนเช็คจ่าย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรายละเอียดเช็คจ่าย - ตามวันที่รับ - ตามสถานะเช็ค",
+      "do": "ui.openMenu",
+      "key": "menu_cb_report_chq_out_payment_by_date",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรายละเอียดเช็คจ่าย - ตามวันที่รับ - ตามสถานะเช็ค",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรายละเอียดเช็คจ่าย - วันครบกำหนด",
+      "do": "ui.openMenu",
+      "key": "menu_report_chq_pay_due_date",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรายละเอียดเช็คจ่าย - วันครบกำหนด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเช็คผ่าน (เช็คจ่าย)",
+      "do": "ui.openMenu",
+      "key": "menu_bank_report_chq_out_pass",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเช็คผ่าน (เช็คจ่าย)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเช็คคืน (เช็คจ่าย)",
+      "do": "ui.openMenu",
+      "key": "menu_bank_report_chq_out_return",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเช็คคืน (เช็คจ่าย)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเช็คขาดสิทธิ์ (เช็คจ่าย)",
+      "do": "ui.openMenu",
+      "key": "menu_bank_report_chq_out_pass_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเช็คขาดสิทธิ์ (เช็คจ่าย)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการเปลี่ยนเช็ค (เช็คจ่าย)",
+      "do": "ui.openMenu",
+      "key": "menu_bank_report_chq_out_change",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการเปลี่ยนเช็ค (เช็คจ่าย)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกเบิกเงินสดย่อย",
+      "do": "ui.openMenu",
+      "key": "menu_report_cb_cancel_pettycash_request",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกเบิกเงินสดย่อย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

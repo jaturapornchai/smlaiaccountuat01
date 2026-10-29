@@ -1,0 +1,380 @@
+{
+  "id": "smoke-gl-menu-1",
+  "title": "สำรวจเปิดเมนูทุกตัว: บัญชี",
+  "module": "gl",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 660000,
+  "description": "เปิดเมนูกลุ่ม บัญชี 24 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู รายละเอียดผังบัญชี",
+      "do": "ui.openMenu",
+      "key": "menu_chart_of_account",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายละเอียดผังบัญชี",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ปรับปรุงผังบัญชีแบบเร็ว",
+      "do": "ui.openMenu",
+      "key": "menu_chart_of_account_fast",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ปรับปรุงผังบัญชีแบบเร็ว",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ตรวจสอบโครงสร้างผังบัญชี",
+      "do": "ui.openMenu",
+      "key": "menu_chart_of_account_flow",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ตรวจสอบโครงสร้างผังบัญชี",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลรายวัน",
+      "do": "ui.openMenu",
+      "key": "menu_gl_journal",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลรายวัน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกข้อมูลรายวันแบบเร็ว",
+      "do": "ui.openMenu",
+      "key": "menu_gl_journal_fast",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกข้อมูลรายวันแบบเร็ว",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลรายวันเชิงวิเคราะห์",
+      "do": "ui.openMenu",
+      "key": "menu_gl_allocate_all",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลรายวันเชิงวิเคราะห์",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกรูปภาพ",
+      "do": "ui.openMenu",
+      "key": "menu_gl_picture",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกรูปภาพ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ตรวจสอบความถูกต้อง",
+      "do": "ui.openMenu",
+      "key": "menu_gl_check_data",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ตรวจสอบความถูกต้อง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ผ่านรายการ",
+      "do": "ui.openMenu",
+      "key": "menu_gl_journal_pass",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ผ่านรายการ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ประมวลผลจากข้อมูลรายวัน",
+      "do": "ui.openMenu",
+      "key": "menu_gl_process",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ประมวลผลจากข้อมูลรายวัน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู สรุปบัญชีสินค้าและต้นทุนขาย",
+      "do": "ui.openMenu",
+      "key": "menu_product_sale_cost_close",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า สรุปบัญชีสินค้าและต้นทุนขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู สรุปยอดบัญชี",
+      "do": "ui.openMenu",
+      "key": "menu_journal_summary",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า สรุปยอดบัญชี",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู แสดงบัญชีแยกประเภท",
+      "do": "ui.openMenu",
+      "key": "menu_gl_show_sheet",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แสดงบัญชีแยกประเภท",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู แสดงบัญชีแยกประเภท (แบบสรุป)",
+      "do": "ui.openMenu",
+      "key": "menu_gl_show_sheet_sum",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แสดงบัญชีแยกประเภท (แบบสรุป)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู แสดงงบทดลอง",
+      "do": "ui.openMenu",
+      "key": "menu_gl_show_trial_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แสดงงบทดลอง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู แสดงงบทดลอง (มิติ)",
+      "do": "ui.openMenu",
+      "key": "menu_gl_analysis_trial_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แสดงงบทดลอง (มิติ)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู แสดงกระดาษทำการ",
+      "do": "ui.openMenu",
+      "key": "menu_gl_show_work_sheet",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แสดงกระดาษทำการ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู แสดงรายการงบดุล",
+      "do": "ui.openMenu",
+      "key": "menu_display_balance_sheet",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แสดงรายการงบดุล",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ประมวลผลสิ้นงวด",
+      "do": "ui.openMenu",
+      "key": "menu_gl_end_of_period",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ประมวลผลสิ้นงวด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ประมวลผลสิ้นปี",
+      "do": "ui.openMenu",
+      "key": "menu_gl_end_of_year",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ประมวลผลสิ้นปี",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ประมวลผลกำไร/ขาดทุน และต้นทุนขาย",
+      "do": "ui.openMenu",
+      "key": "menu_close_account_process",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ประมวลผลกำไร/ขาดทุน และต้นทุนขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกผ่านรายการ",
+      "do": "ui.openMenu",
+      "key": "menu_gl_journal_pass_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกผ่านรายการ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ส่งออกข้อมูลภาษีหัก ณ ทีจ่าย",
+      "do": "ui.openMenu",
+      "key": "menu_export_wht",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ส่งออกข้อมูลภาษีหัก ณ ทีจ่าย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู งบกำไรขาดทุน เปรียบเทียบ",
+      "do": "ui.openMenu",
+      "key": "menu_display_lost_and_profit_compare_dimension",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า งบกำไรขาดทุน เปรียบเทียบ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

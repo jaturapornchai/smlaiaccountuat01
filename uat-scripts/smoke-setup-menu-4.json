@@ -1,0 +1,80 @@
+{
+  "id": "smoke-setup-menu-4",
+  "title": "สำรวจเปิดเมนูทุกตัว: เริ่มต้น (ชุด 4/4)",
+  "module": "master",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 160000,
+  "description": "เปิดเมนูกลุ่ม เริ่มต้น 4 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลหลัก",
+      "do": "ui.openMenu",
+      "key": "menu_audit_master",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลหลัก",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ประวัติการแก้ไขรายวัน",
+      "do": "ui.openMenu",
+      "key": "menu_trans_full_logs",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ประวัติการแก้ไขรายวัน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู แสดงหน้าจอการใช้งาน",
+      "do": "ui.openMenu",
+      "key": "menu_view_capture_screen_realtime",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แสดงหน้าจอการใช้งาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู แสดงหน้าจอการใช้งาน (ย้อนหลัง)",
+      "do": "ui.openMenu",
+      "key": "menu_view_capture_screen",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แสดงหน้าจอการใช้งาน (ย้อนหลัง)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

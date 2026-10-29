@@ -1,0 +1,620 @@
+{
+  "id": "smoke-stock-menu-1",
+  "title": "สำรวจเปิดเมนูทุกตัว: สินค้า (ชุด 1/2)",
+  "module": "inventory",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 1060000,
+  "description": "เปิดเมนูกลุ่ม สินค้า 40 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_detail",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลสินค้าเพิ่มเติม",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_detail_2",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลสินค้าเพิ่มเติม",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู รายละเอียดสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_description",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายละเอียดสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู แก้ไขรายละเอียด(เร็ว)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_description_fast",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แก้ไขรายละเอียด(เร็ว)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรูปภาพ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_picture",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรูปภาพ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ทะเบียน Serial Number",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_serial",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ทะเบียน Serial Number",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู สินค้าชุด",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_set",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า สินค้าชุด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_for_sync",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดบาร์โค้ดสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_barcode",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดบาร์โค้ดสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู เพิ่มบาร์โค๊ดสินค้าแบบเร็ว",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_add_barcode_fast",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า เพิ่มบาร์โค๊ดสินค้าแบบเร็ว",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรูปภาพตามบาร์โค้ด",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_barcode_picture",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรูปภาพตามบาร์โค้ด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดส่วนลดตามบาร์โค๊ด",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_barcode_discount",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดส่วนลดตามบาร์โค๊ด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดส่วนลดตามบาร์โค๊ด (เร็ว)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_multibarcode_discount",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดส่วนลดตามบาร์โค๊ด (เร็ว)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ปรับราคาสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_modify_price",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ปรับราคาสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดสูตรโปรโมชั่น",
+      "do": "ui.openMenu",
+      "key": "pos_promotion_formula",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดสูตรโปรโมชั่น",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดแคมเปญท้ายใบเสร็จ",
+      "do": "ui.openMenu",
+      "key": "menu_setup_pos_slip_campaign",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดแคมเปญท้ายใบเสร็จ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ตรวจสอบราคาสินค้า",
+      "do": "ui.openMenu",
+      "key": "check_price",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ตรวจสอบราคาสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ตรวจสอบบาร์โค๊ดจาก Text File",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_barcode_checker",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ตรวจสอบบาร์โค๊ดจาก Text File",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ตรวจสอบบาร์โค๊ดตามมาตรฐาน EAN13",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_barcode_checker_ean13",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ตรวจสอบบาร์โค๊ดตามมาตรฐาน EAN13",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู พิมพ์บาร์โค๊ดด้วยเครื่องพิมพ์ทั่วไป",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_barcode_laser_print",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า พิมพ์บาร์โค๊ดด้วยเครื่องพิมพ์ทั่วไป",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู คลังที่เก็บสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_warehouse_locaton",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า คลังที่เก็บสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดกลุ่มที่เก็บ",
+      "do": "ui.openMenu",
+      "key": "ic_warehouse_and_location_group",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดกลุ่มที่เก็บ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดลำดับการค้นหา",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_level",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดลำดับการค้นหา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดลำดับการค้นหา (เร็ว)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_multi_item_level",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดลำดับการค้นหา (เร็ว)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดราคาซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_purchase_price",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดราคาซื้อ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ของแถมซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_purchase_premium",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ของแถมซื้อ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดราคาขายมาตรฐาน",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_saleprice",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดราคาขายมาตรฐาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดราคาขายทั่วไป",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_saleprice_2",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดราคาขายทั่วไป",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดส่วนลดสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_discount",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดส่วนลดสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรูปแบบสูตรราคาขาย",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_formula_template",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรูปแบบสูตรราคาขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดสูตรราคาขาย",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_saleprice_formula",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดสูตรราคาขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ราคาขายสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_all_price",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ราคาขายสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู สินค้า/วัตถุดิบ คงเหลือยกมา",
+      "do": "ui.openMenu",
+      "key": "menu_ic_stk_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า สินค้า/วัตถุดิบ คงเหลือยกมา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู รับสินค้าสำเร็จรูป",
+      "do": "ui.openMenu",
+      "key": "menu_ic_finish_receive",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รับสินค้าสำเร็จรูป",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ขอเบิกสินค้า/วัตถุดิบ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_request_issue",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ขอเบิกสินค้า/วัตถุดิบ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู เบิกสินค้า/วัตถุดิบ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_issue",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า เบิกสินค้า/วัตถุดิบ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู รับคืนสินค้า/วัตถุดิบ จากการเบิก",
+      "do": "ui.openMenu",
+      "key": "menu_ic_return_receive",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รับคืนสินค้า/วัตถุดิบ จากการเบิก",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ขอโอนสินค้า/วัตถุดิบ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_request_transfer",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ขอโอนสินค้า/วัตถุดิบ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู โอนสินค้า/วัตถุดิบ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_transfer_wh_out",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า โอนสินค้า/วัตถุดิบ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ปรับปรุงสต็อกสินค้า/วัตถุดิบ (เพิ่ม)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_stk_adjust",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ปรับปรุงสต็อกสินค้า/วัตถุดิบ (เพิ่ม)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

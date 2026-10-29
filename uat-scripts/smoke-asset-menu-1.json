@@ -1,0 +1,140 @@
+{
+  "id": "smoke-asset-menu-1",
+  "title": "สำรวจเปิดเมนูทุกตัว: ค่าเสื่อม",
+  "module": "gl",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 260000,
+  "description": "เปิดเมนูกลุ่ม ค่าเสื่อม 8 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลสินทรัพย์",
+      "do": "ui.openMenu",
+      "key": "menu_asset_lists",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลสินทรัพย์",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรูปภาพ",
+      "do": "ui.openMenu",
+      "key": "menu_asset_picture",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรูปภาพ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู โอนข้อมูลเข้าระบบบัญชี",
+      "do": "ui.openMenu",
+      "key": "menu_asset_transfers",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า โอนข้อมูลเข้าระบบบัญชี",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกการซ่อมบำรุงสินทรัพย์",
+      "do": "ui.openMenu",
+      "key": "menu_asset_maintenance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกการซ่อมบำรุงสินทรัพย์",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกการขายสินทรัพย์",
+      "do": "ui.openMenu",
+      "key": "menu_asset_sale",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกการขายสินทรัพย์",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู แสดงค่าเสื่อมราคาสินทรัพย์รายวัน",
+      "do": "ui.openMenu",
+      "key": "menu_show_asset_byday",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แสดงค่าเสื่อมราคาสินทรัพย์รายวัน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู แสดงค่าเสื่อมราคาสินทรัพย์รายเดือน",
+      "do": "ui.openMenu",
+      "key": "menu_show_asset_bymonth",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แสดงค่าเสื่อมราคาสินทรัพย์รายเดือน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู แสดงค่าเสื่อมราคาสินทรัพย์รายปี",
+      "do": "ui.openMenu",
+      "key": "menu_show_asset_byyear",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แสดงค่าเสื่อมราคาสินทรัพย์รายปี",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

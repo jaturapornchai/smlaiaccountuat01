@@ -111,7 +111,14 @@ function parseCsv(text) {
 // UAT_PG_ALLOW_DB can only narrow TEST_DBS, never widen it — customer databases are unreachable whatever the env says.
 const TEST_DBS = ["smldemo", "smluatadmin", "smlerpmainuatadmin"];
 const ALLOW_DB = (process.env.UAT_PG_ALLOW_DB || "smldemo").split(",").map((s) => s.trim()).filter((d) => TEST_DBS.includes(d));
+// + ฐาน uat_<ชื่อ> ที่ MCP test_db สร้าง: ยอมเมื่อฐานที่ต่อได้จริงมีป้าย COMMENT "uat-tester" (ต้องตรงกับ src/lib/test-db.ts)
+const TEST_DB_NAME = /^uat_[a-z0-9_]{1,30}$/;
 function ensureDemoDb(db = process.env.UAT_PG_DATABASE) {
+  if (TEST_DB_NAME.test(db ?? "")) {
+    if (dbChecked[db] === undefined) dbChecked[db] = parseCsv(psql("select current_database() as db, shobj_description(oid, 'pg_database') as mark from pg_database where datname = current_database()", { readOnly: true, csv: true, db }))[0];
+    if (dbChecked[db]?.db !== db || dbChecked[db]?.mark !== "uat-tester") throw new Fail(`ปฏิเสธ: ฐาน "${db}" ไม่ได้สร้างจาก MCP test_db`);
+    return db;
+  }
   if (!ALLOW_DB.includes(db)) throw new Fail(`ปฏิเสธ: ฐานข้อมูล "${db}" ไม่อยู่ในรายการฐานทดสอบที่อนุญาต (${ALLOW_DB.join(", ")})`);
   if (dbChecked[db] === undefined) dbChecked[db] = parseCsv(psql("select current_database() as db", { readOnly: true, csv: true, db }))[0]?.db;
   if (!ALLOW_DB.includes(dbChecked[db])) throw new Fail(`ปฏิเสธ: ต่อได้ฐาน "${dbChecked[db]}" ซึ่งไม่ใช่ฐานทดสอบที่อนุญาต (${ALLOW_DB.join(", ")})`);
@@ -185,7 +192,8 @@ async function ensurePage() {
     page = await context.newPage();
   }
   page.on("dialog", (d) => { dialogs.push(`${d.type()}: ${d.message()}`); d.accept().catch(() => {}); });
-  page.on("response", (r) => { if (r.status() >= 400 && r.url().startsWith(base.origin)) issues.push(`HTTP ${r.status()} ${r.request().method()} ${new URL(r.url()).pathname}`); });
+  // แนบข้อความ error จากเซิร์ฟเวอร์ (ผ่าน cut = ตัดค่าลับ) ให้รู้ว่าพังเพราะอะไร · ponytail: อ่าน body แบบ async — ถ้าตอบช้ามากอาจไปนับในขั้นตรวจถัดไป
+  page.on("response", async (r) => { if (r.status() >= 400 && r.url().startsWith(base.origin)) { const body = (await r.text().catch(() => "")).replace(/\s+/g, " ").trim(); issues.push(`HTTP ${r.status()} ${r.request().method()} ${new URL(r.url()).pathname}${body ? ` → ${cut(body, 160)}` : ""}`); } });
   page.on("pageerror", (e) => issues.push(`JS: ${e.message.slice(0, 200)}`));
   page.on("console", (m) => { if (m.type() === "error") issues.push(`console: ${m.text().slice(0, 200)}`); });
   return page;
@@ -298,6 +306,9 @@ const ACTIONS = {
   },
   async "ui.openMenu"(p) {
     const pg = await ensurePage();
+    // ERP คืนแท็บที่เปิดค้างจาก localStorage ทุกครั้งที่โหลด (smlaiaccount frontend/account/tabs/TabWorkspace.tsx:285) — ล้างก่อน
+    // ไม่งั้นแท็บสะสม: error ของเมนูก่อนหน้าโผล่ซ้ำในเมนูถัดไป และ Chrome กินแรมจนเซิร์ฟเวอร์ OOM (2026-10-29)
+    await pg.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("sml_workspace_tabs_")).forEach((k) => localStorage.removeItem(k))).catch(() => {});
     await pg.goto(sameOrigin(`/home?open=${encodeURIComponent(p.key)}`).href, { waitUntil: "domcontentloaded", timeout: 30_000 });
     try { await pg.locator(`[data-workspace-tab-panel="${p.key}"]`).waitFor({ state: "visible", timeout: p.timeout ?? 45_000 }); }
     catch { throw new Fail(`เมนู ${p.key} ไม่เปิด`, "แผงเมนูแสดงผล", "ไม่พบแผงเมนู"); }

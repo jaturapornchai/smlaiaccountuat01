@@ -1,0 +1,320 @@
+{
+  "id": "smoke-stock-report-2",
+  "title": "สำรวจเปิดรายงานทุกตัว: สินค้า (ชุด 2/2)",
+  "module": "reports",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 560000,
+  "description": "เปิดรายงานกลุ่ม สินค้า 20 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสินค้าที่ไม่มีการเคลื่อนไหว",
+      "do": "ui.openMenu",
+      "key": "menu_item_non_transfer",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสินค้าที่ไม่มีการเคลื่อนไหว",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกำไรขั้นต้นตามเอกสาร (แสดงส่วนลด)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_info_stk_profit_by_doc_and_discount",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกำไรขั้นต้นตามเอกสาร (แสดงส่วนลด)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกำไรขั้นต้น (สินค้า)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_info_stk_profit",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกำไรขั้นต้น (สินค้า)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกำไรขั้นต้น (สินค้า-เอกสาร)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_info_stk_profit_ic_doc",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกำไรขั้นต้น (สินค้า-เอกสาร)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกำไรขั้นต้น (สินค้า-ลูกค้า)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_info_stk_profit_ic_cust",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกำไรขั้นต้น (สินค้า-ลูกค้า)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกำไรขั้นต้น (สินค้า-ลูกค้า-เอกสาร)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_info_stk_profit_ic_cust_doc",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกำไรขั้นต้น (สินค้า-ลูกค้า-เอกสาร)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกำไรขั้นต้น (เอกสาร)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_info_stk_profit_doc",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกำไรขั้นต้น (เอกสาร)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกำไรขั้นต้น (เอกสาร-สินค้า)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_info_stk_profit_doc_ic",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกำไรขั้นต้น (เอกสาร-สินค้า)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกำไรขั้นต้น (ลูกค้า)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_info_stk_profit_cust",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกำไรขั้นต้น (ลูกค้า)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกำไรขั้นต้น (ลูกค้า-สินค้า)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_info_stk_profit_cust_ic",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกำไรขั้นต้น (ลูกค้า-สินค้า)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกำไรขั้นต้น (ลูกค้า-สินค้า-เอกสาร)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_info_stk_profit_cust_ic_doc",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกำไรขั้นต้น (ลูกค้า-สินค้า-เอกสาร)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกำไรขั้นต้น (ลูกค้า-เอกสาร)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_info_stk_profit_cust_doc",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกำไรขั้นต้น (ลูกค้า-เอกสาร)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกำไรขั้นต้น (ลูกค้า-เอกสาร-สินค้า)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_info_stk_profit_cust_doc_ic",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกำไรขั้นต้น (ลูกค้า-เอกสาร-สินค้า)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกรับสินค้าสำเร็จรูป",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_cancel_goods_pack",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกรับสินค้าสำเร็จรูป",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกใบเบิกสินค้า/วัตถุดิบ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_cancel_raw_material",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกใบเบิกสินค้า/วัตถุดิบ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกรับคืนสินค้า/วัตถุดิบ จากการเบิก",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_cancel_goods_raw_meterial",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกรับคืนสินค้า/วัตถุดิบ จากการเบิก",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกโอนสินค้า/วัตถุดิบ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_stk_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกโอนสินค้า/วัตถุดิบ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกปรับปรุงสต๊อกสินค้า/วัตถุดิบ (เกิน)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_stk_cancel_over",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกปรับปรุงสต๊อกสินค้า/วัตถุดิบ (เกิน)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกปรับปรุงสต๊อกสินค้า/วัตถุดิบ (ขาด)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_stk_cancel_lost",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกปรับปรุงสต๊อกสินค้า/วัตถุดิบ (ขาด)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานอื่น ๆ",
+      "do": "ui.openMenu",
+      "key": "menu_fastreport_other_ic",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานอื่น ๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

@@ -4,13 +4,14 @@ import { ScriptRun } from "@/types/bot";
 import { pushActivity, waitActivity, waitAny } from "./activity";
 import { scriptsForIssue } from "./issuemate";
 import { getBots, getSettings, updateSettings } from "./swarm-store";
+import { testDb } from "./test-db";
 import { checkAll } from "./uat-health";
 import { activeRunCount, getRun, listRuns, sendToIssueMate, startRuns, stopRun } from "./uat-runs";
 import { SCRIPT_DIR, loadScripts } from "./uat-scripts";
 
 // MCP tools ของ UAT Tester — คำอธิบายเป็นอังกฤษสั้นและผลลัพธ์เป็นบรรทัดกะทัดรัด เพื่อประหยัด token ของ AI ที่เรียก
 const STEP_KINDS = ["ui.goto", "ui.demoLogin", "ui.adminLogin", "ui.openMenu", "ui.click", "ui.fill", "ui.select", "ui.press", "ui.readText", "ui.expectText", "ui.expectVisible", "ui.expectValue", "ui.expectUrl", "ui.expectClean", "ui.screenshot", "ui.act", "ui.see", "ui.play", "api.request", "db.query", "db.exec", "wait", "set"];
-export const SCRIPT_FORMAT = `Shape: {id(a-z0-9-),title,module(master|sales|purchase|inventory|gl|tax|reports|security|admin|recon),lens(screen|data|api),severityOnFail(S1-S4),description,steps[],cleanup[]}. Step = {title,do,...}; do: ${STEP_KINDS.join(" ")}. ui.adminLogin{targetPath:/admin/providers|/home} = System Admin login with server-held credentials (never put passwords in scripts). ui.act{instruction} = Stagehand does one plain-Thai action; ui.see{expect} = AI judges the screenshot; ui.play{goal,maxSteps<=30} = Computer Use loop (AI clicks/types until done, its findings fail the step, may save test docs tagged {{run.tag}}). api.request{method,path,body,expectStatus,expect[]}, db.query{sql,database,rows,expect[],save{var:col}} (read-only, psql :'var'), db.exec{sql,database,affected} only for rows prefixed UAT; database = smldemo (default) | smluatadmin | smlerpmainuatadmin. expect item {path|col,op:eq|ne|same|gt|gte|lt|lte|contains|matches|exists|empty,value}; {{var}} interpolation. Money compared as decimal.`;
+export const SCRIPT_FORMAT = `Shape: {id(a-z0-9-),title,module(master|sales|purchase|inventory|gl|tax|reports|security|admin|recon),lens(screen|data|api),severityOnFail(S1-S4),description,steps[],cleanup[]}. Step = {title,do,...}; do: ${STEP_KINDS.join(" ")}. ui.adminLogin{targetPath:/admin/providers|/home} = System Admin login with server-held credentials (never put passwords in scripts). ui.act{instruction} = Stagehand does one plain-Thai action; ui.see{expect} = AI judges the screenshot; ui.play{goal,maxSteps<=30} = Computer Use loop (AI clicks/types until done, its findings fail the step, may save test docs tagged {{run.tag}}). api.request{method,path,body,expectStatus,expect[]}, db.query{sql,database,rows,expect[],save{var:col}} (read-only, psql :'var'), db.exec{sql,database,affected}; database = smldemo (default; db.exec only for rows prefixed UAT) | smluatadmin | smlerpmainuatadmin | uat_<name> from test_db (your own copy of smldemo: any change allowed). expect item {path|col,op:eq|ne|same|gt|gte|lt|lte|contains|matches|exists|empty,value}; {{var}} interpolation. Money compared as decimal.`;
 const str = { type: "string" } as const;
 const bool = { type: "boolean" } as const;
 const strs = { type: "array", items: str } as const;
@@ -52,6 +53,11 @@ export const TOOLS = [
     inputSchema: { type: "object", properties: { after: { type: "integer", minimum: 0 }, wait: { type: "integer", minimum: 0, maximum: 50 } } },
   },
   {
+    name: "test_db",
+    description: "Your own throwaway test database whenever you need one (destructive/bulk/admin flows, clean state, parallel work) instead of touching shared smldemo. action:'create' copies smldemo into uat_<name> in seconds (max 5), then use database:'uat_<name>' in db.* steps; 'list'; 'drop' when done (only DBs made here).",
+    inputSchema: { type: "object", properties: { action: { type: "string", enum: ["list", "create", "drop"] }, name: str }, required: ["action"] },
+  },
+  {
     name: "notify",
     description: "Show a short message to the human watching the tester web page (animated card), e.g. what you are fixing or about to test.",
     inputSchema: { type: "object", properties: { text: str }, required: ["text"] },
@@ -59,7 +65,7 @@ export const TOOLS = [
 ];
 
 // เครื่องมือที่ "สั่งงาน" → หน้าเว็บเล่นแอนิเมชันคำสั่งเข้า (เครื่องมืออ่านอย่างเดียวไม่รบกวนจอ)
-const COMMANDS = new Set(["command", "run", "save_script", "notify", "status:settings", "runs:stop", "runs:issue"]);
+const COMMANDS = new Set(["command", "run", "save_script", "notify", "status:settings", "runs:stop", "runs:issue", "test_db:create", "test_db:drop"]);
 
 type Args = Record<string, unknown>;
 const done = (r: ScriptRun) => !["queued", "running"].includes(r.status) && r.issue?.status !== "sending";
@@ -175,7 +181,7 @@ async function events(a: Args, signal: AbortSignal) {
 }
 
 export async function callTool(name: string, a: Args, client: string, signal: AbortSignal): Promise<string> {
-  const tag = name === "status" && a.settings ? "status:settings" : name === "runs" && a.action ? `runs:${a.action}` : name;
+  const tag = name === "status" && a.settings ? "status:settings" : (name === "runs" || name === "test_db") && a.action ? `${name}:${a.action}` : name;
   if (COMMANDS.has(tag)) {
     const what = name === "notify" ? String(a.text ?? "").slice(0, 300) : summarize(name, a);
     pushActivity({ kind: name === "notify" ? "note" : "mcp", client, tool: tag, text: what });
@@ -188,6 +194,7 @@ export async function callTool(name: string, a: Args, client: string, signal: Ab
     case "command": return command(a);
     case "runs": return runs(a);
     case "events": return events(a, signal);
+    case "test_db": return testDb(String(a.action ?? ""), String(a.name ?? ""));
     case "notify":
       if (!String(a.text ?? "").trim()) throw new Error("text required");
       return "shown";
@@ -220,5 +227,6 @@ function summarize(name: string, a: Args): string {
   }
   if (name === "save_script") return `บันทึกสคริปต์ ${(a.script as Args)?.id ?? ""}`;
   if (name === "runs") return a.action === "stop" ? `หยุดรอบ ${a.id}` : `ส่งรอบ ${a.id} เข้า IssueMate`;
+  if (name === "test_db") return `${a.action === "create" ? "สร้าง" : "ลบ"}ฐานทดสอบ uat_${String(a.name ?? "").replace(/^uat_/, "")}`;
   return "ปรับการตั้งค่า";
 }

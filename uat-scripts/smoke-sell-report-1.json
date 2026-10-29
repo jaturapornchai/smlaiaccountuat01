@@ -1,0 +1,620 @@
+{
+  "id": "smoke-sell-report-1",
+  "title": "สำรวจเปิดรายงานทุกตัว: ขาย (ชุด 1/2)",
+  "module": "reports",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 1060000,
+  "description": "เปิดรายงานกลุ่ม ขาย 40 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานบันทึกใบเสนอราคา",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_quotation",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานบันทึกใบเสนอราคา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานอนุมัติใบเสนอราคา",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_quotation_approve",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานอนุมัติใบเสนอราคา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสถานะใบเสนอราคา",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_quotation_stat",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสถานะใบเสนอราคา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานใบสั่งจองสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_inquiry",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานใบสั่งจองสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานอนุมัติใบสั่งจองสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_inquiry_approve",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานอนุมัติใบสั่งจองสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสถานะใบสั่งจองสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_inquiry_stat",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสถานะใบสั่งจองสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานใบสั่งขาย",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_sale_order",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานใบสั่งขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานอนุมัติใบสั่งขาย",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_sale_order_approve",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานอนุมัติใบสั่งขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสถานะใบสั่งขาย",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_sale_order_stat",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสถานะใบสั่งขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรับเงินล่วงหน้า",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_deposit_receive",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรับเงินล่วงหน้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานคืนเงินรับล่วงหน้า",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_deposit_return",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานคืนเงินรับล่วงหน้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยอดคงเหลือเงินรับล่วงหน้า",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_deposit_payment_remain",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยอดคงเหลือเงินรับล่วงหน้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการตัดเงินรับล่วงหน้า",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_cut_deposit_payment",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการตัดเงินรับล่วงหน้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรับเงินมัดจำ",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_deposit_receive_2",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรับเงินมัดจำ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานคืนเงินมัดจำ",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_deposit_return_2",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานคืนเงินมัดจำ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยอดคงเหลือเงินมัดจำ",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_deposit_payment_remain_2",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยอดคงเหลือเงินมัดจำ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการตัดเงินมัดจำ",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_cut_deposit_payment_2",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการตัดเงินมัดจำ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการขายสินค้าและบริการ",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_invoice",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการขายสินค้าและบริการ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการขายและบริการเรียงตามสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_so_sale_service_by_item",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการขายและบริการเรียงตามสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการรับคืนสินค้า/ลดหนี้ขาย",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_credit_note",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการรับคืนสินค้า/ลดหนี้ขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการเพิ่มหนี้ขาย/ราคาผิด",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_add_goods",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการเพิ่มหนี้ขาย/ราคาผิด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสรุปการขายสินค้าตามพนักงานขาย",
+      "do": "ui.openMenu",
+      "key": "menu_sell_by_sale",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสรุปการขายสินค้าตามพนักงานขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสรุปยอดขายสินค้าสุทธิตามพนักงานขาย",
+      "do": "ui.openMenu",
+      "key": "menu_fast_report_summary_sell_by_sale",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสรุปยอดขายสินค้าสุทธิตามพนักงานขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสรุปยอดขายสินค้า-สรุปตามวันที่",
+      "do": "ui.openMenu",
+      "key": "menu_shipments_by_date",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสรุปยอดขายสินค้า-สรุปตามวันที่",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานประวัติการขายสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_sale_history_product",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานประวัติการขายสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการขายยาตามที่สำนักงานคณะกรรมการอาหารและยากำหนด (ขย.8)",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_sale_drug_by_lot",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการขายยาตามที่สำนักงานคณะกรรมการอาหารและยากำหนด (ขย.8)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการขายยาตามที่สำนักงานคณะกรรมการอาหารและยากำหนด (ขย.13)",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_sale_drug_13",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการขายยาตามที่สำนักงานคณะกรรมการอาหารและยากำหนด (ขย.13)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน บัญชีการผลิตยาและขายยาที่ผลิต (แบบ ผ.ย. ๕)",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_sale_drug_by_lot_5",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บัญชีการผลิตยาและขายยาที่ผลิต (แบบ ผ.ย. ๕)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเรียกเก็บยาคืน (Recall)",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_sale_recall",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเรียกเก็บยาคืน (Recall)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานวิเคราะห์การขายแบบแจกแจง-ตามสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_fast_report_analysis_sell_ex_by_product",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานวิเคราะห์การขายแบบแจกแจง-ตามสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานวิเคราะห์การขายแบบสรุป-ตามเอกสาร",
+      "do": "ui.openMenu",
+      "key": "menu_fast_report_analysis_sell_sum_by_docno",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานวิเคราะห์การขายแบบสรุป-ตามเอกสาร",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานกำไรขั้นต้นแสดงหักรับคืน",
+      "do": "ui.openMenu",
+      "key": "menu_fast_report_margin_reacceptance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานกำไรขั้นต้นแสดงหักรับคืน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานจัดอันดับยอดขาย-ตามสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_fast_report_product_rank",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานจัดอันดับยอดขาย-ตามสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเปรียบเที่ยบยอดสินค้า12 เดือน",
+      "do": "ui.openMenu",
+      "key": "menu_fast_report_shipments_compare_month",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเปรียบเที่ยบยอดสินค้า12 เดือน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการเทียบการขายกับราคาขาย",
+      "do": "ui.openMenu",
+      "key": "menu_compare_sale_with_price",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการเทียบการขายกับราคาขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสินค้าขายต่ำกว่าทุน",
+      "do": "ui.openMenu",
+      "key": "menu_product_sale_loss",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสินค้าขายต่ำกว่าทุน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกใบเสนอราคา",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_quotation_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกใบเสนอราคา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกใบสั่งจองสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_inquiry_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกใบสั่งจองสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกใบสั่งขาย",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_sale_order_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกใบสั่งขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกรับเงินล่วงหน้า",
+      "do": "ui.openMenu",
+      "key": "menu_so_report_deposit_payment_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกรับเงินล่วงหน้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "id": "smoke-buy-report-2",
+  "title": "สำรวจเปิดรายงานทุกตัว: ซื้อ (ชุด 2/2)",
+  "module": "reports",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 160000,
+  "description": "เปิดรายงานกลุ่ม ซื้อ 4 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกรับสินค้า/ตั้งหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_po_report_purchase_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกรับสินค้า/ตั้งหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกส่งคืนสินค้า/ลดหนี้ซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_po_credit_note_cancel_report",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกส่งคืนสินค้า/ลดหนี้ซื้อ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกเพิ่มหนี้ซื้อ/ราคาผิด",
+      "do": "ui.openMenu",
+      "key": "menu_po_report_add_goods_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกเพิ่มหนี้ซื้อ/ราคาผิด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานอื่น ๆ",
+      "do": "ui.openMenu",
+      "key": "menu_fastreport_other_purchase",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานอื่น ๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

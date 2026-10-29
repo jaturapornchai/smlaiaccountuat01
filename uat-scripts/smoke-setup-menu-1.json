@@ -1,0 +1,620 @@
+{
+  "id": "smoke-setup-menu-1",
+  "title": "สำรวจเปิดเมนูทุกตัว: เริ่มต้น (ชุด 1/4)",
+  "module": "master",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 1060000,
+  "description": "เปิดเมนูกลุ่ม เริ่มต้น 40 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรายละเอียดบริษัท",
+      "do": "ui.openMenu",
+      "key": "menu_company_profile",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรายละเอียดบริษัท",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดข้อเลือกพิเศษต่างๆ",
+      "do": "ui.openMenu",
+      "key": "menu_option",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดข้อเลือกพิเศษต่างๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดสกุลเงิน",
+      "do": "ui.openMenu",
+      "key": "menu_setup_currency",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดสกุลเงิน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรายละเอียดสาขา",
+      "do": "ui.openMenu",
+      "key": "menu_setup_branch",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรายละเอียดสาขา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรายละเอียดแผนก",
+      "do": "ui.openMenu",
+      "key": "menu_setup_department_list",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรายละเอียดแผนก",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดพนักงาน",
+      "do": "ui.openMenu",
+      "key": "menu_setup_staff",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดพนักงาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรูปภาพพนักงาน",
+      "do": "ui.openMenu",
+      "key": "menu_setup_staff_pic",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรูปภาพพนักงาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดกลุ่มพนักงาน",
+      "do": "ui.openMenu",
+      "key": "menu_setup_user_group",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดกลุ่มพนักงาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดการใช้คลังและที่เก็บ",
+      "do": "ui.openMenu",
+      "key": "menu_setup_user_group_warehouse_shelf",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดการใช้คลังและที่เก็บ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดผู้ใช้ระบบ MIS",
+      "do": "ui.openMenu",
+      "key": "menu_setup_staff_mis",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดผู้ใช้ระบบ MIS",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดกลุ่มเอกสาร",
+      "do": "ui.openMenu",
+      "key": "menu_setup_doc_group",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดกลุ่มเอกสาร",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรูปแบบเลขที่เอกสาร",
+      "do": "ui.openMenu",
+      "key": "menu_setup_doc_format",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรูปแบบเลขที่เอกสาร",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดประเภทการขนส่ง",
+      "do": "ui.openMenu",
+      "key": "menu_setup_transport",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดประเภทการขนส่ง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดเขตการขนส่ง",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ar_logistic_area",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดเขตการขนส่ง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรหัสจังหวัด / อำเภอ / ตำบล",
+      "do": "ui.openMenu",
+      "key": "menu_setup_province",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรหัสจังหวัด / อำเภอ / ตำบล",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดค่าเริ่มต้น POS",
+      "do": "ui.openMenu",
+      "key": "menu_config_pos_startup",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดค่าเริ่มต้น POS",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรหัสเครื่อง POS",
+      "do": "ui.openMenu",
+      "key": "menu_config_pos_machine",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรหัสเครื่อง POS",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดคุณสมบัติของเครื่อง POS",
+      "do": "ui.openMenu",
+      "key": "menu_config_pos_screen",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดคุณสมบัติของเครื่อง POS",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดเงื่อนไขสะสมแต้ม",
+      "do": "ui.openMenu",
+      "key": "menu_pos_point_rate",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดเงื่อนไขสะสมแต้ม",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดค่าเครื่องรูดบัตรเครดิต",
+      "do": "ui.openMenu",
+      "key": "menu_edc_config",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดค่าเครื่องรูดบัตรเครดิต",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดค่าจอแสดงผล QR Code",
+      "do": "ui.openMenu",
+      "key": "menu_usb_qr_display_config",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดค่าจอแสดงผล QR Code",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดค่า QR Code Payment",
+      "do": "ui.openMenu",
+      "key": "menu_setup_qr_payment",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดค่า QR Code Payment",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู จัดการ MCP Token เชื่อมต่อ AI (Read-Only)",
+      "do": "ui.openMenu",
+      "key": "menu_mcp_tokens",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า จัดการ MCP Token เชื่อมต่อ AI (Read-Only)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดคลังสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_wh",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดคลังสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดพื้นที่เก็บสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_shelf",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดพื้นที่เก็บสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู เพิ่มคลังและพื้นที่เก็บอัตโนมัติ",
+      "do": "ui.openMenu",
+      "key": "ic_auto_add_warehouse_and_location",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า เพิ่มคลังและพื้นที่เก็บอัตโนมัติ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดหน่วยนับสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_unit",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดหน่วยนับสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดกลุ่มสินค้าหลัก",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_group_main",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดกลุ่มสินค้าหลัก",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดกลุ่มสินค้าย่อย",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_group_sub",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดกลุ่มสินค้าย่อย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดกลุ่มสินค้าย่อย2",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_group_sub2",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดกลุ่มสินค้าย่อย2",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดหมวดสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_category",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดหมวดสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดยี่ห้อสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_brand",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดยี่ห้อสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรุ่นสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_model",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรุ่นสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดสีสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_color",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดสีสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดขนาดสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_size",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดขนาดสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรูปแบบสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_pattern",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรูปแบบสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดเกรดสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_grade",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดเกรดสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดรูปทรงสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_design",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดรูปทรงสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดระดับสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_class",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดระดับสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดชื่อมิติสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_setup_ic_dimension_name",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดชื่อมิติสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

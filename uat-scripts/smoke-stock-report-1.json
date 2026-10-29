@@ -1,0 +1,620 @@
+{
+  "id": "smoke-stock-report-1",
+  "title": "สำรวจเปิดรายงานทุกตัว: สินค้า (ชุด 1/2)",
+  "module": "reports",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 1060000,
+  "description": "เปิดรายงานกลุ่ม สินค้า 40 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยอดคงเหลือสินค้า (แสดงทุกสินค้า)  แสดงมูลค่าปัจจุบัน",
+      "do": "ui.openMenu",
+      "key": "menu_stock_balance_all_show_current_value",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยอดคงเหลือสินค้า (แสดงทุกสินค้า)  แสดงมูลค่าปัจจุบัน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรายละเอียดสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_detail",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรายละเอียดสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสินค้าชุด",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_item_set_formula",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสินค้าชุด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานบาร์โค้ดสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_item_barcode",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานบาร์โค้ดสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสินค้าแบบมี Serial",
+      "do": "ui.openMenu",
+      "key": "menu_ic_by_license",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสินค้าแบบมี Serial",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานราคาซื้อสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_item_purchase_price",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานราคาซื้อสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานของแถมซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_item_giveaway",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานของแถมซื้อ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานราคาขายสินค้ามาตรฐาน",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_item_sale_price",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานราคาขายสินค้ามาตรฐาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานราคาขายสินค้าทั่วไป",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_item_sale_price_normal",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานราคาขายสินค้าทั่วไป",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสินค้าและวัตถุดิบ คงเหลือยกมา",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_goods_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสินค้าและวัตถุดิบ คงเหลือยกมา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการรับสินค้าสำเร็จรูป",
+      "do": "ui.openMenu",
+      "key": "menu_import_item_ready_by_date",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการรับสินค้าสำเร็จรูป",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการเบิกสินค้าและวัตถุดิบ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_item_withdraw",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการเบิกสินค้าและวัตถุดิบ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรับคืนสินค้าและวัตถุดิบ จากการเบิก",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_item_return",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรับคืนสินค้าและวัตถุดิบ จากการเบิก",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการโอนสินค้าและวัตถุดิบ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_item_transfer",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการโอนสินค้าและวัตถุดิบ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานตรวจนับสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_item_count",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานตรวจนับสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานผลต่างจากการตรวจนับ",
+      "do": "ui.openMenu",
+      "key": "menu_diff_from_count",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานผลต่างจากการตรวจนับ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสินค้าที่ไม่มีการตรวจนับแต่มียอดคงเหลือ",
+      "do": "ui.openMenu",
+      "key": "menu_stock_no_balance_from_count",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสินค้าที่ไม่มีการตรวจนับแต่มียอดคงเหลือ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการตรวจสอบสินค้า Serial",
+      "do": "ui.openMenu",
+      "key": "menu_report_serial_check",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการตรวจสอบสินค้า Serial",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการปรับปรุงสต็อกสินค้าและวัตถุดิบ (เกิน)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_item_adjust_increase",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการปรับปรุงสต็อกสินค้าและวัตถุดิบ (เกิน)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการปรับปรุงสต๊อกสินค้าและวัตถุดิบ (ขาด)",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_item_adjust_decrease",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการปรับปรุงสต๊อกสินค้าและวัตถุดิบ (ขาด)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสถานะสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_item_status",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสถานะสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานบัญชีคุมพิเศษสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_account_special_item",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานบัญชีคุมพิเศษสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสินค้าและวัตถุดิบ",
+      "do": "ui.openMenu",
+      "key": "menu_report_ic_product_and_material",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสินค้าและวัตถุดิบ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการปรับปรุงสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_report_inventory_adjust",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการปรับปรุงสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงาน Lot สินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_report_lot_inventory",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงาน Lot สินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยอดคงเหลือสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_item_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยอดคงเหลือสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยอดคงเหลือสินค้าตาม LOT",
+      "do": "ui.openMenu",
+      "key": "menu_item_balance_lot",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยอดคงเหลือสินค้าตาม LOT",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยอดคงเหลือสินค้า ณ ปัจจุบัน(เฉพาะสินค้ามี Serial)",
+      "do": "ui.openMenu",
+      "key": "menu_item_balance_now_only_serial",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยอดคงเหลือสินค้า ณ ปัจจุบัน(เฉพาะสินค้ามี Serial)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสรุปยอดสินค้าค้างส่ง",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_sale_remain",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสรุปยอดสินค้าค้างส่ง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสรุปยอดสินค้าค้างรับ",
+      "do": "ui.openMenu",
+      "key": "menu_report_accrued_in_qty",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสรุปยอดสินค้าค้างรับ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสินค้าที่ถึงจุดสั่งซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_ic_report_info_stk_reorder",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสินค้าที่ถึงจุดสั่งซื้อ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสินค้าถึงจุดสูงสุด แยกตามคลัง",
+      "do": "ui.openMenu",
+      "key": "menu_report_ic_stock_balance_warehouse_max",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสินค้าถึงจุดสูงสุด แยกตามคลัง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสินค้าถึงจุดต่ำสุด แยกตามคลัง",
+      "do": "ui.openMenu",
+      "key": "menu_report_ic_stock_balance_warehouse_min",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสินค้าถึงจุดต่ำสุด แยกตามคลัง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสินค้าถึงจุดสูงสุด แยกตามคลัง-จุดเก็บ",
+      "do": "ui.openMenu",
+      "key": "menu_report_ic_stock_balance_location_max",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสินค้าถึงจุดสูงสุด แยกตามคลัง-จุดเก็บ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสินค้าถึงจุดต่ำสุด แยกตามคลัง-จุดเก็บ",
+      "do": "ui.openMenu",
+      "key": "menu_report_ic_stock_balance_location_min",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสินค้าถึงจุดต่ำสุด แยกตามคลัง-จุดเก็บ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเคลื่อนไหวสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_item_transfer",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเคลื่อนไหวสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสรุปเคลื่อนไหวปริมาณสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_result_transfer_item",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสรุปเคลื่อนไหวปริมาณสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสรุปเคลื่อนไหวปริมาณสินค้า-แสดงมูลค่า",
+      "do": "ui.openMenu",
+      "key": "menu_report_ic_info_stk_movement_sum_show_amount",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสรุปเคลื่อนไหวปริมาณสินค้า-แสดงมูลค่า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเคลื่อนไหวสินค้าต้นทุนมาตรฐาน",
+      "do": "ui.openMenu",
+      "key": "menu_item_transfer_standard",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเคลื่อนไหวสินค้าต้นทุนมาตรฐาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเคลื่อนไหว Serial Number",
+      "do": "ui.openMenu",
+      "key": "menu_ic_serial_number",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเคลื่อนไหว Serial Number",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

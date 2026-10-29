@@ -1,0 +1,395 @@
+{
+  "id": "smoke-ar-menu-1",
+  "title": "สำรวจเปิดเมนูทุกตัว: ลูกหนี้",
+  "module": "sales",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 685000,
+  "description": "เปิดเมนูกลุ่ม ลูกหนี้ 25 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดลูกหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_ar_detail",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดลูกหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู รายละเอียดลูกหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_ar_detail_2",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายละเอียดลูกหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู รายละเอียดสมาชิก",
+      "do": "ui.openMenu",
+      "key": "menu_ar_dealer",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายละเอียดสมาชิก",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลคู่ค้า(ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_customer_connected",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลคู่ค้า(ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ที่อยู่จัดส่งสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ar_transport_label",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ที่อยู่จัดส่งสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู พิมพ์ที่อยู่จัดส่งสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ar_transport_label_print",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า พิมพ์ที่อยู่จัดส่งสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู นำเข้าที่อยู่จัดส่งลูกหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_import_ar_transport_label",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า นำเข้าที่อยู่จัดส่งลูกหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดแต้มคงเหลือยกมา",
+      "do": "ui.openMenu",
+      "key": "menu_ar_point_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดแต้มคงเหลือยกมา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู แต้มสะสม",
+      "do": "ui.openMenu",
+      "key": "menu_ar_point",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แต้มสะสม",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกตัดแต้ม",
+      "do": "ui.openMenu",
+      "key": "menu_ar_cut_point",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกตัดแต้ม",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู คำณวนแต้มสะสม",
+      "do": "ui.openMenu",
+      "key": "menu_ar_point_recal",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า คำณวนแต้มสะสม",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ตั้งหนี้ยกมา (ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_debt_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ตั้งหนี้ยกมา (ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู เพิ่มหนี้ยกมา (ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_increase_debt",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า เพิ่มหนี้ยกมา (ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ลดหนี้ยกมา (ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_cn_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ลดหนี้ยกมา (ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ตั้งหนี้อื่นๆ (ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_debt_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ตั้งหนี้อื่นๆ (ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู เพิ่มหนี้อื่นๆ (ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_increase_debt_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า เพิ่มหนี้อื่นๆ (ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ลดหนี้อื่นๆ (ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_cn_debt_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ลดหนี้อื่นๆ (ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ใบวางบิล (ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_pay_bill",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ใบวางบิล (ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู รับชำระหนี้/ออกใบเสร็จรับเงิน",
+      "do": "ui.openMenu",
+      "key": "menu_ar_debt_billing",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รับชำระหนี้/ออกใบเสร็จรับเงิน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกรูปภาพเอกสารลูกหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_ar_doc_picture",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกรูปภาพเอกสารลูกหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกตั้งหนี้อื่นๆ (ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_cancel_debt_balance_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกตั้งหนี้อื่นๆ (ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกเพิ่มหนี้อื่นๆ (ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_cancel_increase_debt_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกเพิ่มหนี้อื่นๆ (ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกลดหนี้อื่นๆ (ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_cancel_cn_debt_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกลดหนี้อื่นๆ (ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกใบวางบิล (ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_cancel_pay_bill",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกใบวางบิล (ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกชำระหนี้/ยกเลิกใบเสร็จรับเงิน",
+      "do": "ui.openMenu",
+      "key": "menu_ar_cancel_debt_billing",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกชำระหนี้/ยกเลิกใบเสร็จรับเงิน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

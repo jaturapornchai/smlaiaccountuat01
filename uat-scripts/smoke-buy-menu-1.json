@@ -1,0 +1,515 @@
+{
+  "id": "smoke-buy-menu-1",
+  "title": "สำรวจเปิดเมนูทุกตัว: ซื้อ",
+  "module": "purchase",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 885000,
+  "description": "เปิดเมนูกลุ่ม ซื้อ 33 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ใบเสนอซื้อสินค้า (PR)",
+      "do": "ui.openMenu",
+      "key": "menu_purchase_requisition",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ใบเสนอซื้อสินค้า (PR)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู อนุมัติใบเสนอซื้อสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_purchase_requisition_approval",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า อนุมัติใบเสนอซื้อสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ใบสั่งซื้อสินค้า (PO)",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_order",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ใบสั่งซื้อสินค้า (PO)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู อนุมัติใบสั่งซื้อสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_order_approve",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า อนุมัติใบสั่งซื้อสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู จ่ายเงินล่วงหน้ายกมา",
+      "do": "ui.openMenu",
+      "key": "menu_po_advance_payment_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า จ่ายเงินล่วงหน้ายกมา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู จ่ายเงินล่วงหน้า",
+      "do": "ui.openMenu",
+      "key": "menu_po_deposit_payment_1",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า จ่ายเงินล่วงหน้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู รับคืนจ่ายเงินล่วงหน้า",
+      "do": "ui.openMenu",
+      "key": "menu_po_deposit_return_1",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รับคืนจ่ายเงินล่วงหน้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู จ่ายเงินมัดจำยกมา",
+      "do": "ui.openMenu",
+      "key": "menu_po_deposit_money_balance",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า จ่ายเงินมัดจำยกมา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู จ่ายเงินมัดจำ",
+      "do": "ui.openMenu",
+      "key": "menu_po_deposit_payment_2",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า จ่ายเงินมัดจำ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู รับคืนจ่ายเงินมัดจำ",
+      "do": "ui.openMenu",
+      "key": "menu_po_deposit_return_2",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รับคืนจ่ายเงินมัดจำ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ซื้อสินค้า/ตั้งหนี้ซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_billing",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ซื้อสินค้า/ตั้งหนี้ซื้อ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ส่งคืนสินค้า/ลดหนี้ซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_po_credit_note",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ส่งคืนสินค้า/ลดหนี้ซื้อ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู เพิ่มหนี้ซื้อ/ราคาผิด",
+      "do": "ui.openMenu",
+      "key": "menu_po_addition_debt",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า เพิ่มหนี้ซื้อ/ราคาผิด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู รับสินค้าตามใบสั่งซื้อ (ทะยอยรับ)",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_partial_item",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รับสินค้าตามใบสั่งซื้อ (ทะยอยรับ)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ส่งคืนสินค้าจากการรับ (ทะยอยรับ)",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_partial_item_debit",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ส่งคืนสินค้าจากการรับ (ทะยอยรับ)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ตั้งหนี้ซื้อจากการรับสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_partial_1",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ตั้งหนี้ซื้อจากการรับสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู เพิ่มหนี้ซื้อจากใบตั้งหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_partial_3",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า เพิ่มหนี้ซื้อจากใบตั้งหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ลดหนี้ซื้อจากใบตั้งหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_partial_2",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ลดหนี้ซื้อจากใบตั้งหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกรูปภาพเอกสารซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_po_doc_picture",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกรูปภาพเอกสารซื้อ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกใบเสนอซื้อสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_cancel_purchase_requisition",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกใบเสนอซื้อสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกใบสั่งซื้อสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_order_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกใบสั่งซื้อสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกจ่ายเงินล่วงหน้า",
+      "do": "ui.openMenu",
+      "key": "menu_po_deposit_payment_1_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกจ่ายเงินล่วงหน้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกรับคืนจ่ายเงินล่วงหน้า",
+      "do": "ui.openMenu",
+      "key": "menu_po_deposit_return_1_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกรับคืนจ่ายเงินล่วงหน้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกจ่ายเงินมัดจำ",
+      "do": "ui.openMenu",
+      "key": "menu_po_deposit_payment_2_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกจ่ายเงินมัดจำ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกรับคืนจ่ายเงินมัดจำ",
+      "do": "ui.openMenu",
+      "key": "menu_po_deposit_return_2_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกรับคืนจ่ายเงินมัดจำ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกซื้อสินค้า/ตั้งหนี้ซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_billing_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกซื้อสินค้า/ตั้งหนี้ซื้อ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกส่งคืนสินค้า/ลดหนี้ซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_po_credit_note_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกส่งคืนสินค้า/ลดหนี้ซื้อ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกเพิ่มหนี้ซื้อ/ราคาผิด",
+      "do": "ui.openMenu",
+      "key": "menu_po_addition_debt_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกเพิ่มหนี้ซื้อ/ราคาผิด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกรับสินค้าตามใบสั่งซื้อ",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_partial_item_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกรับสินค้าตามใบสั่งซื้อ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกส่งคืนสินค้าจากการรับ",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_partial_item_debit_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกส่งคืนสินค้าจากการรับ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกตั้งหนี้จากการรับสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_partial_1_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกตั้งหนี้จากการรับสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกเพิ่มหนี้จากใบตั้งหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_partial_3_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกเพิ่มหนี้จากใบตั้งหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู ยกเลิกลดหนี้จากใบตั้งหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_partial_2_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยกเลิกลดหนี้จากใบตั้งหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

@@ -1,0 +1,470 @@
+{
+  "id": "smoke-ap-report-1",
+  "title": "สำรวจเปิดรายงานทุกตัว: เจ้าหนี้",
+  "module": "reports",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 810000,
+  "description": "เปิดรายงานกลุ่ม เจ้าหนี้ 30 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานรายละเอียดเจ้าหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_detail_ap",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานรายละเอียดเจ้าหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานตั้งหนี้ยกมา",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_early_year_balance_setup",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานตั้งหนี้ยกมา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเพิ่มหนี้ยกมา",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_early_year_balance_increase",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเพิ่มหนี้ยกมา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานลดหนี้ยกมา",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_early_year_balance_decrease",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานลดหนี้ยกมา",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานตั้งหนี้อื่นๆ",
+      "do": "ui.openMenu",
+      "key": "menu_documents_early_year_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานตั้งหนี้อื่นๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเพิ่มหนี้อื่นๆ",
+      "do": "ui.openMenu",
+      "key": "menu_increase_debt_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเพิ่มหนี้อื่นๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานลดหนี้อื่นๆ",
+      "do": "ui.openMenu",
+      "key": "menu_reduction_dept_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานลดหนี้อื่นๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานใบรับวางบิล (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_billing",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานใบรับวางบิล (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานใบรับวางบิลค่าสินค้า-ตามใบส่งของ",
+      "do": "ui.openMenu",
+      "key": "menu_billing_value_by_invoice",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานใบรับวางบิลค่าสินค้า-ตามใบส่งของ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานใบรับวางบิลค่าสินค้าที่คงค้าง",
+      "do": "ui.openMenu",
+      "key": "menu_billing_outstanding",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานใบรับวางบิลค่าสินค้าที่คงค้าง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการจ่ายชำระหนี้ (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_payment",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการจ่ายชำระหนี้ (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานใบส่งของค้างจ่ายชำระ-ตามวันที่",
+      "do": "ui.openMenu",
+      "key": "menu_invoice_arrears_by_date",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานใบส่งของค้างจ่ายชำระ-ตามวันที่",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานใบส่งของถึงกำหนดชำระ-ตามวันที่",
+      "do": "ui.openMenu",
+      "key": "menu_invoice_due_by_date",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานใบส่งของถึงกำหนดชำระ-ตามวันที่",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานใบส่งของค้างชำระแสดงวันที่ถึงกำหนด",
+      "do": "ui.openMenu",
+      "key": "menu_invoice_arrears_due",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานใบส่งของค้างชำระแสดงวันที่ถึงกำหนด",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานใบส่งของเกินกำหนดชำระ-ตามวันที่",
+      "do": "ui.openMenu",
+      "key": "menu_invoice_overdue_by_date",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานใบส่งของเกินกำหนดชำระ-ตามวันที่",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานจ่ายชำระค่าสินค้า-ตามใบส่งของ",
+      "do": "ui.openMenu",
+      "key": "menu_payment_by_invoice",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานจ่ายชำระค่าสินค้า-ตามใบส่งของ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการจ่ายชำระประจำวัน-ตามวันที่",
+      "do": "ui.openMenu",
+      "key": "menu_payment_by_date",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการจ่ายชำระประจำวัน-ตามวันที่",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานการจ่ายเงินประจำวัน-ตามแผนก",
+      "do": "ui.openMenu",
+      "key": "menu_payment_by_department",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการจ่ายเงินประจำวัน-ตามแผนก",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเคลื่อนไหวเจ้าหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_payable_movement",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเคลื่อนไหวเจ้าหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานอายุเจ้าหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_payable_aging",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานอายุเจ้าหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานอายุเจ้าหนี้-ตามเอกสาร",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_payable_aging_by_doc",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานอายุเจ้าหนี้-ตามเอกสาร",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานสถานะเจ้าหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_payable_status",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานสถานะเจ้าหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานเจ้าหนี้ที่ไม่มีการเคลื่อนไหว",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_payable_not_movement",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานเจ้าหนี้ที่ไม่มีการเคลื่อนไหว",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานใบตั้งหนี้จากการซื้อแบบแจกแจงตามเจ้าหนี้",
+      "do": "ui.openMenu",
+      "key": "menu_ap_detail_debt_by_ap",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานใบตั้งหนี้จากการซื้อแบบแจกแจงตามเจ้าหนี้",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกตั้งหนี้อื่นๆ",
+      "do": "ui.openMenu",
+      "key": "menu_cancel_documents_early_year_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกตั้งหนี้อื่นๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกเพิ่มหนี้อื่นๆ",
+      "do": "ui.openMenu",
+      "key": "menu_cancel_increase_debt_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกเพิ่มหนี้อื่นๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกลดหนี้อื่นๆ",
+      "do": "ui.openMenu",
+      "key": "menu_cancel_reduction_dept_other",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกลดหนี้อื่นๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกใบรับวางบิล ( เจ้าหนี้ )",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_cancel_pay_bill",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกใบรับวางบิล ( เจ้าหนี้ )",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานยกเลิกจ่ายชำระ (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_report_cancel_debt_billing",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานยกเลิกจ่ายชำระ (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดรายงาน รายงานอื่น ๆ",
+      "do": "ui.openMenu",
+      "key": "menu_fastreport_other_supplier",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานอื่น ๆ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}

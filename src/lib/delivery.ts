@@ -19,7 +19,7 @@ const blocking = (sev?: string) => sev === "S1" || sev === "S2";
 // รอบล่าสุดที่รันจบแล้วของแต่ละสคริปต์
 function latestRuns(): Map<string, ScriptRun> {
   const out = new Map<string, ScriptRun>();
-  for (const r of listRuns()) if (r.finishedAt && !out.has(r.scriptId)) out.set(r.scriptId, r);
+  for (const r of listRuns(Infinity)) if (r.finishedAt && !out.has(r.scriptId)) out.set(r.scriptId, r);
   return out;
 }
 

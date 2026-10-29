@@ -47,7 +47,7 @@ if (runs.size === 0 && existsSync(RUN_DIR)) {
   }
 }
 
-export const listRuns = () => [...runs.values()].sort((a, b) => b.queuedAt.localeCompare(a.queuedAt)).slice(0, KEEP_RUNS);
+export const listRuns = (limit = KEEP_RUNS) => [...runs.values()].sort((a, b) => b.queuedAt.localeCompare(a.queuedAt)).slice(0, limit);
 export const getRun = (id: string) => runs.get(id);
 export const activeRunCount = () => [...runs.values()].filter((r) => r.status === "queued" || r.status === "running").length;
 

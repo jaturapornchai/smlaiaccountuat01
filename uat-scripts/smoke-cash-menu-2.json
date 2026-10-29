@@ -1,0 +1,215 @@
+{
+  "id": "smoke-cash-menu-2",
+  "title": "สำรวจเปิดเมนูทุกตัว: เงินสด/ธนาคาร (ชุด 2/2)",
+  "module": "gl",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "timeoutMs": 385000,
+  "description": "เปิดเมนูกลุ่ม เงินสด/ธนาคาร 13 รายการทีละตัว แล้วตรวจว่าแผงเปิดได้ และไม่มี HTTP 4xx/5xx, JS error, DB error · ไม่กดบันทึก ไม่แก้ข้อมูล",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกยกเลิกฝากเงิน",
+      "do": "ui.openMenu",
+      "key": "menu_cb_cash_payin_cancle",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกยกเลิกฝากเงิน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกยกเลิกถอนเงิน",
+      "do": "ui.openMenu",
+      "key": "menu_cb_cash_withdraw_cancle",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกยกเลิกถอนเงิน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกยกเลิกโอนเงินระหว่างธนาคาร",
+      "do": "ui.openMenu",
+      "key": "menu_cash_transfer_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกยกเลิกโอนเงินระหว่างธนาคาร",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกยกเลิกบัตรเครดิต",
+      "do": "ui.openMenu",
+      "key": "menu_cb_credit_card_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกยกเลิกบัตรเครดิต",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกยกเลิกนำฝากเช็ค",
+      "do": "ui.openMenu",
+      "key": "menu_cb_chq_in_payin_cancle",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกยกเลิกนำฝากเช็ค",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกยกเลิกเช็คผ่าน",
+      "do": "ui.openMenu",
+      "key": "menu_cb_chq_in_pass_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกยกเลิกเช็คผ่าน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกยกเลิกเช็ครับคืน",
+      "do": "ui.openMenu",
+      "key": "menu_cb_chq_in_return_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกยกเลิกเช็ครับคืน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกยกเลิกเช็คขาดสิทธิ์",
+      "do": "ui.openMenu",
+      "key": "menu_cb_chq_in_cancel_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกยกเลิกเช็คขาดสิทธิ์",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกยกเลิกเปลี่ยนเช็ค",
+      "do": "ui.openMenu",
+      "key": "menu_cb_chq_renew_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกยกเลิกเปลี่ยนเช็ค",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกยกเลิกเช็คจ่ายผ่าน",
+      "do": "ui.openMenu",
+      "key": "menu_cb_chq_out_pass_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกยกเลิกเช็คจ่ายผ่าน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกยกเลิกเช็คคืน",
+      "do": "ui.openMenu",
+      "key": "menu_cb_chq_out_return_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกยกเลิกเช็คคืน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกยกเลิกเช็คขาดสิทธิ์",
+      "do": "ui.openMenu",
+      "key": "menu_cb_chq_out_cancel_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกยกเลิกเช็คขาดสิทธิ์",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกยกเลิกเปลี่ยนเช็คจ่าย",
+      "do": "ui.openMenu",
+      "key": "menu_cb_chq_out_renew_cancel",
+      "timeout": 20000,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกยกเลิกเปลี่ยนเช็คจ่าย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ],
+      "continueOnFail": true
+    }
+  ]
+}
