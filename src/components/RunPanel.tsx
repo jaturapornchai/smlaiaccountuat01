@@ -1,13 +1,28 @@
 "use client";
 
 import React, { useState } from "react";
-import { BrainCircuit, Bug, Camera, Check, Clock, ExternalLink, FileText, Loader2, Minus, Send, Square, Timer, X } from "lucide-react";
+import { BrainCircuit, Bug, Camera, Check, Clock, Download, ExternalLink, FileText, Loader2, Minus, Send, Square, Timer, X } from "lucide-react";
 import { IssueLink, ScriptRun, StepResult } from "@/types/bot";
 import { LENSES, MODULES } from "@/lib/swarm-data";
 import { fmtDur, fmtSpan, fmtTime, host, kindLabel } from "@/lib/format";
 import { StatusBadge } from "./StatusBadge";
 
 const evidenceUrl = (runId: string, file: string) => `/api/runs/${runId}/evidence/${encodeURIComponent(file)}`;
+
+// วิดีโอ + trace มีเฉพาะรอบที่ไม่ผ่าน (runner/run.mjs ลบทิ้งเมื่อผ่าน) · รอบเก่า/สคริปต์ ui.adminLogin ไม่มีไฟล์ → วิดีโอโหลดไม่ได้ก็ซ่อนทั้งกล่อง
+function Recording({ runId }: { runId: string }) {
+  const [missing, setMissing] = useState(false);
+  if (missing) return null;
+  return (
+    <div className="mt-3 overflow-hidden rounded-xl border border-white/10 bg-black/30">
+      <video src={evidenceUrl(runId, "video.webm")} controls preload="metadata" onError={() => setMissing(true)} className="block w-full" />
+      <a href={evidenceUrl(runId, "trace.zip")} className="baseline-center gap-1.5 px-3 py-2 text-[0.7rem] text-cyan-300 hover:underline">
+        <Download className="h-3 w-3" />
+        ดาวน์โหลด Playwright trace (เฉพาะผู้ดูแล) · เปิดดูทีละคลิกที่ trace.playwright.dev
+      </a>
+    </div>
+  );
+}
 
 const NODE: Record<StepResult["status"], { icon: React.ReactNode; cls: string }> = {
   pending: { icon: <Clock className="h-3 w-3" />, cls: "border-white/15 text-slate-500" },
@@ -183,6 +198,7 @@ export const RunPanel: React.FC<Props> = ({ runs, selectedId, onSelect, onStop, 
             </div>
             {run.message && <p className="mt-3 rounded-xl border border-amber-300/20 bg-amber-400/5 px-3 py-2 text-[0.75rem] text-amber-100">{run.message}</p>}
             {(run.status === "failed" || run.status === "error") && <IssueBox run={run} url={issueMateUrl} onSend={() => onIssue(run.id)} />}
+            {(run.status === "failed" || run.status === "error") && <Recording key={run.id} runId={run.id} />}
             {run.issues > 0 && <p className="mt-2 text-[0.72rem] text-amber-200">ตัวตรวจจับเจอ HTTP ผิดพลาด / JS error / ข้อความ DB error รวม {run.issues} ครั้งระหว่างรัน</p>}
 
             <ol className="relative mt-5 space-y-4 before:absolute before:bottom-2 before:left-3 before:top-2 before:w-px before:bg-white/10">

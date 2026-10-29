@@ -2,7 +2,7 @@
 // and prints one JSON line per event on stdout. Spawned by src/lib/uat-runs.ts.
 // Usage: node runner/run.mjs --script <file> --out <dir> --base <erp url>
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -171,6 +171,26 @@ async function loadStagehand() {
 }
 const freePort = () => new Promise((ok, no) => { const srv = createServer().on("error", no).listen(0, "127.0.0.1", () => { const { port } = srv.address(); srv.close(() => ok(port)); }); });
 
+// ---------- video + Playwright trace (kept only when the run does not pass) ----------
+// page.screencast (Playwright 1.64) also records the Stagehand tab attached over CDP; recordVideo would need a context we create ourselves.
+// ui.adminLogin types the real admin password and a trace keeps it in clear (fill value + POST body) → such scripts record nothing.
+const RECORD = ![...script.steps, ...(script.cleanup ?? [])].some((s) => s.do === "ui.adminLogin");
+let recording = false;
+async function startRecording(viewport) {
+  if (!RECORD || !page.screencast) return;
+  await context.tracing.start({ snapshots: true, screenshots: false, title: script.title });
+  recording = true;
+  // ponytail: 5 fps at 1280 wide keeps ffmpeg light next to parallel bots; raise fps if reviewers need smoother playback
+  await page.screencast.start({ path: join(outDir, "video.webm"), size: { width: 1280, height: Math.round((640 * viewport.height) / viewport.width) * 2 }, fps: 5 });
+}
+async function stopRecording(keep) {
+  if (!recording) return;
+  recording = false;
+  await page.screencast.stop().catch(() => {});
+  await context.tracing.stop(keep ? { path: join(outDir, "trace.zip") } : {}).catch(() => {});
+  if (!keep) rmSync(join(outDir, "video.webm"), { force: true });
+}
+
 let gone = "";
 async function ensurePage() {
   if (page) return page;
@@ -192,6 +212,7 @@ async function ensurePage() {
     context = await browser.newContext({ viewport, locale: "th-TH" });
     page = await context.newPage();
   }
+  await startRecording(viewport).catch(() => {}); // recording is extra evidence: never fail the run over it
   // เบราว์เซอร์ของตัวทดสอบดับ (OOM-killer / รีสตาร์ทบริการ) → ขั้นที่เหลือพังเพราะเครื่องทดสอบ ไม่ใช่ ERP
   browser.on("disconnected", () => { gone ||= "เบราว์เซอร์ของตัวทดสอบปิดตัว (หน่วยความจำเครื่องไม่พอหรือบริการรีสตาร์ท)"; });
   page.on("crash", () => { gone ||= "หน้าเว็บในเบราว์เซอร์ของตัวทดสอบแครช (มักเพราะหน่วยความจำไม่พอ)"; });
@@ -534,8 +555,13 @@ async function exec(step) {
   }
 }
 
-const watchdog = setTimeout(() => { emit({ t: "end", status: "error", message: "เกินเวลารวมของสคริปต์" }); process.exit(3); }, script.timeoutMs ?? 300_000);
+const watchdog = setTimeout(async () => {
+  emit({ t: "end", status: "error", message: "เกินเวลารวมของสคริปต์" });
+  await Promise.race([stopRecording(true), new Promise((r) => setTimeout(r, 20_000))]); // keep what was recorded, but never hang the exit
+  process.exit(3);
+}, script.timeoutMs ?? 300_000);
 watchdog.unref();
+let status = "error";
 try {
   let stop = false;
   for (const step of main) {
@@ -544,11 +570,13 @@ try {
   }
   for (const step of tail) await exec(step); // cleanup always runs
   // รอบที่เครื่องทดสอบล้มกลางทาง = error (ไม่เปิด issue) ให้รันใหม่ แทนที่จะโทษ ERP
-  emit({ t: "end", status: gone ? "error" : counts.failed ? "failed" : "passed", ...counts, issues: issues.length, dialogs: dialogs.length, ...(gone && { message: `${gone} — รอบนี้ไม่สมบูรณ์ ไม่ใช่ข้อผิดพลาดของ ERP · สั่งรันใหม่ได้` }) });
+  status = gone ? "error" : counts.failed ? "failed" : "passed";
+  emit({ t: "end", status, ...counts, issues: issues.length, dialogs: dialogs.length, ...(gone && { message: `${gone} — รอบนี้ไม่สมบูรณ์ ไม่ใช่ข้อผิดพลาดของ ERP · สั่งรันใหม่ได้` }) });
 } catch (e) {
   emit({ t: "end", status: "error", message: cut(e.message, 500) });
   process.exitCode = 2;
 } finally {
+  await stopRecording(status !== "passed");
   await stagehand?.close().catch(() => {});
   await browser?.close().catch(() => {});
   await shBrowser?.close().catch(() => {});

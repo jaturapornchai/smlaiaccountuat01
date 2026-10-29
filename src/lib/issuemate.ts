@@ -9,6 +9,7 @@ import { isAiScript } from "./uat-scripts";
 // ส่งผลทดสอบที่ไม่ผ่านเข้า IssueMate (MCP แบบ stateless: เรียก tools/call ได้เลยไม่ต้อง initialize)
 const PRIORITY = { S1: "critical", S2: "high", S3: "medium", S4: "low" } as const;
 const SENT_FILE = join(process.cwd(), "runs", "issuemate-sent.json");
+const SITE = "https://uat.smlwork.com";
 
 async function rpc(method: string, params: object) {
   const { ISSUEMATE_MCP_URL: url, ISSUEMATE_TOKEN: token, ISSUEMATE_PROJECT: project = "SMLAIACC" } = process.env;
@@ -91,10 +92,13 @@ export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLi
   const line = (s: ScriptRun["steps"][number]) =>
     `- ขั้น ${s.i + 1} ${s.title} [${s.kind}]${s.detail ? ` — ${s.detail}` : ""}${s.expected !== undefined ? `\n  - คาดหวัง: \`${s.expected}\`` : ""}${s.actual !== undefined ? `\n  - ค่าจริง: \`${s.actual}\`` : ""}${s.query ? `\n  - คำสั่งที่รัน: \`${s.query}\`` : ""}`;
   // สคริปต์เดียว = issue เดียว: ขั้นแรกที่พังเปลี่ยนไปในรอบใหม่ (เช่น smoke ที่ตรวจหลายเมนู) → ต่อท้ายผลใน issue เดิมแทนการเปิดใหม่ จนกว่าสคริปต์จะผ่าน (clearSent)
+  // วิดีโอ/trace ที่ตัวรันเก็บไว้ (เฉพาะรอบไม่ผ่าน) — ลิงก์ไปหน้าหลักฐานของ Tester แทนการแนบไฟล์ใหญ่
+  const ev = (f: string) => `${SITE}/api/runs/${run.id}/evidence/${f}`;
+  const rec = existsSync(join(outDir, "video.webm")) ? [`วิดีโอรอบนี้: ${ev("video.webm")}${existsSync(join(outDir, "trace.zip")) ? ` · Playwright trace (ผู้ดูแลเท่านั้น): ${ev("trace.zip")}` : ""}`] : [];
   const open = Object.entries(sent).find(([k]) => k.startsWith(`${run.scriptId}#`))?.[1];
   if (open) {
     // รอบตรวจซ้ำของ issue นี้ → sendToIssueMate แจ้งผลใน issue เองแล้ว ไม่ต้องซ้ำ
-    if (run.retestOf !== open) await commentIssue(open, [`รอบ \`${run.id}\` ยังไม่ผ่าน (ผ่าน ${run.passed} ไม่ผ่าน ${run.failed} ข้าม ${run.skipped})`, ...failed.map(line)].join("\n").slice(0, 20_000));
+    if (run.retestOf !== open) await commentIssue(open, [`รอบ \`${run.id}\` ยังไม่ผ่าน (ผ่าน ${run.passed} ไม่ผ่าน ${run.failed} ข้าม ${run.skipped})`, ...failed.map(line), ...rec.map((l) => `\n${l}`)].join("\n").slice(0, 20_000));
     writeFileSync(SENT_FILE, JSON.stringify({ ...sent, [key]: open }, null, 1));
     return { status: "duplicate", code: open, message: `สคริปต์เดิมยังไม่ผ่าน — ต่อท้ายผลรอบนี้ใน ${open}`, at: at() };
   }
@@ -140,6 +144,7 @@ export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLi
     `### วิเคราะห์และแนวทางแก้โดยสมอง AI (${model}) — เป็นการคาดเดา ต้องตรวจโค้ดจริงก่อนแก้`,
     analysis,
     "",
+    ...rec.flatMap((l) => [l, ""]),
     `ทำซ้ำด้วยตัวรัน: \`node runner/run.mjs --script uat-scripts/${run.scriptId}.json --out runs/<id> --base ${run.target}\``,
   ].join("\n");
 
