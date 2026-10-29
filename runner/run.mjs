@@ -524,6 +524,25 @@ const tail = (script.cleanup ?? []).map((s, k) => ({ ...s, i: main.length + k, c
 emit({ t: "plan", runId, steps: [...main, ...tail].map((s) => ({ i: s.i, title: s.title, kind: s.do, cleanup: !!s.cleanup })) });
 
 const counts = { passed: 0, failed: 0, skipped: 0 };
+// ขั้นที่ทำซ้ำแล้วข้อมูลไม่เปลี่ยน (ตรวจ/อ่าน/เปิดจอ/กรอกค่าเดิม/SQL อ่าน/GET) ล้มแล้วลองซ้ำ — ผ่านตอนลองซ้ำ = flaky ไม่ใช่หลักฐานว่า ERP ผิด
+// ห้ามใส่: click/press (กดบันทึกซ้ำ = เอกสารซ้ำ), db.exec, API ที่ไม่ใช่ GET, ui.expectClean (ดึงรายการ error ออกไปแล้ว), ui.see/act/play (เรียก AI)
+const RETRY = new Set(["ui.goto", "ui.openMenu", "ui.fill", "ui.select", "ui.expectText", "ui.expectVisible", "ui.expectValue", "ui.expectUrl", "ui.readText", "ui.pdf", "report.pdf", "db.query"]);
+const RETRIES = 2;
+const retryUntil = Date.now() + (script.timeoutMs ?? 300_000) - 120_000; // เหลือเวลาให้ขั้นถัดไป+เก็บกวาด ไม่งั้นชน watchdog กลายเป็น error แล้วบั๊กจริงไม่ถูกเปิด
+async function attempt(step, fn, p) {
+  const again = RETRY.has(step.do) || (step.do === "api.request" && (p.method ?? "GET") === "GET");
+  for (let k = 0; ; k++) {
+    try { return { r: (await fn(p)) ?? {}, k }; }
+    catch (e) {
+      if (gone || !again || k >= RETRIES || Date.now() > retryUntil) {
+        if (k) e.message += ` (ลองซ้ำ ${k} ครั้งแล้วยังไม่ผ่าน)`;
+        throw e;
+      }
+      emit({ t: "step", i: step.i, status: "running", detail: cut(`ลองซ้ำครั้งที่ ${k + 1}/${RETRIES} · ${e.message}`, 300) });
+      await new Promise((res) => setTimeout(res, 3000));
+    }
+  }
+}
 async function exec(step) {
   emit({ t: "step", i: step.i, status: "running" });
   const t0 = Date.now();
@@ -535,10 +554,10 @@ async function exec(step) {
     const call = step.do === "report.pdf" ? "POST /api/process/report/pdf" : step.do === "api.request" ? `${p.method ?? "GET"} ${p.path}` : "";
     const query = step.do.startsWith("db.") ? p.sql : call && `${call}${p.body ? ` ${JSON.stringify(p.body)}` : ""}`;
     if (query) emit({ t: "step", i: step.i, status: "running", query: cut(query, 600) });
-    const r = (await fn(p)) ?? {};
+    const { r, k } = await attempt(step, fn, p);
     if (p.wait && page) await page.waitForTimeout(Math.min(p.wait, 30_000));
     counts.passed++;
-    emit({ t: "step", i: step.i, status: "passed", durationMs: Date.now() - t0, detail: cut(r.detail), expected: r.expected, actual: r.actual, evidence: r.evidence });
+    emit({ t: "step", i: step.i, status: "passed", durationMs: Date.now() - t0, detail: cut(k ? `ผ่านเมื่อลองซ้ำครั้งที่ ${k} · ${r.detail ?? ""}` : r.detail), ...(k && { flaky: true }), expected: r.expected, actual: r.actual, evidence: r.evidence });
     if (step.do.startsWith("ui.")) await live();
     return true;
   } catch (e) {

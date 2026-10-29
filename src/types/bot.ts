@@ -112,6 +112,7 @@ export interface StepResult {
   actual?: string;
   evidence?: string; // ชื่อไฟล์ใน runs/<id>/
   query?: string; // SQL หรือคำขอ API จริงของขั้นนี้ — การ์ดบอทโชว์แทนภาพหน้าจอ
+  flaky?: boolean; // ล้มครั้งแรกแต่ผ่านตอนลองซ้ำ (runner/run.mjs RETRY)
 }
 
 export type RunStatus = "queued" | "running" | "passed" | "failed" | "error" | "stopped";

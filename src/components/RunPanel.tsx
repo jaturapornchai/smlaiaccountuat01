@@ -41,6 +41,7 @@ const Step: React.FC<{ run: ScriptRun; s: StepResult; onImage: (url: string) => 
         <span className={`min-w-0 flex-1 text-[0.82rem] font-semibold leading-snug ${s.status === "skipped" || s.status === "pending" ? "text-slate-500" : ""}`}>
           {s.i + 1}. {s.title}
         </span>
+        {s.flaky && <span className="shrink-0 rounded-md bg-amber-400/15 px-1.5 text-[0.65rem] text-amber-200" title="ล้มครั้งแรก ผ่านตอนลองซ้ำ — ไม่นับเป็นบั๊ก">ผ่านเมื่อลองซ้ำ</span>}
         <span className="shrink-0 rounded-md bg-white/5 px-1.5 text-[0.65rem] text-slate-400">{kindLabel(s.kind)}</span>
         {s.durationMs !== undefined && <span className="shrink-0 text-[0.65rem] tabular-nums text-slate-500">{fmtDur(s.durationMs)}</span>}
       </div>
@@ -166,6 +167,7 @@ export const RunPanel: React.FC<Props> = ({ runs, selectedId, onSelect, onStop, 
                     <span>{fmtTime(r.startedAt ?? r.queuedAt)}</span>
                     <span className="text-emerald-300/80">ผ่าน {r.passed || r.steps.filter((s) => s.status === "passed").length}</span>
                     <span className={r.failed ? "text-rose-300" : ""}>ไม่ผ่าน {r.failed || r.steps.filter((s) => s.status === "failed").length}</span>
+                    {r.steps.some((s) => s.flaky) && <span className="text-amber-300/80">ลองซ้ำผ่าน {r.steps.filter((s) => s.flaky).length}</span>}
                   </div>
                   {r.status === "running" && (
                     <div className="absolute inset-x-0 bottom-0 h-0.5 bg-white/5">
