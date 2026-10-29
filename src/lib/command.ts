@@ -1,12 +1,15 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { BotConfig, BotTask, ScriptRun } from "@/types/bot";
 import { pushActivity } from "./activity";
 import { askBrain, webResearch } from "./brain";
-import { SCRIPT_FORMAT, saveScript } from "./mcp";
+import menuList from "./erp-menus.json";
+import { SCRIPT_FORMAT, lintScript, saveScript } from "./mcp";
+import { DESIGN } from "./script-fault";
 import { addEvent, getBotById, getBots, getSettings } from "./swarm-store";
 import { psqlRead } from "./uat-health";
-import { getRun, startRuns } from "./uat-runs";
-import { loadScripts } from "./uat-scripts";
+import { RUN_DIR, getRun, startRuns } from "./uat-runs";
+import { SCRIPT_DIR, loadScripts } from "./uat-scripts";
 
 // สั่งงานตรวจ: ผู้ใช้พิมพ์ว่าจะตรวจอะไร → สมอง AI เลือกบอท → แต่ละบอทเขียนสคริปต์ → ตัวรันเดิมต่อ PostgreSQL/เว็บ/API จริง
 const MAX_PICK = 6;
@@ -246,5 +249,70 @@ export async function proposeScripts(runIds: string[]) {
     pushActivity({ kind: "note", text: `AI คิดสคริปต์ทดสอบเพิ่มไม่สำเร็จ: ${errText(e)}` });
   } finally {
     proposing = false;
+  }
+}
+
+// ---------- AI ซ่อมสคริปต์ที่พังเพราะตัวเอง ----------
+// สคริปต์ AI ที่ด่านคัดชี้ว่าผิดเอง → AI เขียนฉบับแก้ลง runs/<รอบ>/heal.json → รันลองจากไฟล์นั้น (healOf) → promoteHeal บันทึกทับเมื่อรอบลองผ่านหรือไปถึงจุดที่ ERP ผิดจริง
+// ponytail: ซ่อมเฉพาะสคริปต์อ่านอย่างเดียว รอบลองจึงรันกับ smldemo ได้ปลอดภัยเท่าสคริปต์ ✨ คำสั่ง — ไม่ใช้ test_db เพราะจอ ERP เขียน smldemo ขั้น db.* บนสำเนาจะไม่เห็นข้อมูลที่จอสร้าง
+const healing = new Set<string>();
+export async function healScript(run: ScriptRun, why: string): Promise<string | undefined> {
+  if (healing.has(run.scriptId)) return undefined;
+  healing.add(run.scriptId);
+  try {
+    const text0 = readFileSync(join(SCRIPT_DIR, `${run.scriptId}.json`), "utf8");
+    const orig = JSON.parse(text0) as Script & Record<string, unknown>;
+    readOnlyGuard(orig); // มีขั้นเขียนข้อมูล → ให้คนแก้เอง
+    const failed = run.steps.filter((s) => s.status === "failed" && !s.cleanup);
+    const facts = failed.map((s) => `ขั้น ${s.i + 1} ${s.title} [${s.kind}] — ${s.detail ?? ""}${s.expected !== undefined ? ` · คาดหวัง ${s.expected}` : ""}${s.actual !== undefined ? ` · ค่าจริง ${s.actual}` : ""}`);
+    // ponytail: เมนูทั้งหมด 90 KB ยาวเกิน → ส่งเฉพาะเมนูที่ key/ชื่อมีคำจาก key ที่ผิดหรือชื่อสคริปต์ (ไม่เกิน 80) พอให้เลือกเมนูที่ถูก
+    const words = [...(text0.match(/menu_[a-z0-9_]+/g) ?? []).flatMap((k) => k.split("_").slice(1)), ...`${run.scriptTitle} ${failed.map((s) => s.title).join(" ")}`.split(/\s+/)].filter((w) => w.length >= 2 && w !== "menu");
+    const menus = failed.some((s) => s.kind === "ui.openMenu") ? menuList.filter(([k, name]) => words.some((w) => k.includes(w) || name.includes(w))).slice(0, 80).map(([k, name]) => `${k} = ${name}`).join("\n") : "";
+    const system = `คุณซ่อมสคริปต์ UAT ของ SML AI Account ที่รันแล้วพังเพราะตัวสคริปต์เอง (ยังไม่ได้ตรวจ ERP จริง)
+${SCRIPT_FORMAT}
+กติกา:
+- คงจุดประสงค์และทุกสิ่งที่ตรวจไว้ แก้เฉพาะส่วนที่ผิด: selector/คำค้น, SQL (ใช้เฉพาะตาราง/คอลัมน์ใน "คอลัมน์จริง"), path/body ของ API, key เมนู, ตัวแปร {{}} (ต้อง save จากขั้นก่อน)
+- ห้ามลบขั้นตรวจ ห้ามแก้ค่าคาดหวังให้ตรงค่าจริงเพื่อให้ผ่าน ยกเว้นการออกแบบด้านล่างอธิบายว่าค่าจริงถูก
+- อ่านอย่างเดียว: ห้าม db.exec, api.request ใช้ GET เท่านั้น · title ทุกขั้นเป็นภาษาไทย
+- ตอบ JSON ของสคริปต์ทั้งไฟล์ (title, steps, cleanup) เท่านั้น
+การออกแบบของ SML ที่ยืนยันจากโค้ดแล้ว (ไม่ใช่บั๊ก):
+${DESIGN}
+${menus ? `เมนูที่มีจริง (key = ชื่อ):\n${menus}\n` : ""}คอลัมน์จริงใน PostgreSQL:
+${await realColumns(text0)}`;
+    let err = "";
+    for (let round = 0; round < 2; round++) {
+      const prompt = `เหตุที่ไม่เปิด issue: ${why}\nขั้นที่พัง:\n${facts.join("\n")}\n\nสคริปต์เดิม:\n${text0.slice(0, 12_000)}${err ? `\n\nฉบับแก้รอบก่อนถูกปฏิเสธ: ${err} — แก้แล้วส่งใหม่` : ""}`;
+      const text = await askBrain("heal", getSettings().scriptModel, system, prompt, [], SCRIPT_SCHEMA).catch(() => askBrain("heal-fallback", getSettings().brainModel, system, prompt, [], SCRIPT_SCHEMA));
+      try {
+        const raw = json(text);
+        const fix = (raw.steps ? raw : (Object.values(raw).find((v) => (v as Script)?.steps) ?? raw)) as Script;
+        if (!Array.isArray(fix.steps) || !fix.steps.length) throw new Error("ไม่มีขั้นตอน (steps ว่าง)");
+        const sc = { ...orig, title: fix.title || orig.title, steps: fix.steps, cleanup: fix.cleanup ?? orig.cleanup ?? [] };
+        readOnlyGuard(sc);
+        await checkScript(sc);
+        lintScript(sc);
+        writeFileSync(join(RUN_DIR, run.id, "heal.json"), JSON.stringify(sc, null, 2) + "\n");
+        return startRuns([run.scriptId], undefined, run.id).runs[0]?.id;
+      } catch (e) {
+        err = errText(e);
+      }
+    }
+    pushActivity({ kind: "note", text: `AI ซ่อมสคริปต์ ${run.scriptId} ไม่ผ่านการตรวจ: ${err}`, scriptId: run.scriptId });
+  } catch (e) {
+    pushActivity({ kind: "note", text: `ไม่ซ่อมสคริปต์ ${run.scriptId} เอง: ${errText(e)}`, scriptId: run.scriptId });
+  } finally {
+    healing.delete(run.scriptId);
+  }
+  return undefined;
+}
+
+// รอบลองผ่าน หรือไปถึงจุดที่ ERP ผิดจริง (เปิด issue) → บันทึกฉบับซ่อมทับสคริปต์เดิมผ่านตัวตรวจของ save_script
+export function promoteHeal(run: ScriptRun) {
+  try {
+    const sc = JSON.parse(readFileSync(join(RUN_DIR, run.healOf!, "heal.json"), "utf8"));
+    saveScript({ script: { ...sc, description: `${sc.description ?? ""} · AI ซ่อมจากรอบ ${run.healOf} ลองแล้วรอบ ${run.id}`.trim() } });
+    pushActivity({ kind: "note", text: `บันทึกสคริปต์ที่ AI ซ่อมทับ ${run.scriptId} แล้ว (รอบลอง ${run.id} ${run.status === "passed" ? "ผ่าน" : "ไปถึงจุดที่ ERP ผิด"})`, scriptId: run.scriptId });
+  } catch (e) {
+    pushActivity({ kind: "note", text: `บันทึกสคริปต์ที่ AI ซ่อมไม่สำเร็จ ${run.scriptId}: ${errText(e)}`, scriptId: run.scriptId });
   }
 }

@@ -110,16 +110,22 @@ function scripts(a: Args) {
     .join("\n");
 }
 
-export function saveScript(a: Args) {
-  const sc = a.script as Args | undefined;
-  if (!sc || typeof sc !== "object") throw new Error("script object required");
-  if (typeof sc.id !== "string" || !/^[a-z0-9-]{3,80}$/.test(sc.id)) throw new Error("id must be 3-80 chars a-z 0-9 -");
+// ชนิดขั้นต้องรู้จัก และห้ามมีความลับในไฟล์ — ใช้ตอนบันทึก และตอนลองสคริปต์ที่ AI ซ่อมก่อนบันทึก (command.ts healScript)
+export function lintScript(sc: Args) {
   const steps = [...((sc.steps as Args[]) ?? []), ...((sc.cleanup as Args[]) ?? [])];
   const bad = steps.map((s, i) => (STEP_KINDS.includes(String(s?.do)) ? "" : `step ${i + 1} do="${s?.do}"`)).filter(Boolean);
   if (bad.length) throw new Error(`unknown step kind: ${bad.join(", ")}`);
   // ความลับห้ามอยู่ในไฟล์สคริปต์: ทั้งค่าจริงและการอ้าง {{env.*PASS/TOKEN/SECRET/KEY}}
   const body = JSON.stringify(sc);
   if (/\{\{\s*env\.\w*(PASS|TOKEN|SECRET|KEY)/i.test(body) || Object.entries(process.env).some(([k, v]) => /PASS|TOKEN|SECRET|KEY/i.test(k) && v && v.length >= 4 && body.includes(v))) throw new Error("script must not contain secrets or {{env.*secret}} — use ui.adminLogin");
+  return steps;
+}
+
+export function saveScript(a: Args) {
+  const sc = a.script as Args | undefined;
+  if (!sc || typeof sc !== "object") throw new Error("script object required");
+  if (typeof sc.id !== "string" || !/^[a-z0-9-]{3,80}$/.test(sc.id)) throw new Error("id must be 3-80 chars a-z 0-9 -");
+  const steps = lintScript(sc);
   const file = join(SCRIPT_DIR, `${sc.id}.json`);
   const old = existsSync(file) ? readFileSync(file, "utf8") : null;
   writeFileSync(file, JSON.stringify({ cleanup: [], ...sc }, null, 2) + "\n");

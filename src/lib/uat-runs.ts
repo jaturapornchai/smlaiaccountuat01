@@ -56,8 +56,8 @@ const save = (r: ScriptRun) => {
   writeFileSync(join(RUN_DIR, r.id, "run.json"), JSON.stringify(r, null, 1));
 };
 
-// retestOf = เลข issue ที่สั่งตรวจซ้ำหลังแก้ (ผลจะถูกแจ้งกลับใน issue นั้น)
-export function startRuns(scriptIds: string[], retestOf?: string): { runs: ScriptRun[]; unknown: string[] } {
+// retestOf = เลข issue ที่สั่งตรวจซ้ำหลังแก้ (ผลจะถูกแจ้งกลับใน issue นั้น) · healOf = รอบที่สคริปต์พังเอง (ลองฉบับที่ AI ซ่อม)
+export function startRuns(scriptIds: string[], retestOf?: string, healOf?: string): { runs: ScriptRun[]; unknown: string[] } {
   const { scripts } = loadScripts();
   if (!activeRunCount()) Object.assign(batch, { p: 0, f: 0, e: 0, ids: [] });
   const s = getSettings();
@@ -71,7 +71,7 @@ export function startRuns(scriptIds: string[], retestOf?: string): { runs: Scrip
     const run: ScriptRun = {
       id, scriptId: sc.id, scriptTitle: sc.title, module: sc.module, lens: sc.lens, severityOnFail: sc.severityOnFail, botId: bot.id,
       target: s.erpTargetUrl, headed: s.headed, status: "queued", queuedAt: new Date().toISOString(),
-      steps: [], passed: 0, failed: 0, skipped: 0, issues: 0, retestOf, ai: sc.ai,
+      steps: [], passed: 0, failed: 0, skipped: 0, issues: 0, retestOf, ai: sc.ai, healOf,
     };
     runs.set(id, run);
     queue.push(id);
@@ -103,7 +103,8 @@ function launch(run: ScriptRun) {
     run.message = "ไม่พบไฟล์สคริปต์แล้ว (ถูกลบหรือแก้ไม่ผ่านการตรวจ)";
     return finish(run);
   }
-  const child = spawn(process.execPath, [RUNNER, "--script", script.file, "--out", outDir, "--base", run.target], {
+  const file = run.healOf ? join(RUN_DIR, run.healOf, "heal.json") : script.file;
+  const child = spawn(process.execPath, [RUNNER, "--script", file, "--out", outDir, "--base", run.target], {
     env: { ...process.env, UAT_RUN_ID: run.id, UAT_HEADED: run.headed ? "1" : "", UAT_BRAIN_MODEL: getSettings().brainModel, UAT_EYES_MODEL: getSettings().eyesModel },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: !run.headed,
@@ -198,7 +199,9 @@ function finish(run: ScriptRun) {
   // ยกเว้นพังเพราะตัวสคริปต์เอง (ไม่ใช่หลักฐานว่าระบบผิด) — รอบตรวจซ้ำของ issue ยังส่งเสมอ ให้คนแก้รู้ผล
   // สคริปต์ auto-* ที่ AI เสนอเองไม่เปิด issue อัตโนมัติ (ลุงจืดสั่ง 2026-10-29: เปิด ticket ไม่จริงบ่อย) — ตรวจแล้วกด "ส่งเข้า IssueMate" เอง
   if (run.status === "failed" && getSettings().autoIssueMate) void autoIssue(run, bot);
-  if (ok) void closeLoop(run);
+  // รอบลองสคริปต์ที่ AI ซ่อมไม่ปิดวงจร issue เดิม: สคริปต์เปลี่ยนแล้ว ผ่านไม่ได้แปลว่าบั๊กเดิมหาย
+  if (ok && run.healOf) void import("./command").then((m) => m.promoteHeal(run));
+  else if (ok) void closeLoop(run);
 
   batch[ok ? "p" : run.status === "failed" ? "f" : "e"]++;
   (batch.ids ??= []).push(run.id);
@@ -214,15 +217,23 @@ function finish(run: ScriptRun) {
 
 // สคริปต์ผ่าน: ปลดตัวกันส่งซ้ำ แล้วแจ้งใน issue เดิมว่าตรวจซ้ำผ่าน (ปิดวงจร สร้าง → ตรวจ → แก้ → ตรวจซ้ำ)
 // สคริปต์ที่ AI เขียน (ask-*, MCP save_script) ผ่านด่าน AI ก่อน: ชี้ชัดว่าสคริปต์ผิดเอง → ไม่เปิด (กดส่งเองได้), ERP ผิด/ไม่แน่ใจ → เปิดตามเดิม
+// สคริปต์ AI ที่ผิดเอง → AI ซ่อมแล้วลองรันก่อนบันทึก (รอบลองไม่ซ่อมต่อ กันวน) · รอบลองที่เปิด issue ได้ = ไปถึง ERP แล้ว → บันทึกฉบับซ่อม
 async function autoIssue(run: ScriptRun, bot: BotConfig) {
   const fault = run.retestOf ? undefined : scriptFault(run);
-  if (fault) run.noIssue = `สคริปต์พังเอง ยังไม่ได้ตรวจ ERP (ขั้น ${fault.i + 1}: ${(fault.detail ?? "").slice(0, 120)}) — แก้สคริปต์แล้วรันใหม่`;
+  let own = fault && `ขั้น ${fault.i + 1}: ${(fault.detail ?? "").slice(0, 120)}`;
+  if (fault) run.noIssue = `สคริปต์พังเอง ยังไม่ได้ตรวจ ERP (${own}) — แก้สคริปต์แล้วรันใหม่`;
   else if (!run.retestOf && run.scriptId.startsWith("auto-")) run.noIssue = "สคริปต์ที่ AI เสนอเอง — ตรวจผลก่อน ถ้าเป็นบั๊กจริงกด \"ส่งเข้า IssueMate\" ที่หน้ารอบนี้";
   else if (!run.retestOf && run.ai) {
     const why = await aiTriage(run, join(RUN_DIR, run.id), getSettings().analystModel);
-    if (why) run.noIssue = `AI ตรวจแล้วเห็นว่าสคริปต์ผิดเอง: ${why} — ถ้าเป็นบั๊กจริงกด "ส่งเข้า IssueMate" ที่หน้ารอบนี้`;
+    if (why) run.noIssue = `AI ตรวจแล้วเห็นว่าสคริปต์ผิดเอง: ${(own = why)} — ถ้าเป็นบั๊กจริงกด "ส่งเข้า IssueMate" ที่หน้ารอบนี้`;
   }
+  if (run.healOf && !own) void import("./command").then((m) => m.promoteHeal(run)); // ไปถึง ERP แล้ว (รวม auto-* ที่ไม่เปิดเอง)
   if (!run.noIssue) return void (await sendToIssueMate(run));
+  if (run.healOf && own) run.noIssue = `สคริปต์ที่ AI ซ่อมยังพังเอง ไม่บันทึกทับ: ${run.noIssue}`;
+  else if (own && run.ai && !run.healOf) {
+    const trial = await import("./command").then((m) => m.healScript(run, own!));
+    if (trial) run.noIssue += ` · AI ซ่อมสคริปต์แล้ว กำลังลองรอบ ${trial} ก่อนบันทึก`;
+  }
   addEvent(bot, "info", `ไม่เปิด issue: "${run.scriptTitle}" ${run.noIssue}`);
   save(run);
 }

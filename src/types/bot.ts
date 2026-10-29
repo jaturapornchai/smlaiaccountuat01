@@ -142,6 +142,7 @@ export interface ScriptRun {
   noIssue?: string; // เหตุผลที่ไม่เปิด issue อัตโนมัติ (สคริปต์พังเอง / สคริปต์ auto-*) ให้คนเห็นบนการ์ดและหน้ารอบ
   retestOf?: string; // เลข issue ที่สั่งตรวจซ้ำ
   ai?: boolean; // สคริปต์ที่ AI เขียน (ดู UatScript.ai)
+  healOf?: string; // รอบลองสคริปต์ที่ AI ซ่อม: รันจาก runs/<healOf>/heal.json แทนไฟล์ในคลัง (command.ts healScript)
   liveAt?: string; // เวลาภาพหน้าจอสดล่าสุด (runs/<id>/live.jpg)
 }
 

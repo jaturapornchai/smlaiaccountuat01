@@ -160,6 +160,7 @@ export const RunPanel: React.FC<Props> = ({ runs, selectedId, onSelect, onStop, 
                   <div className="flex items-center gap-2">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: mod?.accent }} />
                     <span className="min-w-0 flex-1 truncate text-[0.8rem] font-semibold">{r.scriptTitle}</span>
+                    {r.healOf && <span className="rounded-full bg-amber-400/15 px-1.5 text-[0.62rem] font-bold text-amber-200" title={`ลองสคริปต์ที่ AI ซ่อมจากรอบ ${r.healOf} ก่อนบันทึกทับ`}>AI ซ่อม</span>}
                     {r.issue?.code && <span className="rounded-full bg-violet-400/15 px-1.5 text-[0.62rem] font-bold text-violet-200">{r.issue.code}</span>}
                     <StatusBadge status={r.status} />
                   </div>
