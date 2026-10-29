@@ -9,4 +9,18 @@ export async function register() {
     writeLog("server", { event: "stop", pid: process.pid });
     setTimeout(() => process.exit(0), 5000).unref();
   });
+
+  // ticket ที่ Tester เปิดเป็น deployed → ตรวจซ้ำเอง (สวิตช์ autoRetest) · IssueMate ไม่มี webhook จึงถามทุก 5 นาที
+  const [{ join }, { pollDeployed }, { listDeployed }, { startRuns, RUN_DIR }, { getSettings }, { pushActivity }] = await Promise.all([
+    import("node:path"), import("./lib/auto-retest"), import("./lib/issuemate"), import("./lib/uat-runs"), import("./lib/swarm-store"), import("./lib/activity"),
+  ]);
+  const deps = {
+    list: listDeployed,
+    start: startRuns,
+    stateFile: join(RUN_DIR, "auto-retest.json"),
+    note: (text: string, code: string, scriptId: string) => void pushActivity({ kind: "note", text, code, scriptId }),
+  };
+  setInterval(() => {
+    if (getSettings().autoRetest) pollDeployed(deps).catch((e) => writeLog("server", { event: "auto-retest", error: String(e) }));
+  }, 5 * 60_000).unref();
 }

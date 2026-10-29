@@ -74,6 +74,7 @@ export interface SwarmSettings {
   eyesModel: string; // ดูภาพหน้าจอ (ui.see · ui.play)
   autoIssueMate: boolean; // ส่งรอบที่ไม่ผ่านเข้า IssueMate อัตโนมัติ
   autoScripts: boolean; // จบชุดทดสอบแล้วให้ AI เสนอ+เขียนสคริปต์ใหม่เอง (on the fly)
+  autoRetest: boolean; // ticket ที่ Tester เปิดเป็น deployed ใน IssueMate → รันสคริปต์เดิมตรวจซ้ำเอง (auto-retest.ts)
   maxParallelBots: number;
   headed: boolean;
 }
