@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { BotConfig, BotTask } from "@/types/bot";
-import { askBrain } from "./brain";
+import { askBrain, webResearch } from "./brain";
 import { SCRIPT_FORMAT, saveScript } from "./mcp";
 import { addEvent, getBotById, getBots, getSettings } from "./swarm-store";
 import { psqlRead } from "./uat-health";
@@ -35,6 +35,16 @@ async function realColumns(text: string): Promise<string> {
   return lines.map((l) => l.replace("|", ": ").slice(0, 1500)).join("\n") || "(ไม่พบตารางเหล่านี้ในฐาน Demo)";
 }
 
+// ค้นเว็บครั้งเดียวต่อคำสั่ง (บอทหลายตัวที่รับคำสั่งเดียวกันใช้ผลร่วมกัน): กฎทางการ + วิธีที่โปรแกรมบัญชีอื่นทำ
+// ponytail: แคชในหน่วยความจำ ล้างทิ้งเมื่อเกิน 50 คำสั่ง
+const refsCache = new Map<string, Promise<string>>();
+function researchFor(command: string) {
+  if (refsCache.size > 50) refsCache.clear();
+  const q = command.slice(0, 120);
+  if (!refsCache.has(q)) refsCache.set(q, webResearch([`${q} กรมสรรพากร หลักเกณฑ์`, `${q} โปรแกรมบัญชี วิธีบันทึก`]));
+  return refsCache.get(q)!;
+}
+
 // AI เลือกบอทที่เกี่ยวกับคำสั่ง (ไม่เกิน MAX_PICK ตัว)
 async function pickBots(command: string): Promise<BotConfig[]> {
   const bots = getBots();
@@ -61,6 +71,7 @@ function readOnlyGuard(sc: Script) {
 async function writeScript(bot: BotConfig, id: string, command: string): Promise<Script> {
   const mine = loadScripts().scripts.filter((s) => s.module === bot.role && !s.id.startsWith("ask-"));
   const example = mine.find((s) => s.lens === bot.lens) ?? mine[0];
+  const refs = await researchFor(command);
   const cols = await realColumns(`${command} ${bot.focus} ${mine.map((s) => readFileSync(s.file, "utf8")).join(" ")}`);
   const system = `${bot.systemPrompt}
 
@@ -72,6 +83,9 @@ ${SCRIPT_FORMAT}
 - SQL ใช้เฉพาะตารางและคอลัมน์ใน "คอลัมน์จริง" ห้ามเดาชื่อ · ตรวจแบบนับแถวที่ผิด select count(*) as n ... แล้ว expect {col:"n",op:"eq",value:0}
 - อ่านอย่างเดียว: ห้าม db.exec, api.request ใช้ GET เท่านั้น · เงินเทียบตรงเป๊ะ ห้ามปัดเศษ
 - title ของสคริปต์และทุกขั้นเป็นภาษาไทยที่ผู้ใช้ทั่วไปเข้าใจ · 2-10 ขั้น
+
+ข้อมูลอ้างอิงจากเว็บ (ใช้เฉพาะส่วนที่เกี่ยวกับคำสั่ง · ถ้าใช้ตัดสินว่าถูก/ผิด ให้ใส่ URL ไว้ใน description ของสคริปต์):
+${refs || "(ค้นไม่เจอ)"}
 
 ตัวอย่างสคริปต์ที่รันผ่านจริงของโมดูลนี้:
 ${example ? readFileSync(example.file, "utf8").slice(0, 3000) : "(ไม่มี)"}
@@ -88,7 +102,7 @@ ${cols}`;
       if (!Array.isArray(sc.steps) || !sc.steps.length) throw new Error("ไม่มีขั้นตอน (steps ว่าง)");
       readOnlyGuard(sc);
       const severity = /^S[1-4]$/.test(String(sc.severityOnFail)) ? sc.severityOnFail : "S3";
-      saveScript({ script: { ...sc, id, module: bot.role, lens: bot.lens, severityOnFail: severity, description: `สั่งงาน: ${command}` } });
+      saveScript({ script: { ...sc, id, module: bot.role, lens: bot.lens, severityOnFail: severity, description: `สั่งงาน: ${command}${raw.description ? ` · ${raw.description}` : ""}` } });
       return sc;
     } catch (e) {
       err = errText(e);

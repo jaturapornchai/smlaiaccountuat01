@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { BotConfig, BotTask, IssueLink, ScriptRun, StepResult } from "@/types/bot";
 import { pushActivity } from "./activity";
+import { redact } from "./log";
 import { clearSent, commentIssue, reportRun } from "./issuemate";
 import { addEvent, getBotById, getBots, getSettings } from "./swarm-store";
 import { loadScripts } from "./uat-scripts";
@@ -11,9 +12,7 @@ export const RUN_DIR = join(process.cwd(), "runs");
 const RUNNER = join(process.cwd(), "runner", "run.mjs");
 const KEEP_RUNS = 60;
 
-// ชั้นที่ 2 ของการปิดความลับ (ตัวรันปิดแล้วชั้นแรก): ทุกบรรทัดจากตัวรันก่อนเข้า run.json / หน้าเว็บ / IssueMate
-const SECRETS = Object.entries(process.env).filter(([k, v]) => /PASS|TOKEN|SECRET|KEY/i.test(k) && v && v.length >= 4).map(([, v]) => v as string);
-const redact = (s: string) => SECRETS.reduce((t, v) => t.split(v).join("***REDACTED***"), s);
+// ชั้นที่ 2 ของการปิดความลับ (ตัวรันปิดแล้วชั้นแรก): ทุกบรรทัดจากตัวรันผ่าน redact ก่อนเข้า run.json / หน้าเว็บ / IssueMate
 
 // state อยู่บน global เพื่อให้รอดตอน dev reload; ผลที่จบแล้วเก็บถาวรที่ runs/<id>/run.json
 declare global {
@@ -190,8 +189,8 @@ function finish(run: ScriptRun) {
   }
   save(run);
   pump();
-  // สคริปต์ ask-* ที่ AI เขียนจากคำสั่ง ไม่เปิด issue เอง (SQL ที่ AI แต่งอาจผิดเอง) — กดส่ง IssueMate จากหน้ารอบรันได้
-  if (run.status === "failed" && getSettings().autoIssueMate && !run.scriptId.startsWith("ask-")) void sendToIssueMate(run);
+  // ตรวจไม่ผ่าน → เปิด issue ให้หาวิธีแก้ทันที (ลุงจืดสั่ง 2026-10-29) · สคริปต์ ask-* ที่ AI เขียนเองจะมีหมายเหตุใน issue ให้ตรวจสคริปต์ก่อน
+  if (run.status === "failed" && getSettings().autoIssueMate) void sendToIssueMate(run);
   if (ok) void closeLoop(run);
 
   batch[ok ? "p" : run.status === "failed" ? "f" : "e"]++;

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { ScriptRun } from "@/types/bot";
 import { pushActivity, waitActivity, waitAny } from "./activity";
 import { scriptsForIssue } from "./issuemate";
+import { logDays, readLogs, timed } from "./log";
 import { getBots, getSettings, updateSettings } from "./swarm-store";
 import { testDb } from "./test-db";
 import { checkAll } from "./uat-health";
@@ -51,6 +52,11 @@ export const TOOLS = [
     name: "events",
     description: "Feed from the tester to you: run results, batch summaries, issues opened, issues verified fixed. Long-poll: returns events after cursor 'after' (0 = all kept), waiting up to 'wait' seconds (max 50) if none. Reuse the returned cursor.",
     inputSchema: { type: "object", properties: { after: { type: "integer", minimum: 0 }, wait: { type: "integer", minimum: 0, maximum: 50 } } },
+  },
+  {
+    name: "logs",
+    description: "Persistent work log of this tester, one file per Thai day kept 30 days: brain (model, prompt/reply excerpt, ms), web (search query, hits), mcp (every AI tool call), activity (runs, batches, issues), api (route errors), server (restarts). Use it to audit what the system did and find slow or failing parts to improve. Returns the day's summary (count/failed/avg+max ms per kind, top errors, slowest) and the latest matching entries.",
+    inputSchema: { type: "object", properties: { date: { type: "string", description: "YYYY-MM-DD, default today" }, kind: { type: "string", enum: ["server", "activity", "brain", "web", "mcp", "api"] }, q: str, errors: { type: "boolean" }, limit: { type: "integer", minimum: 1, maximum: 500 } } },
   },
   {
     name: "test_db",
@@ -186,6 +192,11 @@ export async function callTool(name: string, a: Args, client: string, signal: Ab
     const what = name === "notify" ? String(a.text ?? "").slice(0, 300) : summarize(name, a);
     pushActivity({ kind: name === "notify" ? "note" : "mcp", client, tool: tag, text: what });
   }
+  // ทุกการเรียกจาก AI ลง log (ใครเรียก อะไร นานเท่าไร ล้มเพราะอะไร) — events รอได้นาน ms สูงเป็นปกติ
+  return timed("mcp", { client, tool: tag, args: JSON.stringify(a).slice(0, 500) }, () => dispatch(name, a, signal), (r) => ({ resultChars: r.length }));
+}
+
+async function dispatch(name: string, a: Args, signal: AbortSignal): Promise<string> {
   switch (name) {
     case "status": return status(a);
     case "scripts": return scripts(a);
@@ -194,6 +205,10 @@ export async function callTool(name: string, a: Args, client: string, signal: Ab
     case "command": return command(a);
     case "runs": return runs(a);
     case "events": return events(a, signal);
+    case "logs": {
+      const r = readLogs({ date: a.date as string, kind: a.kind as string, q: a.q as string, errors: !!a.errors, limit: lim(a.limit, 50, 500) });
+      return JSON.stringify({ days: logDays().slice(0, 30), ...r });
+    }
     case "test_db": return testDb(String(a.action ?? ""), String(a.name ?? ""));
     case "notify":
       if (!String(a.text ?? "").trim()) throw new Error("text required");

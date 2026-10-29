@@ -1,0 +1,140 @@
+{
+  "id": "e2e-purchase-credit-payment",
+  "title": "E2E ซื้อเชื่อ → จ่ายชำระ: ยอด VAT ภาษีซื้อ GL ตรงกัน แล้วลบคืนไม่เหลือเศษ",
+  "module": "purchase",
+  "lens": "api",
+  "severityOnFail": "S1",
+  "description": "ทำงานแบบผู้ใช้ Demo ผ่าน API ตัวเดียวกับหน้าจอ (/api/process/trans/save, ใบจ่ายชำระ → /api/process/doc/save): ซื้อเชื่อ 2 × 150.00 VAT แยกนอก 7% (อัตราเดียวกับบิลซื้อจริงใน smldemo) → คาด 300.00 + 21.00 = 321.00 · ตรวจหัวบิล ภาษีซื้อ (gl_journal_vat_buy) GL เดบิต=เครดิต รายงานภาษีซื้อ (menu_report_vat_buy) ยอดตรง · จ่ายชำระเงินสดเต็มจำนวน → ตรวจใบจ่ายอ้างบิล GL สมดุล · ลบบิลที่ถูกจ่ายชำระแล้วต้องถูกปฏิเสธ · cleanup ลบใบจ่าย+บิลผ่าน API แล้วตรวจว่าไม่เหลือแถวใน smldemo (เลขเอกสาร UAT-<รอบ>-PU/DE)",
+  "steps": [
+    { "title": "กำหนดเลขบิลซื้อทดสอบ", "do": "set", "name": "pu", "value": "UAT-{{run.short}}-PU" },
+    { "title": "กำหนดเลขใบจ่ายชำระทดสอบ", "do": "set", "name": "de", "value": "UAT-{{run.short}}-DE" },
+    { "title": "เข้าสู่ระบบแบบ Demo", "do": "ui.demoLogin" },
+    {
+      "title": "เลือกเจ้าหนี้/สินค้า/คลังจากบิลซื้อเชื่อจริงล่าสุด",
+      "do": "db.query",
+      "sql": "select t.cust_code as supp, d.item_code as item, d.unit_code as unit, d.wh_code as wh, d.shelf_code as shelf, d.stand_value::text as stand, d.divide_value::text as divide, to_char((now() at time zone 'Asia/Bangkok')::date, 'YYYY-MM-DD') as today from ic_trans t join ic_trans_detail d on d.doc_no = t.doc_no and d.trans_flag = t.trans_flag where t.trans_flag = 12 and t.inquiry_type = 0 and t.doc_no not like 'UAT%' and coalesce(t.is_cancel, 0) = 0 and t.last_status = 0 order by t.doc_date desc, t.roworder desc limit 1",
+      "rows": 1,
+      "save": { "supp": "supp", "item": "item", "unit": "unit", "wh": "wh", "shelf": "shelf", "stand": "stand", "divide": "divide", "today": "today" }
+    },
+    {
+      "title": "บันทึกซื้อเชื่อ 2 × 150.00 VAT แยกนอก 7%",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/save",
+      "body": {
+        "isNew": true, "confirmed": true,
+        "docNo": "{{pu}}", "docDate": "{{today}}", "transType": 1, "transFlag": 12, "inquiryType": 0,
+        "custCode": "{{supp}}", "docFormatCode": "PU", "taxDocNo": "{{pu}}", "taxDocDate": "{{today}}",
+        "vatType": 0, "vatRate": "7", "remark": "{{run.tag}}",
+        "lines": [{ "itemCode": "{{item}}", "unitCode": "{{unit}}", "whCode": "{{wh}}", "shelfCode": "{{shelf}}", "standValue": "{{stand}}", "divideValue": "{{divide}}", "qty": "2", "price": "150.00", "sumAmount": "300.00", "taxType": 0 }]
+      },
+      "expect": [{ "path": "data.docNo", "op": "eq", "value": "{{pu}}" }]
+    },
+    {
+      "title": "หัวบิล: มูลค่าก่อนภาษี 300.00 ภาษี 21.00 รวม 321.00",
+      "do": "db.query",
+      "sql": "select total_before_vat, total_vat_value, total_amount, vat_rate from ic_trans where doc_no = :'pu' and trans_flag = 12",
+      "rows": 1,
+      "expect": [
+        { "col": "total_before_vat", "op": "eq", "value": "300.00" },
+        { "col": "total_vat_value", "op": "eq", "value": "21.00" },
+        { "col": "total_amount", "op": "eq", "value": "321.00" },
+        { "col": "vat_rate", "op": "eq", "value": "7" }
+      ]
+    },
+    {
+      "title": "ภาษีซื้อ: ลงรายงานภาษีซื้อ 1 แถว ฐาน 300.00 ภาษี 21.00",
+      "do": "db.query",
+      "sql": "select vat_base_amount, vat_amount, vat_rate from gl_journal_vat_buy where doc_no = :'pu'",
+      "rows": 1,
+      "expect": [
+        { "col": "vat_base_amount", "op": "eq", "value": "300.00" },
+        { "col": "vat_amount", "op": "eq", "value": "21.00" },
+        { "col": "vat_rate", "op": "eq", "value": "7" }
+      ]
+    },
+    {
+      "title": "GL บิลซื้อ: มีรายการ และเดบิต = เครดิต ≥ 321.00",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(credit), 0) as credit from gl_journal_detail where doc_no = :'pu'",
+      "expect": [
+        { "col": "n", "op": "gt", "value": "0" },
+        { "col": "diff", "op": "eq", "value": "0" },
+        { "col": "credit", "op": "gte", "value": "321.00" }
+      ]
+    },
+    {
+      "title": "รายงานภาษีซื้อ (เมนูจริง) แสดงบิลนี้ ยอด 300.00 + 21.00 = 321.00",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": { "menuKey": "menu_report_vat_buy", "mode": "summary", "dateFrom": "{{today}}", "dateTo": "{{today}}", "fromCode": "", "toCode": "", "orderBy": "", "keyword": "{{pu}}", "viewDetail": false },
+      "expect": [
+        { "path": "data.rows.0.เลขที่เอกสาร", "op": "eq", "value": "{{pu}}" },
+        { "path": "data.rows.0.มูลค่าสินค้า/บริการ", "op": "eq", "value": "300.00" },
+        { "path": "data.rows.0.ภาษีมูลค่าเพิ่ม", "op": "eq", "value": "21.00" },
+        { "path": "data.rows.0.รวม", "op": "eq", "value": "321.00" }
+      ]
+    },
+    {
+      "title": "บันทึกจ่ายชำระเงินสดเต็มจำนวน 321.00",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/save",
+      "body": {
+        "kind": "ap_ar_trans", "isNew": true,
+        "docNo": "{{de}}", "docDate": "{{today}}", "transType": 1, "transFlag": 19,
+        "custCode": "{{supp}}", "docFormatCode": "DE", "remark": "{{run.tag}}",
+        "bills": [{ "billingNo": "{{pu}}", "billingDate": "{{today}}", "billType": 12, "sumDebtAmount": "321.00", "balanceRef": "321.00", "sumPayMoney": "321.00" }],
+        "pay": { "cash": "321.00" }
+      },
+      "expect": [{ "path": "data.docNo", "op": "eq", "value": "{{de}}" }]
+    },
+    {
+      "title": "ใบจ่ายชำระอ้างบิลซื้อ ยอดจ่าย 321.00",
+      "do": "db.query",
+      "sql": "select billing_no, bill_type, sum_pay_money from ap_ar_trans_detail where doc_no = :'de' and trans_flag = 19",
+      "rows": 1,
+      "expect": [
+        { "col": "billing_no", "op": "eq", "value": "{{pu}}" },
+        { "col": "bill_type", "op": "eq", "value": "12" },
+        { "col": "sum_pay_money", "op": "eq", "value": "321.00" }
+      ]
+    },
+    {
+      "title": "GL ใบจ่ายชำระ: มีรายการ และเดบิต = เครดิต = 321.00",
+      "do": "db.query",
+      "sql": "select count(*) as n, coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff, coalesce(sum(debit), 0) as debit from gl_journal_detail where doc_no = :'de'",
+      "expect": [
+        { "col": "n", "op": "gt", "value": "0" },
+        { "col": "diff", "op": "eq", "value": "0" },
+        { "col": "debit", "op": "eq", "value": "321.00" }
+      ]
+    },
+    {
+      "title": "ลบบิลซื้อที่ถูกจ่ายชำระแล้ว ต้องถูกปฏิเสธ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/trans/delete",
+      "body": { "docNo": "{{pu}}", "transFlag": 12 },
+      "expectStatus": [400, 409, 422]
+    },
+    {
+      "title": "บิลซื้อยังอยู่หลังถูกปฏิเสธการลบ",
+      "do": "db.query",
+      "sql": "select doc_no from ic_trans where doc_no = :'pu' and trans_flag = 12",
+      "rows": 1
+    }
+  ],
+  "cleanup": [
+    { "title": "ลบใบจ่ายชำระทดสอบ", "do": "api.request", "method": "POST", "path": "/api/process/doc/delete", "body": { "kind": "ap_ar_trans", "docNo": "{{de}}", "transFlag": 19 }, "expectStatus": [200, 400, 404, 409, 422] },
+    { "title": "ลบบิลซื้อทดสอบ", "do": "api.request", "method": "POST", "path": "/api/process/trans/delete", "body": { "docNo": "{{pu}}", "transFlag": 12 }, "expectStatus": [200, 400, 404, 409, 422] },
+    {
+      "title": "ไม่เหลือเศษเอกสารทดสอบใน smldemo",
+      "do": "db.query",
+      "sql": "select (select count(*) from ic_trans where doc_no in (:'pu', :'de')) + (select count(*) from ic_trans_detail where doc_no in (:'pu', :'de')) + (select count(*) from ap_ar_trans where doc_no in (:'pu', :'de')) + (select count(*) from ap_ar_trans_detail where doc_no in (:'pu', :'de')) + (select count(*) from cb_trans where doc_no in (:'pu', :'de')) + (select count(*) from gl_journal where doc_no in (:'pu', :'de')) + (select count(*) from gl_journal_detail where doc_no in (:'pu', :'de')) + (select count(*) from gl_journal_vat_buy where doc_no in (:'pu', :'de')) as left_rows",
+      "expect": [{ "col": "left_rows", "op": "eq", "value": "0" }]
+    }
+  ]
+}

@@ -36,7 +36,7 @@ export const BotCard: React.FC<BotCardProps> = ({ i, bot, run, shot, scriptCount
           <span className="grid h-full place-items-center px-6 text-center text-[0.75rem] text-slate-500">
             <span>
               <MonitorPlay className="mx-auto mb-2 h-7 w-7 opacity-60" style={{ color: bot.accent }} />
-              {live ? "กำลังทำงาน · ขั้นนี้ไม่มีหน้าจอ (SQL/API)" : "ยังไม่มีภาพหน้าจอ"}
+              {live ? "กำลังทำงาน · ขั้นนี้ไม่มีหน้าจอ (SQL/API)" : bot.lens === "data" ? "บอทนี้ตรวจผ่าน SQL · ไม่มีหน้าจอ" : "ยังไม่มีภาพหน้าจอ"}
             </span>
           </span>
         )}

@@ -3,7 +3,21 @@ import { listRuns, startRuns } from "@/lib/uat-runs";
 import { loadScripts } from "@/lib/uat-scripts";
 import { getBotById } from "@/lib/swarm-store";
 
-export const GET = () => guard(() => ok({ runs: listRuns() }));
+// แนบรอบล่าสุด + รอบที่มีภาพหน้าจอล่าสุดของทุกบอท แม้หลุด 60 รอบล่าสุด (smoke รันทีละมากจะดันบอทอื่นตกรายการ → การ์ดไม่มีจอ)
+export const GET = () =>
+  guard(() => {
+    const runs = listRuns();
+    const have = new Set(runs.map((r) => r.id));
+    const seen = new Set<string>();
+    for (const r of listRuns(Infinity)) {
+      for (const k of [r.startedAt && `${r.botId}:run`, r.liveAt && `${r.botId}:shot`]) {
+        if (!k || seen.has(k)) continue;
+        seen.add(k);
+        if (!have.has(r.id)) (have.add(r.id), runs.push(r));
+      }
+    }
+    return ok({ runs });
+  });
 
 // body: { scriptIds?: string[], botIds?: string[], all?: boolean } — botIds = ทุกสคริปต์ที่ตรงกับโมดูล+มุมตรวจของบอทนั้น
 export const POST = (req: Request) =>

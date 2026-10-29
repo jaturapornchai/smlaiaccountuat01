@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HealthCheck, IssueLink, ScriptRun } from "@/types/bot";
-import { askBrain } from "./brain";
+import { askBrain, webResearch } from "./brain";
+import { PERSONA } from "./swarm-data";
 import { getSettings } from "./swarm-store";
 
 // ส่งผลทดสอบที่ไม่ผ่านเข้า IssueMate (MCP แบบ stateless: เรียก tools/call ได้เลยไม่ต้อง initialize)
@@ -67,12 +68,16 @@ export function clearSent(scriptId: string): string[] {
   return codes;
 }
 
-const ANALYST = `คุณคือนักวิเคราะห์ผลทดสอบ UAT ของระบบบัญชี SML AI Account (Next.js + Go + PostgreSQL)
-ตอบภาษาไทย สั้น ตรงประเด็น ไม่แต่งข้อมูลที่ไม่มีในหลักฐาน หัวข้อ:
-1. อาการ (1 บรรทัด)
+const ANALYST = `${PERSONA}
+งานตอนนี้: วิเคราะห์ผลทดสอบ UAT ของระบบบัญชี SML AI Account (Next.js + Go + PostgreSQL)
+ผู้อ่านคือ AI นักพัฒนาที่จะรับ issue นี้ไปแก้ต่อ ตอบภาษาไทย สั้น ตรงประเด็น ไม่แต่งข้อมูลที่ไม่มีในหลักฐาน หัวข้อ:
+1. ไม่ผ่านเพราะอะไร (1-2 บรรทัด: ขั้นไหน คาดหวังอะไร ได้อะไร)
 2. สาเหตุที่น่าจะเป็น (เรียงจากน่าจะสุด ระบุว่าเป็นการคาดเดา)
 3. จุดที่ควรตรวจในโค้ด/ตาราง (ชื่อตาราง คอลัมน์ API หรือหน้าจอที่เกี่ยว)
-4. วิธีตรวจว่าแก้แล้ว (รันสคริปต์ไหน ขั้นไหน คาดหวังค่าอะไร)`;
+4. แนวทางแก้ไขที่แนะนำ (ทำอะไรที่ไหน เป็นข้อๆ ให้ AI ทำต่อได้ทันที · เรื่องภาษี/บัญชีให้อ้างหลักที่ถูกพร้อม URL)
+5. วิธีตรวจว่าแก้แล้ว (รันสคริปต์ไหน ขั้นไหน คาดหวังค่าอะไร)`;
+
+const TAXY = /ภาษี|VAT|ใบกำกับ|หัก ณ ที่จ่าย|ภ\.?ง\.?ด|ภ\.?พ|e-?Tax|บัญชี|GL|งบ|เดบิต|เครดิต|ค่าเสื่อม|ต้นทุน/i;
 
 export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLink> {
   const at = () => new Date().toISOString();
@@ -88,6 +93,7 @@ export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLi
     `- ขั้น ${s.i + 1} ${s.title} [${s.kind}]${s.detail ? ` — ${s.detail}` : ""}${s.expected !== undefined ? `\n  - คาดหวัง: \`${s.expected}\`` : ""}${s.actual !== undefined ? `\n  - ค่าจริง: \`${s.actual}\`` : ""}`;
   const facts = [
     `สคริปต์: uat-scripts/${run.scriptId}.json — ${run.scriptTitle}`,
+    ...(run.scriptId.startsWith("ask-") ? ["(สคริปต์นี้ AI เขียนจากคำสั่ง — ตรวจก่อนว่า SQL/ค่าคาดหวังในสคริปต์ถูกต้อง แล้วค่อยแก้ระบบ)"] : []),
     `เว็บที่ทดสอบ: ${run.target} · โมดูล ${run.module} · มุมตรวจ ${run.lens}`,
     `ผล: ${run.status} ผ่าน ${run.passed} ไม่ผ่าน ${run.failed} ข้าม ${run.skipped}${run.message ? ` · ${run.message}` : ""}`,
     `ตัวตรวจจับเจอ HTTP>=400 / JS error / DB error ${run.issues} ครั้ง`,
@@ -99,7 +105,10 @@ export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLi
   const model = getSettings().brainModel;
   let analysis: string;
   try {
-    analysis = await askBrain(model, ANALYST, `${facts}${png ? "\n\n(แนบภาพหน้าจอตอนขั้นที่พัง)" : ""}`, png ? [png] : []);
+    // เรื่องเงิน/ภาษี/บัญชี → ค้นกฎทางการมาประกอบ (เรื่องโค้ดล้วนไม่ต้องค้น กัน prompt ฟุ้ง)
+    const refs = TAXY.test(facts) ? await webResearch([`${run.scriptTitle} ${first?.title ?? ""}`.slice(0, 120) + " กรมสรรพากร"]) : "";
+    const web = refs ? `\n\nข้อมูลอ้างอิงจากเว็บ (อ้าง URL เมื่อใช้):\n${refs}` : "";
+    analysis = await askBrain(model, ANALYST, `${facts}${web}${png ? "\n\n(แนบภาพหน้าจอตอนขั้นที่พัง)" : ""}`, png ? [png] : []);
   } catch (e) {
     analysis = `(สมอง AI วิเคราะห์ไม่สำเร็จ: ${(e as Error).message})`;
   }
@@ -111,12 +120,14 @@ export async function reportRun(run: ScriptRun, outDir: string): Promise<IssueLi
   const description = [
     `**ผลทดสอบ UAT อัตโนมัติไม่ผ่าน** · รอบ \`${run.id}\` · ${run.finishedAt ?? at()}`,
     "",
+    `**ไม่ผ่านเพราะ:** ${first ? `ขั้น ${first.i + 1} ${first.title}${first.detail ? ` — ${first.detail}` : ""}${first.expected !== undefined ? ` (คาดหวัง \`${first.expected}\` ได้ \`${first.actual ?? ""}\`)` : ""}` : (run.message ?? run.status)}`,
+    "",
     facts,
     "",
     "### ขั้นตอนทำซ้ำ",
     repro || "-",
     "",
-    `### วิเคราะห์โดยสมอง AI (${model}) — เป็นการคาดเดา ต้องตรวจโค้ดจริงก่อนแก้`,
+    `### วิเคราะห์และแนวทางแก้โดยสมอง AI (${model}) — เป็นการคาดเดา ต้องตรวจโค้ดจริงก่อนแก้`,
     analysis,
     "",
     `ทำซ้ำด้วยตัวรัน: \`node runner/run.mjs --script uat-scripts/${run.scriptId}.json --out runs/<id> --base ${run.target}\``,

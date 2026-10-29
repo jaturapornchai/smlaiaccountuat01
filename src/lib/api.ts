@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { writeLog } from "./log";
 
 export const ok = (data: object = {}) => NextResponse.json({ success: true, ...data });
 export const bad = (message: string, status = 400) => NextResponse.json({ success: false, message }, { status });
@@ -8,6 +9,7 @@ export async function guard(fn: () => Promise<Response> | Response): Promise<Res
   try {
     return await fn();
   } catch (e) {
+    writeLog("api", { ok: false, error: e instanceof Error ? e.message : String(e) });
     return bad(e instanceof Error ? e.message : String(e), 500);
   }
 }

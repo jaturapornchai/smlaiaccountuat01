@@ -1,4 +1,5 @@
 import { RunStatus } from "@/types/bot";
+import { writeLog } from "./log";
 
 // ฟีดเหตุการณ์สองทาง: คำสั่งจาก AI (MCP) → หน้าเว็บเล่นแอนิเมชัน · ผลรัน/issue → AI อ่านผ่าน MCP tool "events"
 export interface Activity {
@@ -32,6 +33,8 @@ export function pushActivity(a: Omit<Activity, "seq" | "at">): Activity {
   const e = { ...a, seq: ++A.seq, at: new Date().toISOString() };
   A.list.push(e);
   if (A.list.length > 200) A.list.shift();
+  const { kind, ...rest } = e;
+  writeLog("activity", { type: kind, ...rest }); // ฟีดในหน่วยความจำเก็บแค่ 200 รายการ → ลงไฟล์ถาวรด้วย
   for (const w of A.waiters) w();
   return e;
 }
