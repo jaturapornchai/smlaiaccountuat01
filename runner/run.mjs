@@ -237,6 +237,72 @@ const live = async () => {
 };
 const jpeg64 = async () => (await page.screenshot({ type: "jpeg", quality: 70 })).toString("base64");
 
+// ---------- ระนาบ baseline (กฎ UI ลุงจืด: ทุกอย่างในแถวเดียวกันต้องมีกึ่งกลางแนวตั้งตรงกันเป๊ะ) → ข้อค้นพบ S4 ไม่ทำให้ขั้นล้ม ----------
+// ทำงานในหน้าเว็บ (page.evaluate) ห้ามอ้างตัวแปรนอกฟังก์ชัน · ชิ้นที่วัด = ช่องกรอก/ปุ่ม/ไอคอน + ข้อความ 1 บรรทัด
+// ข้อความวัดจากขอบตัวอักษรจริง (Range) ไม่ใช่กล่อง label ที่ยืดเต็มแถว · ข้อความใน inline เดียวกันเบราว์เซอร์วางบน baseline เดียวกันแล้ว → นับเป็นชิ้นเดียว
+// แถว = บรรพบุรุษชั้นบนสุดที่สูงไม่เกิน 64px · แถวที่มีของซ้อนบน-ล่าง (ชื่อ + คำอธิบาย 2 บรรทัด) ข้ามทั้งแถว กันแจ้งผิด
+// ponytail: แถวที่เป็น grid หลายบรรทัดในกล่องเดียว (label/input เป็นลูกตรงของ grid สูง >64px) ไม่ถูกจับเป็นแถว — SML ใช้ flex ต่อแถว (CustomerDetailScreen.tsx:1398)
+function measureAlignment() {
+  const ROW_MAX = 64, ATOM_MAX = 48, TOL = 1, rows = new Map();
+  const rowOf = (el) => {
+    if (!rows.has(el)) { const p = el.parentElement; rows.set(el, p && p !== document.body && p.getBoundingClientRect().height <= ROW_MAX ? rowOf(p) : el); }
+    return rows.get(el);
+  };
+  const blockOf = (el) => { while (el.parentElement && ["inline", "contents"].includes(getComputedStyle(el).display)) el = el.parentElement; return el; };
+  const ok = (el, r) => r.width >= 2 && r.height >= 4 && r.height <= ATOM_MAX && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth && el.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+  const atom = (el, r, what, control) => ({ el, r, what, control, cy: r.top + r.height / 2 });
+  const atoms = [];
+  for (const el of document.querySelectorAll("input:not([type=hidden]),select,textarea,button,svg,img")) {
+    const r = el.getBoundingClientRect();
+    if (!el.parentElement?.closest("svg") && ok(el, r)) atoms.push(atom(el, r, el.tagName.toLowerCase(), !el.matches("svg,img")));
+  }
+  const texts = new Map(), range = document.createRange(), walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n, k = 0; (n = walk.nextNode()) && k < 5000; k++) {
+    const p = n.parentElement;
+    if (!p || !n.data.trim() || p.closest("script,style,noscript,select,textarea,svg")) continue;
+    range.selectNodeContents(n);
+    const rs = range.getClientRects(), key = blockOf(p);
+    if (rs.length === 1 && ok(p, rs[0]) && !(texts.get(key)?.r.height >= rs[0].height)) texts.set(key, atom(p, rs[0], `"${n.data.trim().slice(0, 24)}"`, false));
+  }
+  const groups = new Map();
+  for (const a of [...atoms, ...texts.values()]) { const g = rowOf(a.el); if (groups.has(g)) groups.get(g).push(a); else groups.set(g, [a]); }
+  // จุดกึ่งกลางต้องเห็นจริง (ไม่ถูกกล่องเลื่อน/ป๊อปอัปบัง)
+  const shown = (a) => { const h = document.elementFromPoint(a.r.left + a.r.width / 2, a.cy); return !!h && (a.el.contains(h) || h.contains(a.el)); };
+  const out = [];
+  for (const g of groups.values()) {
+    if (g.length < 2 || g.some((a) => g.some((b) => Math.min(a.r.bottom, b.r.bottom) <= Math.max(a.r.top, b.r.top)))) continue;
+    g.sort((a, b) => a.r.left - b.r.left);
+    const ref = g.find((a) => a.control) ?? g[0]; // อ้างอิงช่องกรอก/ปุ่มตัวแรกในแถว (ไม่มี = ชิ้นซ้ายสุด)
+    const bad = g.filter((a) => Math.abs(a.cy - ref.cy) > TOL);
+    if (!bad.length || !shown(ref)) continue;
+    const seen = bad.filter(shown);
+    if (!seen.length) continue;
+    out.push({
+      key: [ref, ...seen].map((a) => a.what).join("|"),
+      text: `แถว y≈${Math.round(ref.cy)} อ้างอิง ${ref.what}: ${seen.map((a) => `${a.what} (x ${Math.round(a.r.left)}) ${a.cy > ref.cy ? "ต่ำกว่า" : "สูงกว่า"} ${Math.abs(a.cy - ref.cy).toFixed(1)}px`).join(", ")}`,
+      boxes: [ref, ...seen].map((a, i) => ({ x: a.r.left, y: a.r.top, w: a.r.width, h: a.r.height, bad: i > 0 })),
+    });
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+// กรอบเขียว = ชิ้นอ้างอิง, แดง = ชิ้นที่เหลื่อม (วาดทับชั่วคราวเพื่อถ่ายภาพหลักฐาน แล้วลบทิ้ง)
+function drawBoxes(boxes) {
+  const host = document.body.appendChild(document.createElement("div"));
+  host.id = "__uat_align";
+  host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647";
+  for (const b of boxes) host.appendChild(document.createElement("div")).style.cssText = `position:absolute;left:${b.x - 2}px;top:${b.y - 2}px;width:${b.w + 4}px;height:${b.h + 4}px;outline:2px solid ${b.bad ? "#ff1744" : "#00c853"}`;
+}
+const alignSeen = new Set(); // แถวเดิมที่เจอแล้วในรอบนี้ไม่แจ้งซ้ำ
+async function alignFindings() {
+  const rows = (await page.evaluate(measureAlignment).catch(() => [])).filter((r) => !alignSeen.has(r.key) && alignSeen.add(r.key));
+  if (!rows.length) return [];
+  await page.evaluate(drawBoxes, rows.flatMap((r) => r.boxes)).catch(() => {});
+  const evidence = await shot("align");
+  await page.evaluate(() => document.getElementById("__uat_align")?.remove()).catch(() => {});
+  return [{ severity: "S4", kind: "baseline", text: cut(`ระนาบเหลื่อม ${rows.length} แถว — ${rows.map((r) => r.text).join(" · ")}`, 800), evidence }];
+}
+
 // ---------- Computer Use: the eyes model looks at the screen and picks one action per turn ----------
 const SEE_SCHEMA = { type: "object", properties: { pass: { type: "boolean" }, reason: { type: "string" } }, required: ["pass", "reason"] };
 const PLAY_SCHEMA = {
@@ -415,7 +481,7 @@ const ACTIONS = {
     const sqlErr = body.match(DB_ERROR_TEXT)?.[0];
     if (sqlErr) found.push(`ข้อความ DB error บนหน้าจอ: ${sqlErr}`);
     if (found.length) throw new Fail(`พบ ${found.length} ข้อผิดพลาดแฝงในหน้าจอ`, "ไม่มี HTTP>=400 / JS error / DB error", cut(found.slice(0, 5).join(" | "), 500));
-    return { detail: "ไม่พบข้อผิดพลาดแฝง (HTTP/JS/console/DB error)" };
+    return { detail: "ไม่พบข้อผิดพลาดแฝง (HTTP/JS/console/DB error)", findings: await alignFindings() };
   },
   async "ui.screenshot"(p) {
     await ensurePage();
@@ -538,7 +604,9 @@ async function exec(step) {
     const r = (await fn(p)) ?? {};
     if (p.wait && page) await page.waitForTimeout(Math.min(p.wait, 30_000));
     counts.passed++;
-    emit({ t: "step", i: step.i, status: "passed", durationMs: Date.now() - t0, detail: cut(r.detail), expected: r.expected, actual: r.actual, evidence: r.evidence });
+    // ข้อค้นพบ S4 ไม่ทำให้ขั้นล้ม → ไม่เข้า IssueMate (ส่งเฉพาะขั้นที่ไม่ผ่าน) แต่โชว์ในหน้ารอบ + MCP runs
+    const findings = r.findings?.length ? r.findings : undefined;
+    emit({ t: "step", i: step.i, status: "passed", durationMs: Date.now() - t0, detail: cut(`${r.detail ?? ""}${findings ? ` · ข้อค้นพบ S4 ${findings.length} ข้อ (ไม่ทำให้ขั้นล้ม)` : ""}`), expected: r.expected, actual: r.actual, evidence: r.evidence, findings });
     if (step.do.startsWith("ui.")) await live();
     return true;
   } catch (e) {

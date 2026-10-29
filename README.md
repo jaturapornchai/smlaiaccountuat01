@@ -193,6 +193,11 @@ pnpm start -p 3050
 node docs/workflow/render.mjs
 ```
 
+ตรวจตัวรันในเครื่องหลังแก้ `runner/run.mjs` (เปิดหน้า HTML ที่จงใจเหลื่อมบน 127.0.0.1 ไม่แตะ uat.smlwork.com/SML ต้องมี Playwright ตาม `UAT_PLAYWRIGHT`) — ผ่านจะพิมพ์ "ผ่านทั้งหมด":
+```bash
+node runner/selfcheck.mjs
+```
+
 สร้างทะเบียนเมนู `src/lib/erp-menus.json` ใหม่เมื่อเมนูใน ERP เปลี่ยน (รูปแบบ `[รหัส, ชื่อ, หมวด]`):
 ```bash
 node -e "const m=require('D:/smlaiaccount/frontend/src/config/smlMenu.json'),o=[];const w=(n,g)=>{for(const x of n){const t=g||x.text;if(x.children?.length)w(x.children,t);else if((x.projects||[]).includes('SMLAccount'))o.push([x.name,x.text,t])}};w(m,'');require('fs').writeFileSync('src/lib/erp-menus.json',JSON.stringify(o));console.log(o.length)"
@@ -263,7 +268,7 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 ```
 
 ขั้นที่ใช้ได้:
-- หน้าจอ: `ui.goto`, `ui.demoLogin`, `ui.adminLogin` `{targetPath: "/admin/providers" | "/home"}`, `ui.openMenu`, `ui.click`, `ui.fill`, `ui.select`, `ui.press`, `ui.readText`, `ui.expectText`, `ui.expectVisible`, `ui.expectValue`, `ui.expectUrl`, `ui.expectClean`, `ui.screenshot`, `ui.pdf` `{selector, contains[]}` (กดปุ่มบนจอที่ดาวน์โหลด PDF เช่นปุ่มดาวน์โหลดในหน้าพิมพ์ แล้วตรวจข้อความในไฟล์แบบเดียวกับ `report.pdf`)
+- หน้าจอ: `ui.goto`, `ui.demoLogin`, `ui.adminLogin` `{targetPath: "/admin/providers" | "/home"}`, `ui.openMenu`, `ui.click`, `ui.fill`, `ui.select`, `ui.press`, `ui.readText`, `ui.expectText`, `ui.expectVisible`, `ui.expectValue`, `ui.expectUrl`, `ui.expectClean` (ไม่มี HTTP/JS/console/DB error แฝง แล้ววัดระนาบ: ชิ้นในแถวเดียวกัน เช่น label/ช่องกรอก/ปุ่ม/ไอคอน/Badge กึ่งกลางแนวตั้งห่างกันเกิน 1px → ข้อค้นพบ S4 พร้อมภาพมีกรอบชี้จุด ไม่ทำให้ขั้นล้มและไม่เปิด issue อัตโนมัติ ดูใต้ขั้นนั้นในหน้ารอบ/tool `runs`), `ui.screenshot`, `ui.pdf` `{selector, contains[]}` (กดปุ่มบนจอที่ดาวน์โหลด PDF เช่นปุ่มดาวน์โหลดในหน้าพิมพ์ แล้วตรวจข้อความในไฟล์แบบเดียวกับ `report.pdf`)
 - AI กดเล่นหน้าจอ: `ui.act` `{instruction}` (Stagehand ทำ 1 อย่างตามคำสั่งภาษาไทย), `ui.see` `{expect}` (AI ดูภาพแล้วตัดสินผ่าน/ไม่ผ่าน), `ui.play` `{goal, maxSteps}` (Computer Use: AI ดูจอ คลิก พิมพ์ จนครบเป้าหมาย สิ่งผิดปกติที่ AI เห็น = ขั้นไม่ผ่าน บันทึกเอกสารทดสอบได้โดยใส่ `{{run.tag}}`) · ผลจาก AI ต้องให้คนยืนยันก่อนแก้
 - API: `api.request`
 - รายงาน PDF: `report.pdf` `{body, contains[]}` — ขอ PDF แบบที่ผู้ใช้กดพิมพ์รายงาน (`POST /api/process/report/pdf` ใช้ body เดียวกับ `/api/process/report/run`) แล้วหาทุกค่าใน `contains` จากข้อความในไฟล์ · หลักฐาน = ภาพหน้าแรก + ไฟล์ PDF (ปุ่ม "เปิด PDF รายงาน" ในไทม์ไลน์)
@@ -275,6 +280,7 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 ถ้าไม่ใส่ `lens` ระบบเลือกให้เอง: มีขั้น `db.*` = data, ไม่มี = screen
 
 ## Limitation
+- ตรวจระนาบ (`ui.expectClean`) ดูเฉพาะแถวที่สูงไม่เกิน 64px และข้ามกลุ่มที่วางซ้อนบน-ล่าง · ข้อความที่จัดตรงแล้วยังห่างกึ่งกลางช่องกรอก ~0.5px ตามเมตริกฟอนต์ จึงเลื่อน 1px วัดได้ ~1.5px และถูกแจ้ง · ฟอนต์ต่างขนาดในแถวเดียวกันวัดด้วยกึ่งกลาง ไม่ใช่เส้นฐานตัวอักษร · แถวเดิมแจ้งครั้งเดียวต่อรอบ (สูงสุด 8 แถวต่อครั้ง)
 - `report.pdf` ตรวจว่ามีข้อความ ไม่ตรวจตำแหน่งคอลัมน์ · วรรณยุกต์ไทยบางตัวใน PDF ของ ERP เป็นอักษร private-use (U+F70A–F70F) คำไทยจึงหาไม่เจอ ให้ใส่เลขเอกสาร/ตัวเลขใน `contains`
 - `test_db` คัดลอกจากแม่แบบ `uat_template` ไม่ใช่ smldemo สด (smldemo มีคนต่ออยู่ตลอดจึงเป็นแม่แบบตรงๆ ไม่ได้) — อยากได้ข้อมูลล่าสุดให้รัน `sh runner/make-test-template.sh` บนเซิร์ฟเวอร์ (ใช้เวลาหลายนาที) · ฐานละ ~600 MB จึงจำกัด 5 ฐาน · ฐานใหม่จะโผล่ให้เลือกในจอ ERP ได้เมื่อมี provider `uatadmin` (ฐาน `smlerpmainuatadmin`) แล้วเท่านั้น ถ้ายังไม่มีใช้ได้จากขั้น `db.*` อย่างเดียว
 - ปุ่ม Google ใช้ได้เมื่อเพิ่ม `https://uat.smlwork.com` ใน Authorized JavaScript origins ของ Client ID นั้นใน Google Cloud Console แล้ว

@@ -99,6 +99,14 @@ export interface UatScript {
 
 export type StepStatus = "pending" | "running" | "passed" | "failed" | "skipped";
 
+// ข้อค้นพบที่ไม่ทำให้ขั้นล้ม (ไม่เปิด issue อัตโนมัติ): baseline = ชิ้นในแถวเดียวกันกึ่งกลางเหลื่อมเกิน 1px
+export interface Finding {
+  severity: Severity;
+  kind: "baseline";
+  text: string;
+  evidence?: string; // ภาพมีกรอบชี้จุด ใน runs/<id>/
+}
+
 export interface StepResult {
   i: number;
   title: string;
@@ -111,6 +119,7 @@ export interface StepResult {
   actual?: string;
   evidence?: string; // ชื่อไฟล์ใน runs/<id>/
   query?: string; // SQL หรือคำขอ API จริงของขั้นนี้ — การ์ดบอทโชว์แทนภาพหน้าจอ
+  findings?: Finding[];
 }
 
 export type RunStatus = "queued" | "running" | "passed" | "failed" | "error" | "stopped";
