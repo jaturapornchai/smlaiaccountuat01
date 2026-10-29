@@ -1,0 +1,21 @@
+{
+  "id": "security-api-session",
+  "title": "API session ตอบ 200 หลังเข้าสู่ระบบ Demo",
+  "module": "security",
+  "lens": "api",
+  "severityOnFail": "S2",
+  "description": "หลังล็อกอินด้วยปุ่ม Demo เรียก GET /api/auth/session ด้วยคุกกี้ของเบราว์เซอร์เดียวกัน ต้องได้ HTTP 200",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "GET /api/auth/session",
+      "do": "api.request",
+      "method": "GET",
+      "path": "/api/auth/session",
+      "expectStatus": 200
+    }
+  ]
+}

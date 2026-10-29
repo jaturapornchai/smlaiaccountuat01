@@ -1,0 +1,74 @@
+{
+  "id": "master-code-unique",
+  "title": "ข้อมูลหลัก: เปิดจอลูกหนี้ และรหัสลูกหนี้/เจ้าหนี้/สินค้าต้องไม่ซ้ำใน PG",
+  "module": "master",
+  "severityOnFail": "S1",
+  "description": "เปิดจอข้อมูลคู่ค้า(ลูกหนี้) ตรวจไม่มีข้อผิดพลาดแฝง แล้วตรวจ PG ว่า ar_customer / ap_supplier / ic_inventory ไม่มีรหัสซ้ำ",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลคู่ค้า(ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_customer_connected"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลคู่ค้า(ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า ข้อมูลคู่ค้า(ลูกหนี้)",
+      "do": "ui.screenshot",
+      "name": "menu_ar_customer_connected"
+    },
+    {
+      "title": "PG: รหัสลูกหนี้ซ้ำ = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from (select code from ar_customer group by code having count(*) > 1) t",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: รหัสเจ้าหนี้ซ้ำ = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from (select code from ap_supplier group by code having count(*) > 1) t",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: รหัสสินค้าซ้ำ = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from (select code from ic_inventory group by code having count(*) > 1) t",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,105 @@
+{
+  "id": "admin-api-session-and-groups",
+  "title": "แอดมิน: API session เป็นโหมด Demo และ API เห็นกลุ่ม/ผู้ใช้ตรงกับฐานข้อมูล",
+  "module": "admin",
+  "lens": "api",
+  "severityOnFail": "S2",
+  "description": "GET /api/auth/session ต้องเป็น isDemo = true และมีชื่อฐาน จากนั้นนับ erp_user_group, erp_user ผ่าน POST /api/query/list เทียบ PG",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "API: session เป็นโหมด Demo",
+      "do": "api.request",
+      "method": "GET",
+      "path": "/api/auth/session",
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.isDemo",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.database",
+          "op": "exists"
+        }
+      ]
+    },
+    {
+      "title": "PG: นับกลุ่มพนักงาน erp_user_group",
+      "do": "db.query",
+      "sql": "select count(*) as n from erp_user_group",
+      "rows": 1,
+      "save": {
+        "g": "n"
+      }
+    },
+    {
+      "title": "API: /api/query/list นับกลุ่มพนักงาน ต้องเท่ากับฐานข้อมูล",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/query/list",
+      "body": {
+        "sql": "select count(*) as n from erp_user_group"
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.0.n",
+          "op": "eq",
+          "value": "{{g}}"
+        }
+      ]
+    },
+    {
+      "title": "PG: นับผู้ใช้ erp_user",
+      "do": "db.query",
+      "sql": "select count(*) as n from erp_user",
+      "rows": 1,
+      "save": {
+        "u": "n"
+      }
+    },
+    {
+      "title": "API: /api/query/list นับผู้ใช้ ต้องเท่ากับฐานข้อมูล",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/query/list",
+      "body": {
+        "sql": "select count(*) as n from erp_user"
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.0.n",
+          "op": "eq",
+          "value": "{{u}}"
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

@@ -1,0 +1,353 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ทุกขนาดใน Tailwind เป็น rem → ตั้งขนาดฐานแบบลื่นตามความกว้างจอ ทั้งหน้าก็ขยาย/ย่อตามจอเอง (มือถือ → 4K) */
+html {
+  font-size: clamp(14px, 0.35vw + 9px, 22px);
+  background: #04060f;
+  color-scheme: dark;
+}
+
+body {
+  color: #e6ebff;
+  font-family: "Leelawadee UI", "Noto Sans Thai", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* กฎ UI Baseline: ทุกอย่างในแถวเดียวกันอยู่กึ่งกลางระนาบเดียวกัน */
+.baseline-center {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+
+/* ---------- ฉากหลัง: แสงออโรร่า + ตาราง จุด + เส้นสแกน (CSS ล้วน) ---------- */
+.stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background: radial-gradient(120% 80% at 50% -10%, #0d1640 0%, #04060f 60%);
+}
+.stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(148, 163, 255, 0.09) 1px, transparent 1.2px);
+  background-size: 2rem 2rem;
+  mask-image: radial-gradient(ellipse at 50% 30%, #000 30%, transparent 75%);
+}
+.stage::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 30vh;
+  background: linear-gradient(180deg, transparent, rgba(34, 211, 238, 0.05), transparent);
+  animation: scan 9s linear infinite;
+}
+.aurora {
+  position: absolute;
+  width: 60vmax;
+  height: 60vmax;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.35;
+  mix-blend-mode: screen;
+  animation: drift 26s ease-in-out infinite alternate;
+}
+.aurora.a1 { background: #0891b2; top: -25vmax; left: -15vmax; }
+.aurora.a2 { background: #7c3aed; bottom: -30vmax; right: -20vmax; animation-duration: 32s; animation-delay: -8s; }
+.aurora.a3 { background: #db2777; top: 30%; left: 45%; width: 35vmax; height: 35vmax; opacity: 0.16; animation-duration: 40s; }
+
+@keyframes drift {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(6vmax, 4vmax, 0) scale(1.12); }
+  100% { transform: translate3d(-4vmax, 7vmax, 0) scale(0.95); }
+}
+@keyframes scan {
+  from { transform: translateY(-30vh); }
+  to { transform: translateY(130vh); }
+}
+
+/* ---------- แผงกระจก + ไฟส่องตามเมาส์ ---------- */
+.glass {
+  position: relative;
+  background: linear-gradient(180deg, rgba(22, 30, 70, 0.62), rgba(10, 14, 36, 0.72));
+  border: 1px solid rgba(148, 163, 255, 0.12);
+  box-shadow: 0 1.2rem 3rem -1.5rem rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(14px);
+}
+.spot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+  background: radial-gradient(18rem circle at var(--mx, 50%) var(--my, 50%), rgba(125, 211, 252, 0.1), transparent 60%);
+}
+.spot:hover::before { opacity: 1; }
+
+/* ขอบไล่สีหมุนรอบ (ใช้กับแผงที่กำลังทำงาน/ปุ่มหลัก) */
+@property --angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+.ring-live {
+  --c: #22d3ee;
+}
+.ring-live::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: conic-gradient(from var(--angle), transparent 0 70%, var(--c) 85%, transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: spin-angle 2.6s linear infinite;
+}
+@keyframes spin-angle {
+  to { --angle: 360deg; }
+}
+
+.btn-primary {
+  position: relative;
+  isolation: isolate;
+  background: linear-gradient(110deg, #06b6d4, #6366f1 55%, #a855f7);
+  background-size: 200% 100%;
+  box-shadow: 0 0.6rem 1.8rem -0.6rem rgba(99, 102, 241, 0.75);
+  transition: background-position 0.5s, transform 0.2s, box-shadow 0.3s;
+}
+.btn-primary:hover { background-position: 100% 0; transform: translateY(-1px); box-shadow: 0 0.8rem 2.2rem -0.6rem rgba(168, 85, 247, 0.8); }
+.btn-primary:disabled { opacity: 0.5; transform: none; }
+
+.text-shine {
+  background: linear-gradient(90deg, #67e8f9, #a5b4fc 35%, #f0abfc 55%, #67e8f9 80%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shine 6s linear infinite;
+}
+@keyframes shine {
+  to { background-position: 200% center; }
+}
+
+/* ---------- การเข้าฉาก (ไล่ทีละชิ้นด้วย --i) ---------- */
+.rise {
+  animation: rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(1.2rem) scale(0.98); filter: blur(4px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+.slide-in { animation: slide-in 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-0.8rem); }
+  to { opacity: 1; transform: none; }
+}
+
+/* จุดสถานะเต้น + แถบวิ่งของงานที่กำลังรัน */
+.pulse-dot { position: relative; }
+.pulse-dot::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  border: 2px solid currentColor;
+  animation: ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes ping {
+  from { transform: scale(0.6); opacity: 0.9; }
+  to { transform: scale(1.8); opacity: 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: shimmer 1.4s linear infinite;
+}
+@keyframes shimmer {
+  from { background-position: -50% 0; }
+  to { background-position: 150% 0; }
+}
+
+/* วงโคจรของ SwarmCore */
+.orbit { transform-origin: 50% 50%; transform-box: view-box; animation: orbit linear infinite; }
+@keyframes orbit {
+  to { transform: rotate(360deg); }
+}
+.breathe { transform-origin: center; transform-box: fill-box; animation: breathe 3.2s ease-in-out infinite; }
+@keyframes breathe {
+  50% { transform: scale(1.08); opacity: 0.85; }
+}
+
+/* scrollbar */
+::-webkit-scrollbar { width: 0.45rem; height: 0.45rem; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(148, 163, 255, 0.22); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 255, 0.4); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---------- แอนิเมชันสด: คำสั่งจาก AI ผ่าน MCP / งานเสร็จ (ActivityFx) ---------- */
+.fx-card { animation: fx-card-in 0.65s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.fx-card.out { animation: fx-card-out 0.45s ease-in both; }
+@keyframes fx-card-in {
+  0% { opacity: 0; transform: translateX(115%) skewX(-10deg); filter: blur(8px); }
+  60% { opacity: 1; transform: translateX(-3%) skewX(2deg); filter: blur(0); }
+  100% { transform: none; }
+}
+@keyframes fx-card-out { to { opacity: 0; transform: translateX(45%) scale(0.95); filter: blur(5px); } }
+
+.fx-holo { --c: #22d3ee; box-shadow: 0 0 2.5rem -0.8rem var(--c); }
+.fx-holo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: conic-gradient(from var(--angle), transparent 0 55%, var(--c) 80%, transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: spin-angle 1.8s linear infinite;
+}
+.fx-shine {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.16) 50%, transparent 65%);
+  transform: translateX(-100%);
+  animation: fx-shine 1.3s 0.35s ease-out both;
+}
+@keyframes fx-shine { to { transform: translateX(100%); } }
+
+.fx-shake { animation: fx-shake 0.55s 0.55s both; }
+@keyframes fx-shake {
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+.fx-spark {
+  position: absolute;
+  left: calc(50% - 2px);
+  top: calc(50% - 2px);
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+  animation: fx-spark 0.9s 0.4s ease-out both;
+}
+@keyframes fx-spark {
+  from { transform: rotate(var(--a)) translateX(0.4rem) scale(1.2); opacity: 1; }
+  to { transform: rotate(var(--a)) translateX(2.4rem) scale(0); opacity: 0; }
+}
+
+/* คำสั่งเข้า: ลำแสงพุ่งจากมุมขวาบน (ฝั่ง AI) เข้ากลางจอ + คลื่นวง + ม่านแสงกวาด */
+.fx-beam {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 3px;
+  transform-origin: right center;
+  background: linear-gradient(270deg, #fff, #22d3ee 25%, #a78bfa 70%, transparent);
+  box-shadow: 0 0 1.4rem #22d3ee, 0 0 3rem #a78bfa;
+  border-radius: 9999px;
+  animation: fx-beam 0.95s cubic-bezier(0.7, 0, 0.2, 1) both;
+}
+@keyframes fx-beam {
+  0% { transform: rotate(var(--deg)) scaleX(0); opacity: 1; }
+  55% { transform: rotate(var(--deg)) scaleX(1); opacity: 1; }
+  100% { transform: rotate(var(--deg)) scaleX(1); opacity: 0; }
+}
+.fx-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14vmin;
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  border: 2px solid rgba(34, 211, 238, 0.9);
+  box-shadow: 0 0 2.5rem rgba(34, 211, 238, 0.7), inset 0 0 2.5rem rgba(167, 139, 250, 0.6);
+  animation: fx-ring 1.5s 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes fx-ring {
+  0% { transform: translate(-50%, -50%) scale(0.1); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(11); opacity: 0; }
+}
+.fx-sweep {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 42%, rgba(34, 211, 238, 0.08) 47%, rgba(167, 139, 250, 0.22) 50%, rgba(34, 211, 238, 0.08) 53%, transparent 58%);
+  background-size: 300% 100%;
+  mix-blend-mode: screen;
+  animation: fx-sweep 1.3s 0.45s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes fx-sweep {
+  from { background-position: 100% 0; opacity: 1; }
+  to { background-position: 0% 0; opacity: 0; }
+}
+
+/* งานจบ: ขอบจอเรืองเขียว (ผ่าน) / กะพริบแดง (ไม่ผ่าน) */
+.fx-edge { position: absolute; inset: 0; }
+.fx-glow { box-shadow: inset 0 0 14vmin rgba(52, 211, 153, 0.45); animation: fx-fade 1.6s ease-out both; }
+.fx-alarm { box-shadow: inset 0 0 14vmin rgba(244, 63, 94, 0.6); animation: fx-alarm 1.6s ease-out both; }
+@keyframes fx-fade { from { opacity: 1; } to { opacity: 0; } }
+@keyframes fx-alarm {
+  0%, 30%, 60% { opacity: 1; }
+  15%, 45% { opacity: 0.25; }
+  100% { opacity: 0; }
+}
+
+.fx-banner { animation: fx-banner 0.9s cubic-bezier(0.16, 1, 0.3, 1) both; cursor: pointer; }
+@keyframes fx-banner {
+  0% { opacity: 0; transform: scale(0.55) rotateX(25deg); filter: blur(14px); }
+  60% { opacity: 1; transform: scale(1.04); filter: blur(0); }
+  100% { transform: scale(1); }
+}
+.fx-halo {
+  position: absolute;
+  left: 50%;
+  top: 3.5rem;
+  width: 22rem;
+  height: 22rem;
+  border-radius: 9999px;
+  filter: blur(3rem);
+  transform: translate(-50%, -50%);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+
+.fx-confetti {
+  position: absolute;
+  top: -3vh;
+  height: 0.9rem;
+  border-radius: 2px;
+  animation: fx-fall var(--t) cubic-bezier(0.25, 0.4, 0.5, 1) var(--d) both;
+}
+@keyframes fx-fall {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg); opacity: 1; }
+  100% { transform: translate3d(var(--dx), 108vh, 0) rotate(var(--r)); opacity: 0.85; }
+}
+
+.fx-hud { animation: fx-hud 0.9s ease-out both; }
+@keyframes fx-hud {
+  0% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.9); transform: scale(1.25); }
+  100% { box-shadow: 0 0 0 1.4rem rgba(34, 211, 238, 0); transform: scale(1); }
+}

@@ -1,0 +1,44 @@
+{
+  "id": "inventory-ai-play",
+  "title": "สต๊อก: AI กดเล่นหน้าจอ ยอดคงเหลือตามคลัง",
+  "module": "inventory",
+  "lens": "screen",
+  "severityOnFail": "S3",
+  "timeoutMs": 600000,
+  "description": "AI (Stagehand + Computer Use บนสมอง Ollama) เปิด ยอดคงเหลือตามคลัง แล้วกดใช้งานจริงเหมือนผู้ใช้ รายงานสิ่งผิดปกติที่เห็นบนจอ · ผลจาก AI ต้องให้คนยืนยันก่อนแก้",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ยอดคงเหลือตามคลัง",
+      "do": "ui.openMenu",
+      "key": "menu_ic_info_stk_balance_warehouse"
+    },
+    {
+      "title": "AI กดเล่น ยอดคงเหลือตามคลัง",
+      "do": "ui.play",
+      "goal": "ใช้หน้ายอดคงเหลือสินค้าตามคลังแบบพนักงานสต๊อก: ค้นหาสินค้า 1 ตัว ดูยอดคงเหลือแยกตามคลัง ตรวจว่ายอดรวมตรงกับผลบวกของแต่ละคลังและหน่วยนับแสดงถูก ห้ามแก้ไขหรือกดบันทึกใดๆ จบเมื่อตรวจเสร็จ",
+      "maxSteps": 15,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงระหว่างที่ AI ใช้งาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้าจอสุดท้าย",
+      "do": "ui.screenshot",
+      "name": "inventory-ai-play"
+    }
+  ]
+}

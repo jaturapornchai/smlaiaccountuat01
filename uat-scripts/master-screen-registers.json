@@ -1,0 +1,71 @@
+{
+  "id": "master-screen-registers",
+  "title": "ข้อมูลหลัก: เปิดทะเบียนลูกหนี้ เจ้าหนี้ สินค้า ไม่มีข้อผิดพลาดแฝง",
+  "module": "master",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "เปิด menu_ar_customer_connected, menu_ap_partner_detail, menu_ic_item_detail แล้วตรวจ HTTP 4xx/5xx, JS error, DB error บนหน้าจอ",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลคู่ค้า (ลูกหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ar_customer_connected"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลคู่ค้า (ลูกหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า ข้อมูลคู่ค้า (ลูกหนี้)",
+      "do": "ui.screenshot",
+      "name": "menu_ar_customer_connected"
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลคู่ค้า (เจ้าหนี้)",
+      "do": "ui.openMenu",
+      "key": "menu_ap_partner_detail"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลคู่ค้า (เจ้าหนี้)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า ข้อมูลคู่ค้า (เจ้าหนี้)",
+      "do": "ui.screenshot",
+      "name": "menu_ap_partner_detail"
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_detail"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า ข้อมูลสินค้า",
+      "do": "ui.screenshot",
+      "name": "menu_ic_item_detail"
+    }
+  ],
+  "cleanup": []
+}

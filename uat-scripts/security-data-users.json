@@ -1,0 +1,50 @@
+{
+  "id": "security-data-users",
+  "title": "ความปลอดภัย: ไม่มีรหัสผ่านข้อความธรรมดา และรหัสผู้ใช้ไม่กำกวม",
+  "module": "security",
+  "lens": "data",
+  "severityOnFail": "S1",
+  "description": "ตรวจ erp_user: password ต้องว่างหรือเป็น hash, รหัสผู้ใช้ไม่ว่าง และไม่ซ้ำเมื่อไม่สนตัวพิมพ์/ช่องว่าง",
+  "steps": [
+    {
+      "title": "PG: ผู้ใช้ที่เก็บรหัสผ่านเป็นข้อความธรรมดา = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from erp_user where coalesce(password, '') <> '' and password !~ '^\\$2[aby]\\$' and password !~ '^[0-9a-fA-F]{32,128}$'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: ผู้ใช้ที่รหัสว่าง = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from erp_user where coalesce(trim(code), '') = ''",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: รหัสผู้ใช้ที่ซ้ำเมื่อไม่สนตัวพิมพ์/ช่องว่าง = 0",
+      "do": "db.query",
+      "sql": "select count(*) - count(distinct lower(trim(code))) as n from erp_user",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

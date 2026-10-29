@@ -1,0 +1,47 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;600;700&family=JetBrains+Mono:wght@500&display=block");
+
+* { box-sizing: border-box; margin: 0; }
+html, body { width: 1920px; min-height: 1080px; }
+body {
+  position: relative;
+  overflow: hidden;
+  font-family: "IBM Plex Sans Thai", "Leelawadee UI", Tahoma, sans-serif;
+  color: #e2e8f0;
+  background: radial-gradient(60% 70% at 15% 0%, #0e3a4f 0%, transparent 60%), radial-gradient(50% 60% at 100% 100%, #3b1d6e 0%, transparent 60%), #070b16;
+  padding: 44px 64px 84px;
+}
+header h1 { font-size: 54px; font-weight: 700; line-height: 1.15; background: linear-gradient(90deg, #67e8f9, #c4b5fd 55%, #f9a8d4); -webkit-background-clip: text; color: transparent; }
+header p { margin-top: 8px; font-size: 24px; color: #94a3b8; }
+footer { position: absolute; left: 64px; right: 64px; bottom: 26px; display: flex; justify-content: space-between; font-size: 17px; color: #64748b; }
+code { white-space: nowrap; font-family: "JetBrains Mono", Consolas, monospace; font-size: 0.86em; color: #67e8f9; background: rgba(103, 232, 249, 0.08); padding: 1px 7px; border-radius: 7px; }
+
+.node {
+  --c: #22d3ee;
+  position: relative;
+  z-index: 2;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025));
+  border: 1.5px solid color-mix(in srgb, var(--c) 45%, transparent);
+  border-radius: 24px;
+  padding: 18px 24px;
+  box-shadow: 0 0 44px -14px var(--c), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.node h3 { display: flex; align-items: center; gap: 12px; font-size: 27px; font-weight: 700; line-height: 1.25; color: #f8fafc; }
+.node h3 .ic { display: grid; place-items: center; width: 46px; height: 46px; flex-shrink: 0; border-radius: 14px; font-size: 26px; background: color-mix(in srgb, var(--c) 18%, transparent); }
+.node p { margin-top: 8px; font-size: 20px; line-height: 1.45; color: #cbd5e1; }
+.node p + p { margin-top: 4px; }
+.num { display: grid; place-items: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; font-size: 22px; font-weight: 700; color: #070b16; background: var(--c); }
+
+/* ลูกศร: วาดโดย wf.js */
+svg.arrows { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: visible; }
+.alabel {
+  position: absolute;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  font-size: 17px;
+  font-weight: 600;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: #0b1222;
+  border: 1.5px solid currentColor;
+}

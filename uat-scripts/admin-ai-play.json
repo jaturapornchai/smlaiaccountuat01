@@ -1,0 +1,44 @@
+{
+  "id": "admin-ai-play",
+  "title": "ผู้ดูแลระบบ: AI กดเล่นหน้าจอ กลุ่มผู้ใช้",
+  "module": "admin",
+  "lens": "screen",
+  "severityOnFail": "S3",
+  "timeoutMs": 600000,
+  "description": "AI (Stagehand + Computer Use บนสมอง Ollama) เปิด กลุ่มผู้ใช้ แล้วกดใช้งานจริงเหมือนผู้ใช้ รายงานสิ่งผิดปกติที่เห็นบนจอ · ผลจาก AI ต้องให้คนยืนยันก่อนแก้",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู กลุ่มผู้ใช้",
+      "do": "ui.openMenu",
+      "key": "menu_setup_user_group"
+    },
+    {
+      "title": "AI กดเล่น กลุ่มผู้ใช้",
+      "do": "ui.play",
+      "goal": "ดูหน้ากลุ่มผู้ใช้แบบผู้ดูแลระบบ: เปิดดูกลุ่มผู้ใช้ 1 กลุ่ม ดูรายการสิทธิ์ของกลุ่มนั้น ตรวจว่าชื่อเมนูภาษาไทยอ่านได้ ห้ามติ๊กหรือแก้สิทธิ์ ห้ามแก้ไขหรือกดบันทึกใดๆ จบเมื่อดูเสร็จ",
+      "maxSteps": 12,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงระหว่างที่ AI ใช้งาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้าจอสุดท้าย",
+      "do": "ui.screenshot",
+      "name": "admin-ai-play"
+    }
+  ]
+}

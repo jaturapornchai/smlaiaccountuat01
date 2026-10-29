@@ -1,0 +1,61 @@
+{
+  "id": "inventory-doc-integrity",
+  "title": "สต็อก: เปิดจอสินค้า และเอกสาร ic_trans ต้องไม่ซ้ำ/ไม่มีรายการกำพร้า",
+  "module": "inventory",
+  "severityOnFail": "S1",
+  "description": "เปิดจอข้อมูลสินค้า แล้วตรวจ PG: (trans_flag, doc_no) ใน ic_trans ไม่ซ้ำ และทุกแถวใน ic_trans_detail มีหัวเอกสาร",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_item_detail"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า ข้อมูลสินค้า",
+      "do": "ui.screenshot",
+      "name": "menu_ic_item_detail"
+    },
+    {
+      "title": "PG: เลขเอกสารซ้ำใน ic_trans = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from (select trans_flag, doc_no from ic_trans group by 1, 2 having count(*) > 1) t",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: รายการไม่มีหัวเอกสาร = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from ic_trans_detail d where not exists (select 1 from ic_trans h where h.trans_flag = d.trans_flag and h.doc_no = d.doc_no)",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

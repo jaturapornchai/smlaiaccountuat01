@@ -1,0 +1,50 @@
+{
+  "id": "admin-data-codes-clean",
+  "title": "แอดมิน: รหัสผู้ใช้และกลุ่มพนักงานไม่ซ้ำ ไม่มีช่องว่างหัวท้าย",
+  "module": "admin",
+  "lens": "data",
+  "severityOnFail": "S2",
+  "description": "ตรวจ erp_user และ erp_user_group: รหัสไม่ซ้ำ และไม่มีช่องว่างหน้า/หลังรหัส",
+  "steps": [
+    {
+      "title": "PG: รหัสกลุ่มพนักงานที่ซ้ำ = 0",
+      "do": "db.query",
+      "sql": "select count(*) - count(distinct code) as n from erp_user_group",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: รหัสกลุ่มพนักงานที่มีช่องว่างหัวท้าย = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from erp_user_group where code <> trim(code)",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: รหัสผู้ใช้ที่มีช่องว่างหัวท้าย = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from erp_user where code <> trim(code)",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

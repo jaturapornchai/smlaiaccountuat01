@@ -1,0 +1,58 @@
+{
+  "id": "security-screen-login-guard",
+  "title": "ความปลอดภัย: ยังไม่ล็อกอินต้องถูกส่งไปหน้าเข้าสู่ระบบ",
+  "module": "security",
+  "lens": "screen",
+  "severityOnFail": "S1",
+  "description": "เปิด /home?open=menu_gl_journal ก่อนล็อกอิน ต้องถูกพาไป /login (app/(app)/home/page.tsx redirect) แล้วล็อกอิน Demo เปิดหน้าเปลี่ยนรหัสผ่าน",
+  "steps": [
+    {
+      "title": "เปิดหน้าบัญชีโดยยังไม่ล็อกอิน",
+      "do": "ui.goto",
+      "url": "/home?open=menu_gl_journal"
+    },
+    {
+      "title": "ต้องถูกพาไปหน้าเข้าสู่ระบบ",
+      "do": "ui.expectUrl",
+      "op": "contains",
+      "value": "/login"
+    },
+    {
+      "title": "ปุ่มเข้าสู่ระบบแบบ Demo แสดง",
+      "do": "ui.expectVisible",
+      "selector": "[data-testid=\"demo-login-btn\"]"
+    },
+    {
+      "title": "ถ่ายภาพหน้าเข้าสู่ระบบ",
+      "do": "ui.screenshot",
+      "name": "login-guard"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู เปลี่ยนรหัสผ่าน",
+      "do": "ui.openMenu",
+      "key": "menu_change_password"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า เปลี่ยนรหัสผ่าน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า เปลี่ยนรหัสผ่าน",
+      "do": "ui.screenshot",
+      "name": "menu_change_password"
+    }
+  ],
+  "cleanup": []
+}

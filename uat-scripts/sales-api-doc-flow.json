@@ -1,0 +1,79 @@
+{
+  "id": "sales-api-doc-flow",
+  "title": "ขาย: API Document Flow ของใบขายล่าสุด และรายงานการขายรันได้",
+  "module": "sales",
+  "lens": "api",
+  "severityOnFail": "S2",
+  "description": "หาใบขาย (trans_flag 44) ล่าสุดจาก PG แล้วเรียก POST /api/process/doc/flow และรันรายงาน menu_so_report_invoice ผ่าน POST /api/process/report/run",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "PG: หาใบขายล่าสุดที่ไม่ยกเลิก",
+      "do": "db.query",
+      "sql": "select doc_no from ic_trans where trans_flag = 44 and is_cancel = 0 order by doc_date desc, doc_no desc limit 1",
+      "rows": 1,
+      "save": {
+        "doc": "doc_no"
+      }
+    },
+    {
+      "title": "API: Document Flow ของใบขาย",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/flow",
+      "body": {
+        "docNo": "{{doc}}",
+        "transFlag": 44,
+        "kind": "ic_trans"
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        }
+      ]
+    },
+    {
+      "title": "API: รันรายงาน การขายสินค้าและบริการ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_so_report_invoice",
+        "mode": "summary",
+        "dateFrom": "2000-01-01",
+        "dateTo": "2099-12-31",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "",
+        "viewDetail": false
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.menuKey",
+          "op": "eq",
+          "value": "menu_so_report_invoice"
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

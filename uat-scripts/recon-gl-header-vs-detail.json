@@ -1,0 +1,35 @@
+{
+  "id": "recon-gl-header-vs-detail",
+  "title": "กระทบยอด: ยอดหัวรายวัน = ผลรวมรายการแยกประเภท",
+  "module": "recon",
+  "severityOnFail": "S1",
+  "description": "ตรวจ PG อย่างเดียว: gl_journal.debit/credit ต้องเท่ากับ sum ของ gl_journal_detail ต่อเอกสาร และหัวรายวันต้องเดบิต = เครดิต",
+  "steps": [
+    {
+      "title": "PG: หัวรายวันที่ยอดไม่ตรงรายการ = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from gl_journal h join (select book_code, doc_no, sum(debit) d, sum(credit) c from gl_journal_detail group by 1, 2) x using (book_code, doc_no) where h.debit <> x.d or h.credit <> x.c",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: หัวรายวันที่เดบิต<>เครดิต = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from gl_journal where debit <> credit",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

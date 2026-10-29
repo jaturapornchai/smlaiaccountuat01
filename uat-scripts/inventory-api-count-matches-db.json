@@ -1,0 +1,82 @@
+{
+  "id": "inventory-api-count-matches-db",
+  "title": "สต็อก: API นับเอกสารและรายการสินค้าตรงกับฐานข้อมูล",
+  "module": "inventory",
+  "lens": "api",
+  "severityOnFail": "S2",
+  "description": "นับ ic_trans และ ic_trans_detail จาก PG แล้วเทียบกับ POST /api/query/list",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "PG: นับเอกสาร ic_trans",
+      "do": "db.query",
+      "sql": "select count(*) as n from ic_trans",
+      "rows": 1,
+      "save": {
+        "h": "n"
+      }
+    },
+    {
+      "title": "API: /api/query/list นับเอกสาร ic_trans ต้องเท่ากับฐานข้อมูล",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/query/list",
+      "body": {
+        "sql": "select count(*) as n from ic_trans"
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.0.n",
+          "op": "eq",
+          "value": "{{h}}"
+        }
+      ]
+    },
+    {
+      "title": "PG: นับรายการ ic_trans_detail",
+      "do": "db.query",
+      "sql": "select count(*) as n from ic_trans_detail",
+      "rows": 1,
+      "save": {
+        "d": "n"
+      }
+    },
+    {
+      "title": "API: /api/query/list นับรายการ ic_trans_detail ต้องเท่ากับฐานข้อมูล",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/query/list",
+      "body": {
+        "sql": "select count(*) as n from ic_trans_detail"
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.0.n",
+          "op": "eq",
+          "value": "{{d}}"
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

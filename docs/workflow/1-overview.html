@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="wf.css" />
+<style>
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: auto repeat(4, minmax(150px, auto)); column-gap: 130px; row-gap: 40px; margin-top: 30px; }
+  .colhead { font-size: 22px; font-weight: 700; color: #94a3b8; align-self: end; }
+  .frame { grid-column: 2 / 4; grid-row: 1 / 6; margin: -8px -34px -20px; border-radius: 34px; border: 2px dashed rgba(167, 139, 250, 0.45); background: rgba(124, 58, 237, 0.07); }
+  .frame-title { grid-column: 2 / 4; grid-row: 1; z-index: 2; font-size: 26px; font-weight: 700; color: #c4b5fd; }
+  .legend { grid-column: 1; grid-row: 5; align-self: end; font-size: 18px; color: #94a3b8; line-height: 1.9; }
+  .legend i { display: inline-block; width: 44px; height: 0; border-top: 4px solid; vertical-align: middle; margin-right: 12px; }
+  .grid .node { align-self: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ภาพที่ 1 · ภาพรวมระบบ UAT Tester</h1>
+  <p>ใครสั่งงานได้ · ระบบทดสอบอยู่ตรงไหน · ทดสอบกับอะไร (ของจริงทั้งหมด ไม่มี mock)</p>
+</header>
+
+<div class="grid">
+  <div class="colhead" style="grid-column:1;grid-row:1">ผู้ใช้ / ผู้สั่งงาน</div>
+  <div class="frame"></div>
+  <div class="frame-title">🧪 UAT Tester · uat.smlwork.com</div>
+  <div class="colhead" style="grid-column:4;grid-row:1">ระบบปลายทาง (ของจริง)</div>
+
+  <div class="node" id="ai" style="grid-column:1;grid-row:2;--c:#22d3ee">
+    <h3><span class="ic">🤖</span>AI นักพัฒนา</h3>
+    <p>Claude Code / Antigravity สร้าง-แก้ ERP แล้วสั่งทดสอบเอง</p>
+  </div>
+  <div class="node" id="admin" style="grid-column:1;grid-row:3;--c:#34d399">
+    <h3><span class="ic">🧑‍💼</span>ลุงจืด (ผู้ดูแล)</h3>
+    <p>เข้าระบบ Google แล้วกดรัน ตั้งค่า ส่ง issue ได้</p>
+  </div>
+  <div class="node" id="guest" style="grid-column:1;grid-row:4;--c:#94a3b8">
+    <h3><span class="ic">👥</span>เพื่อนๆ (ผู้ชม)</h3>
+    <p>เปิดดูได้ทุกหน้า แต่กดสั่งงานไม่ได้</p>
+  </div>
+  <div class="legend">
+    <div><i style="color:#22d3ee"></i>สั่งงาน / ส่งผลกลับ</div>
+    <div><i style="color:#34d399"></i>ทดสอบกับของจริง</div>
+    <div><i style="color:#fb7185"></i>พบปัญหา → แจ้ง</div>
+    <div><i style="color:#94a3b8;border-top-style:dashed"></i>ดูอย่างเดียว</div>
+  </div>
+
+  <div class="node" id="mcp" style="grid-column:2;grid-row:2;--c:#22d3ee">
+    <h3><span class="ic">🔌</span>ช่องสั่งงาน AI</h3>
+    <p><code>/api/mcp</code> มี 7 คำสั่ง เช่น <code>run</code> <code>runs</code> <code>events</code> · ต้องมี token</p>
+  </div>
+  <div class="node" id="web" style="grid-column:2;grid-row:3 / 5;--c:#a78bfa">
+    <h3><span class="ic">🖥️</span>หน้าเว็บ</h3>
+    <p>การ์ดบอท 30 ตัว เรียงตามเวลาทำงานล่าสุด พร้อมจอสด</p>
+    <p>ดูผลทีละขั้น คาดหวัง vs ได้จริง และภาพหลักฐาน</p>
+  </div>
+
+  <div class="node" id="queue" style="grid-column:3;grid-row:2;--c:#fbbf24">
+    <h3><span class="ic">⏳</span>คิวรัน</h3>
+    <p>รันพร้อมกันสูงสุด 3 สคริปต์ (ตั้งได้)</p>
+  </div>
+  <div class="node" id="runner" style="grid-column:3;grid-row:3 / 6;--c:#34d399">
+    <h3><span class="ic">🦾</span>ตัวรันสคริปต์</h3>
+    <p><code>runner/run.mjs</code> ทำตามสคริปต์ JSON 31 ชุดทีละขั้น</p>
+    <p>• หน้าจอ: Chrome ผ่าน Playwright</p>
+    <p>• API: เรียกของจริงแล้วตรวจผล</p>
+    <p>• ฐานข้อมูล: psql ตรวจแถว</p>
+    <p>บอท 30 ตัว = 10 โมดูล × 3 มุมตรวจ</p>
+  </div>
+
+  <div class="node" id="www" style="grid-column:4;grid-row:2;--c:#34d399">
+    <h3><span class="ic">🌐</span>www.smlwork.com</h3>
+    <p>SML AI Account (เข้าแบบ Demo)</p>
+  </div>
+  <div class="node" id="pg" style="grid-column:4;grid-row:3;--c:#34d399">
+    <h3><span class="ic">🐘</span>PostgreSQL</h3>
+    <p>ฐาน <code>smldemo</code> เท่านั้น</p>
+  </div>
+  <div class="node" id="brain" style="grid-column:4;grid-row:4;--c:#f472b6">
+    <h3><span class="ic">🧠</span>สมอง AI</h3>
+    <p>Ollama Cloud <code>deepseek-v4.1-flash</code> วิเคราะห์ขั้นที่พัง</p>
+  </div>
+  <div class="node" id="issuemate" style="grid-column:4;grid-row:5;--c:#fb7185">
+    <h3><span class="ic">🐞</span>IssueMate</h3>
+    <p>โปรเจกต์ SMLAIACC รับ issue พร้อมภาพและขั้นตอนทำซ้ำ</p>
+  </div>
+</div>
+
+<footer><span>อ้างอิงโค้ด: src/lib/mcp.ts · src/middleware.ts · src/lib/uat-runs.ts · runner/run.mjs · src/lib/issuemate.ts</span><span>UAT Tester · SML AI Account</span></footer>
+
+<script>
+  window.ARROWS = [
+    ["ai", "mcp", "สั่งงาน ⇄ ผล", { both: true }],
+    ["admin", "web", "Google login", { color: "#34d399", to: "l" }],
+    ["guest", "web", "ดูอย่างเดียว", { color: "#94a3b8", dash: true, to: "l" }],
+    ["mcp", "queue", "run"],
+    ["web", "queue", "กด ▶", { color: "#a78bfa", from: "r", to: "l" }],
+    ["queue", "runner", "เริ่มรัน", { color: "#fbbf24", from: "b", to: "t" }],
+    ["runner", "www", "หน้าจอ · API", { color: "#34d399", from: "r", to: "l", y1: -110 }],
+    ["runner", "pg", "SQL", { color: "#34d399", from: "r", to: "l", y1: -55 }],
+    ["runner", "brain", "ไม่ผ่าน", { color: "#fb7185", from: "r", to: "l" }],
+    ["brain", "issuemate", "เปิด issue", { color: "#fb7185", from: "b", to: "t", dx: 80 }],
+  ];
+</script>
+<script src="wf.js"></script>
+</body>
+</html>

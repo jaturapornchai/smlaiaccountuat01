@@ -1,0 +1,52 @@
+{
+  "id": "purchase-menu-smoke",
+  "title": "ซื้อ: เปิดใบเสนอซื้อ/ใบสั่งซื้อแล้วไม่มีข้อผิดพลาดแฝง",
+  "module": "purchase",
+  "severityOnFail": "S2",
+  "description": "เปิดเมนู menu_purchase_requisition และ menu_po_purchase_order ตรวจ HTTP 4xx/5xx, JS error, DB error บนหน้าจอ",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ใบเสนอซื้อสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_purchase_requisition"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ใบเสนอซื้อสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า ใบเสนอซื้อสินค้า",
+      "do": "ui.screenshot",
+      "name": "menu_purchase_requisition"
+    },
+    {
+      "title": "เปิดเมนู ใบสั่งซื้อสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_po_purchase_order"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ใบสั่งซื้อสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า ใบสั่งซื้อสินค้า",
+      "do": "ui.screenshot",
+      "name": "menu_po_purchase_order"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "id": "recon-ai-play",
+  "title": "กระทบยอด: AI กดเล่นหน้าจอ ตรวจสอบเอกสาร",
+  "module": "recon",
+  "lens": "screen",
+  "severityOnFail": "S3",
+  "timeoutMs": 600000,
+  "description": "AI (Stagehand + Computer Use บนสมอง Ollama) เปิด ตรวจสอบเอกสาร แล้วกดใช้งานจริงเหมือนผู้ใช้ รายงานสิ่งผิดปกติที่เห็นบนจอ · ผลจาก AI ต้องให้คนยืนยันก่อนแก้",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ตรวจสอบเอกสาร",
+      "do": "ui.openMenu",
+      "key": "menu_checking_ic_trans"
+    },
+    {
+      "title": "AI กดเล่น ตรวจสอบเอกสาร",
+      "do": "ui.play",
+      "goal": "ใช้เครื่องมือตรวจสอบเอกสารแบบนักบัญชี: กำหนดช่วงวันที่ กดตรวจสอบ แล้วอ่านผลว่าพบเอกสารผิดปกติอะไรบ้าง ห้ามกดปุ่มซ่อมหรือแก้ไขข้อมูล ห้ามแก้ไขหรือกดบันทึกใดๆ จบเมื่ออ่านผลเสร็จ",
+      "maxSteps": 15,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงระหว่างที่ AI ใช้งาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้าจอสุดท้าย",
+      "do": "ui.screenshot",
+      "name": "recon-ai-play"
+    }
+  ]
+}

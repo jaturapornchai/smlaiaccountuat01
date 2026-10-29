@@ -1,0 +1,54 @@
+{
+  "id": "recon-screen-tools",
+  "title": "กระทบยอด: เปิดหน้าตรวจสอบข้อมูลและงบดุล ไม่มีข้อผิดพลาดแฝง",
+  "module": "recon",
+  "lens": "screen",
+  "severityOnFail": "S3",
+  "description": "เปิด menu_checking_ic_trans และ menu_display_balance_sheet (เปิดดูเท่านั้น ไม่กดประมวลผล) แล้วตรวจ HTTP 4xx/5xx, JS error, DB error",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ตรวจสอบและปรับปรุงข้อมูล",
+      "do": "ui.openMenu",
+      "key": "menu_checking_ic_trans"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ตรวจสอบและปรับปรุงข้อมูล",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า ตรวจสอบและปรับปรุงข้อมูล",
+      "do": "ui.screenshot",
+      "name": "menu_checking_ic_trans"
+    },
+    {
+      "title": "เปิดเมนู แสดงรายการงบดุล",
+      "do": "ui.openMenu",
+      "key": "menu_display_balance_sheet"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า แสดงรายการงบดุล",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า แสดงรายการงบดุล",
+      "do": "ui.screenshot",
+      "name": "menu_display_balance_sheet"
+    }
+  ],
+  "cleanup": []
+}

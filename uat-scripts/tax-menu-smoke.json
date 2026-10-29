@@ -1,0 +1,52 @@
+{
+  "id": "tax-menu-smoke",
+  "title": "ภาษี: เปิดประเภทภาษี/รายงานภาษีขายแล้วไม่มีข้อผิดพลาดแฝง",
+  "module": "tax",
+  "severityOnFail": "S2",
+  "description": "เปิดเมนู menu_tax_type และ menu_report_vat_sale ตรวจ HTTP 4xx/5xx, JS error, DB error บนหน้าจอ",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู กำหนดประเภทภาษี",
+      "do": "ui.openMenu",
+      "key": "menu_tax_type"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า กำหนดประเภทภาษี",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า กำหนดประเภทภาษี",
+      "do": "ui.screenshot",
+      "name": "menu_tax_type"
+    },
+    {
+      "title": "เปิดเมนู รายงานภาษีขาย",
+      "do": "ui.openMenu",
+      "key": "menu_report_vat_sale"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานภาษีขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า รายงานภาษีขาย",
+      "do": "ui.screenshot",
+      "name": "menu_report_vat_sale"
+    }
+  ]
+}

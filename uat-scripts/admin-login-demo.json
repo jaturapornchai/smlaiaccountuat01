@@ -1,0 +1,25 @@
+{
+  "id": "admin-login-demo",
+  "title": "เข้าสู่ระบบ Demo แล้วหน้าหลักต้องไม่มีข้อผิดพลาดแฝง",
+  "module": "admin",
+  "severityOnFail": "S2",
+  "description": "กดปุ่ม 'ทดลองใช้งานทันที' ที่หน้า /login แล้วตรวจว่าเข้าหน้าหลักได้ ไม่มี HTTP 4xx/5xx, JS error หรือข้อความ DB error",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้าหลัก",
+      "do": "ui.screenshot",
+      "name": "home"
+    }
+  ]
+}

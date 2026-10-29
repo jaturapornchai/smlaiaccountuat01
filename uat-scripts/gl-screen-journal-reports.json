@@ -1,0 +1,71 @@
+{
+  "id": "gl-screen-journal-reports",
+  "title": "บัญชี: เปิดบันทึกรายวันแบบเร็ว ผังบัญชี และงบทดลอง ไม่มีข้อผิดพลาดแฝง",
+  "module": "gl",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "เปิด menu_gl_journal_fast, menu_chart_of_account, menu_gl_report_trial_balance แล้วตรวจ HTTP 4xx/5xx, JS error, DB error บนหน้าจอ",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู บันทึกข้อมูลรายวันแบบเร็ว",
+      "do": "ui.openMenu",
+      "key": "menu_gl_journal_fast"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า บันทึกข้อมูลรายวันแบบเร็ว",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า บันทึกข้อมูลรายวันแบบเร็ว",
+      "do": "ui.screenshot",
+      "name": "menu_gl_journal_fast"
+    },
+    {
+      "title": "เปิดเมนู รายละเอียดผังบัญชี",
+      "do": "ui.openMenu",
+      "key": "menu_chart_of_account"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายละเอียดผังบัญชี",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า รายละเอียดผังบัญชี",
+      "do": "ui.screenshot",
+      "name": "menu_chart_of_account"
+    },
+    {
+      "title": "เปิดเมนู รายงานงบทดลอง (มาตรฐาน)",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_trial_balance"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานงบทดลอง (มาตรฐาน)",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า รายงานงบทดลอง (มาตรฐาน)",
+      "do": "ui.screenshot",
+      "name": "menu_gl_report_trial_balance"
+    }
+  ],
+  "cleanup": []
+}

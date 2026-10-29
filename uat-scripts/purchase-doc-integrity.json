@@ -1,0 +1,50 @@
+{
+  "id": "purchase-doc-integrity",
+  "title": "ซื้อ: เอกสารซื้ออ้างเจ้าหนี้จริง ยอดภาษีถูก และลงภาษีซื้อครบ",
+  "module": "purchase",
+  "lens": "data",
+  "severityOnFail": "S1",
+  "description": "ตรวจ ic_trans ฝั่งเจ้าหนี้ (trans_flag ตาม partySide ap): รหัสเจ้าหนี้มีใน ap_supplier, ยอดหลังภาษี = ก่อนภาษี + ภาษี, ใบซื้อ/เพิ่มหนี้/ลดหนี้ที่มีภาษีต้องมีแถวใน gl_journal_vat_buy",
+  "steps": [
+    {
+      "title": "PG: เอกสารเจ้าหนี้ที่อ้างรหัสที่ไม่มีใน ap_supplier = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from ic_trans t where t.trans_flag in (6,8,12,14,16) and coalesce(t.cust_code, '') <> '' and not exists (select 1 from ap_supplier s where s.code = t.cust_code)",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: เอกสารซื้อที่ยอดหลังภาษี ≠ ยอดก่อนภาษี + ภาษี = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from ic_trans where trans_flag in (6,12,14,16) and total_after_vat <> total_before_vat + total_vat_value",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: ใบซื้อ/เพิ่มหนี้/ลดหนี้ที่มีภาษีแต่ไม่มีในภาษีซื้อ = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from ic_trans t where t.trans_flag in (12,14,16) and t.is_cancel = 0 and t.total_vat_value <> 0 and not exists (select 1 from gl_journal_vat_buy v where v.doc_no = t.doc_no and v.trans_flag = t.trans_flag)",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

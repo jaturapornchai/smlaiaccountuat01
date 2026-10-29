@@ -1,0 +1,73 @@
+{
+  "id": "gl-api-trial-balance",
+  "title": "บัญชี: API งบทดลองรันได้ และ API เห็นทุกเอกสารเดบิต = เครดิต",
+  "module": "gl",
+  "lens": "api",
+  "severityOnFail": "S1",
+  "description": "รันรายงาน menu_gl_report_trial_balance ผ่าน API แล้วถาม POST /api/query/list ว่ามีเอกสารที่เดบิต ≠ เครดิตหรือไม่",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "API: รันรายงาน งบทดลอง (มาตรฐาน)",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_gl_report_trial_balance",
+        "mode": "summary",
+        "dateFrom": "2000-01-01",
+        "dateTo": "2099-12-31",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "",
+        "viewDetail": false
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.menuKey",
+          "op": "eq",
+          "value": "menu_gl_report_trial_balance"
+        }
+      ]
+    },
+    {
+      "title": "API: เอกสารที่เดบิต ≠ เครดิต = 0",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/query/list",
+      "body": {
+        "sql": "select count(*) as n from (select book_code, doc_no from gl_journal_detail group by 1, 2 having sum(debit) <> sum(credit)) t"
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.0.n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

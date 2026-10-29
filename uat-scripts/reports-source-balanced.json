@@ -1,0 +1,37 @@
+{
+  "id": "reports-source-balanced",
+  "title": "รายงาน: ข้อมูลต้นทางของงบทดลองสมดุลและอ้างผังบัญชีครบ",
+  "module": "reports",
+  "lens": "data",
+  "severityOnFail": "S1",
+  "description": "ตรวจ gl_journal_detail ที่รายงานงบทดลอง/งบการเงินใช้: ยอดเดบิตรวม = เครดิตรวม และทุกรหัสบัญชีมีใน gl_chart_of_account",
+  "steps": [
+    {
+      "title": "PG: ผลต่างเดบิตรวม - เครดิตรวมทั้งสมุด = 0",
+      "do": "db.query",
+      "sql": "select coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as n from gl_journal_detail",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: รายการบัญชีที่รหัสบัญชีไม่มีในผังบัญชี = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from gl_journal_detail d where not exists (select 1 from gl_chart_of_account a where a.code = d.account_code)",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

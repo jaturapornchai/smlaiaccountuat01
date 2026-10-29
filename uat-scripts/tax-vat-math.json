@@ -1,0 +1,63 @@
+{
+  "id": "tax-vat-math",
+  "title": "ภาษี: ภาษีซื้อ/ขาย = ฐาน × อัตรา และเลขใบกำกับไม่ถูกใช้ซ้ำ",
+  "module": "tax",
+  "lens": "data",
+  "severityOnFail": "S1",
+  "description": "ตรวจ gl_journal_vat_sale/gl_journal_vat_buy: ภาษี = round(ฐาน × อัตรา ÷ 100, 2) คลาดได้ไม่เกิน 0.01, ภาษีขายจากเอกสารขายต้องมีเอกสารต้นทาง, เลขใบกำกับภาษีขาย 1 เลขต้องอยู่ในเอกสารเดียว",
+  "steps": [
+    {
+      "title": "PG: แถวภาษีขายที่ภาษี ≠ ฐาน × อัตรา = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from gl_journal_vat_sale where abs(amount - round(base_caltax_amount * tax_rate / 100, 2)) > 0.01",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: แถวภาษีซื้อที่ภาษี ≠ ฐาน × อัตรา = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from gl_journal_vat_buy where abs(vat_amount - round(vat_base_amount * vat_rate / 100, 2)) > 0.01",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: ภาษีขายของใบขาย/เพิ่มหนี้/รับคืนที่ไม่มีเอกสารต้นทาง = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from gl_journal_vat_sale v where v.trans_flag in (44,46,48) and not exists (select 1 from ic_trans t where t.doc_no = v.doc_no and t.trans_flag = v.trans_flag)",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: เลขใบกำกับภาษีขายที่ถูกใช้ในหลายเอกสาร = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from (select vat_number from gl_journal_vat_sale where coalesce(vat_number, '') <> '' group by 1 having count(distinct doc_no) > 1) t",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

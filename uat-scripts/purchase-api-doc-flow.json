@@ -1,0 +1,79 @@
+{
+  "id": "purchase-api-doc-flow",
+  "title": "ซื้อ: API Document Flow ของใบสั่งซื้อล่าสุด และรายงานการซื้อรันได้",
+  "module": "purchase",
+  "lens": "api",
+  "severityOnFail": "S2",
+  "description": "หาใบสั่งซื้อ (trans_flag 6) ล่าสุดจาก PG แล้วเรียก POST /api/process/doc/flow และรันรายงาน menu_po_report_purchase",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "PG: หาใบสั่งซื้อล่าสุดที่ไม่ยกเลิก",
+      "do": "db.query",
+      "sql": "select doc_no from ic_trans where trans_flag = 6 and is_cancel = 0 order by doc_date desc, doc_no desc limit 1",
+      "rows": 1,
+      "save": {
+        "doc": "doc_no"
+      }
+    },
+    {
+      "title": "API: Document Flow ของใบสั่งซื้อ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/doc/flow",
+      "body": {
+        "docNo": "{{doc}}",
+        "transFlag": 6,
+        "kind": "ic_trans"
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        }
+      ]
+    },
+    {
+      "title": "API: รันรายงาน การซื้อสินค้า/ตั้งหนี้",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_po_report_purchase",
+        "mode": "summary",
+        "dateFrom": "2000-01-01",
+        "dateTo": "2099-12-31",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "",
+        "viewDetail": false
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.menuKey",
+          "op": "eq",
+          "value": "menu_po_report_purchase"
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

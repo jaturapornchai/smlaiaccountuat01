@@ -1,0 +1,113 @@
+{
+  "id": "master-api-count-matches-db",
+  "title": "ข้อมูลหลัก: API นับลูกหนี้/เจ้าหนี้/สินค้า ตรงกับฐานข้อมูล",
+  "module": "master",
+  "lens": "api",
+  "severityOnFail": "S2",
+  "description": "นับแถว ar_customer, ap_supplier, ic_inventory จาก PG แล้วเทียบกับผลของ POST /api/query/list ที่หน้าจอใช้",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "PG: นับลูกหนี้ ar_customer",
+      "do": "db.query",
+      "sql": "select count(*) as n from ar_customer",
+      "rows": 1,
+      "save": {
+        "ar": "n"
+      }
+    },
+    {
+      "title": "API: /api/query/list นับลูกหนี้ ต้องเท่ากับฐานข้อมูล",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/query/list",
+      "body": {
+        "sql": "select count(*) as n from ar_customer"
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.0.n",
+          "op": "eq",
+          "value": "{{ar}}"
+        }
+      ]
+    },
+    {
+      "title": "PG: นับเจ้าหนี้ ap_supplier",
+      "do": "db.query",
+      "sql": "select count(*) as n from ap_supplier",
+      "rows": 1,
+      "save": {
+        "ap": "n"
+      }
+    },
+    {
+      "title": "API: /api/query/list นับเจ้าหนี้ ต้องเท่ากับฐานข้อมูล",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/query/list",
+      "body": {
+        "sql": "select count(*) as n from ap_supplier"
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.0.n",
+          "op": "eq",
+          "value": "{{ap}}"
+        }
+      ]
+    },
+    {
+      "title": "PG: นับสินค้า ic_inventory",
+      "do": "db.query",
+      "sql": "select count(*) as n from ic_inventory",
+      "rows": 1,
+      "save": {
+        "ic": "n"
+      }
+    },
+    {
+      "title": "API: /api/query/list นับสินค้า ต้องเท่ากับฐานข้อมูล",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/query/list",
+      "body": {
+        "sql": "select count(*) as n from ic_inventory"
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.0.n",
+          "op": "eq",
+          "value": "{{ic}}"
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

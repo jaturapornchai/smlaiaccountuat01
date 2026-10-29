@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="wf.css" />
+<style>
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); column-gap: 150px; row-gap: 64px; margin-top: 40px; }
+  .grid .node { align-self: stretch; }
+  .hub { grid-column: 2; grid-row: 2; text-align: center; padding: 22px 26px; }
+  .hub h3 { justify-content: center; }
+  .strip { grid-column: 1 / 4; display: flex; gap: 22px; }
+  .strip .node { flex: 1; padding: 14px 22px; }
+  .strip .node p { margin-top: 0; font-size: 19px; }
+  .strip b { color: #f8fafc; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ภาพที่ 2 · วงจร AI แก้ → ทดสอบ → แจ้ง → แก้ซ้ำ</h1>
+  <p>AI สั่งทดสอบเองผ่าน MCP · ไม่ผ่านระบบเปิด issue ให้เอง · แก้แล้วตรวจซ้ำจนผ่าน โดยไม่ต้องมีคนกด</p>
+</header>
+
+<div class="grid">
+  <div class="node" id="n1" style="grid-column:1;grid-row:1;--c:#22d3ee">
+    <h3><span class="num">1</span>AI แก้โค้ด ERP</h3>
+    <p>Claude Code / Antigravity แก้โปรแกรม SML AI Account แล้วขึ้นระบบที่ www.smlwork.com</p>
+  </div>
+  <div class="node" id="n2" style="grid-column:2;grid-row:1;--c:#22d3ee">
+    <h3><span class="num">2</span>สั่งทดสอบผ่าน MCP</h3>
+    <p>เรียกคำสั่ง <code>run</code> เลือกสคริปต์ / โมดูล / ทั้งหมด รอผลได้ถึง 90 วินาที หรือติดตามด้วย <code>events</code></p>
+  </div>
+  <div class="node" id="n3" style="grid-column:3;grid-row:1;--c:#34d399">
+    <h3><span class="num">3</span>บอททดสอบของจริง</h3>
+    <p>เปิดหน้าจอ เรียก API ตรวจฐาน <code>smldemo</code> ทีละขั้น หน้าเว็บโชว์จอสดและผลทุกขั้น</p>
+  </div>
+
+  <div class="node hub" id="hub" style="--c:#34d399">
+    <h3><span class="ic">✅</span>ผ่าน → ปิดวง</h3>
+    <p>ถ้าเคยเปิด issue ไว้ ระบบคอมเมนต์ใน issue เดิมว่า "ตรวจซ้ำผ่านแล้ว"<br />หน้าเว็บขึ้นป้ายกลางจอพร้อมพลุกระดาษ</p>
+  </div>
+
+  <div class="node" id="n6" style="grid-column:1;grid-row:3;--c:#fbbf24">
+    <h3><span class="num">6</span>AI อ่าน issue แล้วแก้</h3>
+    <p>แก้เสร็จสั่ง <code>run</code> แบบ <code>issue</code> = เลข issue ระบบรันซ้ำเฉพาะสคริปต์ของ issue นั้น</p>
+  </div>
+  <div class="node" id="n5" style="grid-column:2;grid-row:3;--c:#fb7185">
+    <h3><span class="num">5</span>เปิด issue ใน IssueMate</h3>
+    <p>แนบขั้นตอนทำซ้ำ ภาพหน้าจอ และ <code>run.json</code> · ระดับ S1→critical … S4→low · กันส่งซ้ำ</p>
+  </div>
+  <div class="node" id="n4" style="grid-column:3;grid-row:3;--c:#f472b6">
+    <h3><span class="num">4</span>สมอง AI วิเคราะห์</h3>
+    <p>อ่านขั้นที่พังพร้อมภาพ เขียนสาเหตุที่น่าจะเป็น (เป็นการคาดเดา ต้องตรวจโค้ดจริง)</p>
+  </div>
+
+  <div class="strip">
+    <div class="node" style="--c:#fb7185"><p>📌 <b>ตัวอย่างจริง SMLAIACC-119</b> · สคริปต์ <code>tax-vat-math</code> พบภาษีขายใบ FAS6909-0001 ยอดภาษีไม่ตรง ฐาน × อัตรา → เปิด issue เอง</p></div>
+    <div class="node" style="--c:#fb7185"><p>📌 <b>ตัวอย่างจริง SMLAIACC-120</b> · สคริปต์ <code>admin-login-demo</code> หลังเข้าแบบ Demo เรียก <code>/api/query/list</code> แล้วได้ 401 → เปิด issue เอง</p></div>
+  </div>
+</div>
+
+<footer><span>อ้างอิงโค้ด: src/lib/mcp.ts (run · events) · src/lib/brain.ts · src/lib/issuemate.ts · src/components/ActivityFx.tsx</span><span>UAT Tester · SML AI Account</span></footer>
+
+<script>
+  window.ARROWS = [
+    ["n1", "n2", "เรียก run", { from: "r", to: "l" }],
+    ["n2", "n3", "เข้าคิว", { from: "r", to: "l" }],
+    ["n3", "hub", "ผ่าน", { color: "#34d399", from: "b", to: "r", x1: -110 }],
+    ["n3", "n4", "ไม่ผ่าน", { color: "#fb7185", from: "b", to: "t", x1: 110 }],
+    ["n4", "n5", "ส่งผลวิเคราะห์", { color: "#f472b6", from: "l", to: "r" }],
+    ["n5", "n6", "issue ใหม่", { color: "#fb7185", from: "l", to: "r" }],
+    ["n6", "n1", "วนแก้จนผ่าน", { color: "#fbbf24", from: "t", to: "b" }],
+  ];
+</script>
+<script src="wf.js"></script>
+</body>
+</html>

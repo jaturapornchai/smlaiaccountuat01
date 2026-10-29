@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>โครงสร้างการทำงาน — ระบบ UAT Tester สำหรับ ERP</title>
+<style>
+  :root { --bg1:#050816; --bg2:#0b1230; --card:#0f1838; --line:#27325f; --cyan:#22d3ee; --violet:#a78bfa; --emerald:#34d399; --amber:#fbbf24; --rose:#fb7185; --text:#e8ecff; --muted:#9aa6d6; }
+  * { box-sizing:border-box; margin:0; }
+  html, body { background:#050816; }
+  body { font-family:"Leelawadee UI","Tahoma","Noto Sans Thai",sans-serif; color:var(--text); }
+  #c { position:relative; width:1920px; height:1080px; overflow:hidden;
+       background: radial-gradient(900px 600px at 15% 10%, rgba(34,211,238,.16), transparent 60%),
+                   radial-gradient(1000px 700px at 90% 85%, rgba(167,139,250,.18), transparent 60%),
+                   linear-gradient(160deg, var(--bg1), var(--bg2)); }
+  #c::before { content:""; position:absolute; inset:0; background-image:radial-gradient(rgba(255,255,255,.07) 1px, transparent 1.2px); background-size:34px 34px; }
+  .card { position:absolute; border-radius:26px; padding:26px 30px; background:linear-gradient(180deg, rgba(23,33,78,.92), rgba(12,19,50,.92));
+          border:1.5px solid var(--line); box-shadow:0 18px 50px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06); }
+  .card h2 { font-size:32px; font-weight:700; line-height:1.25; }
+  .card p { margin-top:10px; font-size:21px; line-height:1.5; color:var(--muted); }
+  .tag { display:inline-block; font-size:17px; font-weight:700; letter-spacing:.04em; padding:3px 12px; border-radius:99px; margin-bottom:12px; }
+  .glow-c { border-color:rgba(34,211,238,.55); box-shadow:0 0 0 1px rgba(34,211,238,.15), 0 0 46px rgba(34,211,238,.18), 0 18px 50px rgba(0,0,0,.45); }
+  .glow-v { border-color:rgba(167,139,250,.55); box-shadow:0 0 0 1px rgba(167,139,250,.15), 0 0 46px rgba(167,139,250,.2), 0 18px 50px rgba(0,0,0,.45); }
+  .glow-e { border-color:rgba(52,211,153,.55); box-shadow:0 0 0 1px rgba(52,211,153,.15), 0 0 46px rgba(52,211,153,.16), 0 18px 50px rgba(0,0,0,.45); }
+  .chips { display:grid; grid-template-columns:1fr 1fr; gap:14px 16px; margin-top:22px; }
+  .chip { display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:16px; font-size:22px; font-weight:600; white-space:nowrap;
+          background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); }
+  .chip i { width:14px; height:14px; border-radius:50%; flex:none; box-shadow:0 0 14px currentColor; background:currentColor; }
+  .sub { display:flex; align-items:center; gap:18px; padding:18px 20px; margin-top:16px; border-radius:18px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); }
+  .sub b { display:block; font-size:25px; font-weight:700; }
+  .sub span { display:block; margin-top:3px; font-size:18px; color:var(--muted); line-height:1.4; }
+  .ico { flex:none; width:58px; height:58px; border-radius:16px; display:grid; place-items:center; background:rgba(255,255,255,.07); }
+  .lab { position:absolute; font-size:19px; font-weight:600; color:var(--cyan); background:#0a1030; padding:2px 12px; border-radius:99px; border:1px solid rgba(34,211,238,.4); white-space:nowrap; }
+  .res { display:grid; grid-template-columns:repeat(3,1fr); gap:24px; margin-top:6px; }
+  .res div { padding:6px 4px; }
+  .res b { font-size:27px; display:block; }
+  .res span { font-size:20px; color:var(--muted); display:block; margin-top:6px; line-height:1.45; }
+  svg.links { position:absolute; inset:0; }
+</style>
+</head>
+<body>
+<div id="c">
+  <svg class="links" width="1920" height="1080" viewBox="0 0 1920 1080">
+    <defs>
+      <linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>
+      <marker id="ah" viewBox="0 0 12 12" refX="9" refY="6" markerWidth="11" markerHeight="11" orient="auto"><path d="M1 1 L11 6 L1 11 Z" fill="#8be9fb"/></marker>
+    </defs>
+    <g fill="none" stroke="#67e8f9" stroke-width="4" stroke-linecap="round" marker-end="url(#ah)">
+      <path d="M240 330 V400"/>
+      <path d="M420 540 H500"/>
+      <path d="M900 365 H980"/>
+      <path d="M900 645 H980"/>
+      <path d="M1360 365 H1440"/>
+      <path d="M1360 645 H1440"/>
+      <path d="M1170 875 V920"/>
+      <path d="M240 920 V640"/>
+    </g>
+  </svg>
+
+  <div style="position:absolute;left:60px;top:46px;">
+    <div style="font-size:54px;font-weight:800;line-height:1.2;background:linear-gradient(90deg,#67e8f9,#c4b5fd);-webkit-background-clip:text;color:transparent;">ระบบ UAT Tester สำหรับ ERP</div>
+    <div style="margin-top:8px;font-size:24px;color:var(--muted);">OpenHands Swarm · ทดสอบ SML AI Account ตามสคริปต์ทีละขั้นตอน ทั้งหน้าจอ API และ PostgreSQL</div>
+  </div>
+
+  <!-- ผู้ใช้ -->
+  <div class="card" style="left:60px;top:230px;width:360px;height:100px;padding:18px 26px;display:flex;align-items:center;gap:18px;">
+    <div class="ico" style="background:rgba(251,191,36,.15)"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg></div>
+    <div><h2 style="font-size:32px">ลุงจืด</h2><p style="margin:0;font-size:19px">ผู้สั่งงานและดูผล</p></div>
+  </div>
+
+  <!-- แดชบอร์ด -->
+  <div class="card glow-c" style="left:60px;top:400px;width:360px;height:240px;">
+    <span class="tag" style="background:rgba(34,211,238,.15);color:var(--cyan)">หน้าจอควบคุม</span>
+    <h2>แดชบอร์ดสั่งงาน</h2>
+    <p>เลือกบอทหรือสคริปต์ กดรัน แล้วดูผลสดทีละขั้นตอน</p>
+  </div>
+  <span class="lab" style="left:250px;top:352px;">สั่งงาน</span>
+  <span class="lab" style="left:262px;top:760px;">แสดงผลสด</span>
+
+  <!-- ฝูงบอท -->
+  <div class="card glow-v" style="left:500px;top:230px;width:400px;height:560px;">
+    <span class="tag" style="background:rgba(167,139,250,.18);color:var(--violet)">ผู้ทดสอบ</span>
+    <h2>ฝูงบอท 30 ตัว</h2>
+    <p style="margin-top:6px">10 โมดูล × 3 มุมตรวจ<br>หน้าจอ · ฐานข้อมูล · API</p>
+    <div class="chips">
+      <div class="chip" style="color:#60a5fa"><i></i><span style="color:var(--text)">ข้อมูลหลัก</span></div>
+      <div class="chip" style="color:#34d399"><i></i><span style="color:var(--text)">ขาย</span></div>
+      <div class="chip" style="color:#fbbf24"><i></i><span style="color:var(--text)">ซื้อ</span></div>
+      <div class="chip" style="color:#22d3ee"><i></i><span style="color:var(--text)">สต็อก</span></div>
+      <div class="chip" style="color:#a78bfa"><i></i><span style="color:var(--text)">บัญชี GL</span></div>
+      <div class="chip" style="color:#fb7185"><i></i><span style="color:var(--text)">ภาษี</span></div>
+      <div class="chip" style="color:#2dd4bf"><i></i><span style="color:var(--text)">รายงาน</span></div>
+      <div class="chip" style="color:#f97316"><i></i><span style="color:var(--text)">สิทธิ์</span></div>
+      <div class="chip" style="color:#818cf8"><i></i><span style="color:var(--text)">แอดมิน</span></div>
+      <div class="chip" style="color:#f472b6"><i></i><span style="color:var(--text)">กระทบยอด</span></div>
+    </div>
+  </div>
+
+  <!-- ตัวรันสคริปต์ -->
+  <div class="card glow-e" style="left:980px;top:230px;width:380px;height:270px;">
+    <span class="tag" style="background:rgba(52,211,153,.15);color:var(--emerald)">ทางที่ 1</span>
+    <h2>ตัวรันสคริปต์ทดสอบ</h2>
+    <p>ทำตามสคริปต์ทีละขั้นตอน ผ่านหรือไม่ผ่านชัดเจน ถ้าพังจะถ่ายภาพหลักฐานให้ทันที</p>
+  </div>
+  <div class="card glow-v" style="left:980px;top:530px;width:380px;height:260px;">
+    <span class="tag" style="background:rgba(167,139,250,.18);color:var(--violet)">ทางที่ 2</span>
+    <h2>บอท AI สำรวจเพิ่ม</h2>
+    <p>OpenHands ลองทดสอบนอกสคริปต์ แล้วรายงานปัญหาเป็นระดับ S1–S4</p>
+  </div>
+
+  <!-- ระบบเป้าหมาย -->
+  <div class="card glow-c" style="left:1440px;top:230px;width:420px;height:560px;padding-bottom:20px;">
+    <span class="tag" style="background:rgba(251,113,133,.15);color:var(--rose)">ระบบที่ถูกทดสอบ</span>
+    <h2>SML AI Account (UAT)</h2>
+    <div class="sub" style="margin-top:20px">
+      <div class="ico"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+      <div><b>หน้าจอ</b><span>เบราว์เซอร์ Chrome จริง คลิก กรอก อ่านค่า</span></div>
+    </div>
+    <div class="sub">
+      <div class="ico" style="font-size:26px;font-weight:800;color:#a78bfa">{ }</div>
+      <div><b>API</b><span>เรียกด้วยคุกกี้เดียวกับหน้าจอ</span></div>
+    </div>
+    <div class="sub">
+      <div class="ico"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg></div>
+      <div><b>ฐานข้อมูล PostgreSQL</b><span>ฐาน Demo เท่านั้น ตรวจแถวหลังทุกการบันทึก</span></div>
+    </div>
+  </div>
+
+  <!-- ด่านป้องกัน -->
+  <div class="card" style="left:980px;top:815px;width:880px;height:60px;padding:0 26px;display:flex;align-items:center;gap:16px;border-color:rgba(251,191,36,.55);border-radius:18px;">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4" stroke-linecap="round"/></svg>
+    <span style="font-size:23px;font-weight:700;color:#fde68a">ด่านป้องกัน</span>
+    <span style="font-size:21px;color:var(--text)">เปิดได้เฉพาะเว็บ UAT · แตะฐานข้อมูลได้เฉพาะ Demo</span>
+  </div>
+  <span class="lab" style="left:1190px;top:886px;">ส่งผลทีละขั้นตอน</span>
+
+  <!-- ผลลัพธ์ -->
+  <div class="card glow-e" style="left:60px;top:920px;width:1800px;height:130px;padding:20px 34px;">
+    <div class="res">
+      <div><b style="color:var(--emerald)">ผ่าน / ไม่ผ่าน ทีละขั้นตอน</b><span>เห็นว่าพังที่ขั้นไหน ค่าที่คาดหวังกับค่าจริงต่างกันอย่างไร</span></div>
+      <div><b style="color:var(--cyan)">ภาพหลักฐานจากหน้าจอ</b><span>ถ่ายอัตโนมัติเมื่อขั้นตอนล้มเหลว และตามจุดที่สคริปต์กำหนด</span></div>
+      <div><b style="color:var(--amber)">รายงานปัญหาระดับ S1–S4</b><span>เงิน ภาษี สต็อก หรือ GL ผิด จัดเป็น S1 สูงสุด</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,44 @@
+{
+  "id": "gl-ai-play",
+  "title": "บัญชีแยกประเภท: AI กดเล่นหน้าจอ งบทดลอง",
+  "module": "gl",
+  "lens": "screen",
+  "severityOnFail": "S3",
+  "timeoutMs": 600000,
+  "description": "AI (Stagehand + Computer Use บนสมอง Ollama) เปิด งบทดลอง แล้วกดใช้งานจริงเหมือนผู้ใช้ รายงานสิ่งผิดปกติที่เห็นบนจอ · ผลจาก AI ต้องให้คนยืนยันก่อนแก้",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู งบทดลอง",
+      "do": "ui.openMenu",
+      "key": "menu_gl_report_trial_balance"
+    },
+    {
+      "title": "AI กดเล่น งบทดลอง",
+      "do": "ui.play",
+      "goal": "ใช้รายงานงบทดลองแบบนักบัญชี: กำหนดช่วงวันที่ทั้งปีปัจจุบัน กดแสดงรายงาน ตรวจว่ายอดเดบิตรวมเท่ากับยอดเครดิตรวม และชื่อบัญชีภาษาไทยอ่านได้ ห้ามแก้ไขหรือกดบันทึกใดๆ จบเมื่อตรวจเสร็จ",
+      "maxSteps": 15,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงระหว่างที่ AI ใช้งาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้าจอสุดท้าย",
+      "do": "ui.screenshot",
+      "name": "gl-ai-play"
+    }
+  ]
+}

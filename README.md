@@ -1,0 +1,249 @@
+# UAT Tester · SML AI Account (ฝูงบอททดสอบ 30 ตัว)
+
+![หน้าแรก UAT Tester: สถิติ ฝูงบอท และสรุปส่งมอบ](docs/screens/01-home.webp)
+
+> ภาพทั้งหมดในไฟล์นี้เป็นภาพหน้าจอจริงจาก https://uat.smlwork.com (มุมมองสาธารณะ ไม่ได้ล็อกอิน) ถ่ายเมื่อ 2026-10-29
+>
+> repo นี้ไม่มีค่าลับ: รหัสผ่าน, token และ API key อยู่ใน `.env.local` ของแต่ละเครื่องเท่านั้น (ถูก `.gitignore`) — เริ่มจาก `cp .env.example .env.local` แล้วใส่ค่าจริงเอง
+
+## Objective
+ทดสอบระบบ SML AI Account แบบ UAT กับของจริง (ไม่มีผลจำลอง) โดยรันสคริปต์ทีละขั้นตอนที่เขียนไว้ ตรวจได้ทั้งหน้าจอ, API และแถวใน PostgreSQL ของฐาน Demo
+รอบที่ไม่ผ่านจะให้สมอง AI (Ollama Cloud) วิเคราะห์ แล้วเปิด issue ใน IssueMate (โปรเจกต์ SMLAIACC) ให้ทีมแก้โปรแกรมต่อ
+
+- ตัว Tester อยู่ที่ https://uat.smlwork.com และทดสอบเว็บ https://www.smlwork.com (เข้าแบบ Demo / ฐาน `smldemo`)
+- AI ที่เขียนโปรแกรม (Claude, Antigravity บนเครื่องลุงจืด) สั่งงานผ่าน MCP วงจรคือ
+  1. AI สั่งตรวจ → Tester รันกับของจริง
+  2. ไม่ผ่าน → เปิด issue ใน IssueMate
+  3. AI แก้โค้ด แล้วสั่งตรวจซ้ำด้วยเลข issue
+  4. ผ่าน → Tester เขียนคอมเมนต์ปิดวงจรใน issue นั้น (ไม่ผ่าน → คอมเมนต์ว่ายังพังขั้นไหน)
+- บทบาทของ AI (ทั้งสมองบอทและคำแนะนำใน MCP): คนไทย เป็นผู้ใช้ทั่วไปของ SML AI Account ที่ทำงานแบบผู้ใช้จริง และเก่ง query กับ data model ตรวจฐานข้อมูลและ flow งานได้ (เช่น ใบเสนอราคา → ใบสั่งขาย → ใบขาย → ภาษีขาย → GL → สต็อก)
+
+ฝูงบอทมี 30 ตัว = 10 โมดูล × 3 มุมตรวจ
+- โมดูล: master, sales, purchase, inventory, gl, tax, reports, security, admin, recon
+- มุมตรวจ: หน้าจอ (screen), ฐานข้อมูล (data), API (api)
+
+ข้อมูลบอทอยู่ใน `src/lib/swarm-data.ts`
+
+![ฝูงบอท 30 ตัวพร้อมจอสด และแผงรอบการรันด้านขวา](docs/screens/04-bots.webp)
+
+## Workflow
+
+ภาพรวมระบบ (ใครสั่งงานได้ · ระบบทดสอบอยู่ตรงไหน · ทดสอบกับอะไร):
+
+![ภาพที่ 1 ภาพรวมระบบ](public/guide/1-overview.webp)
+
+วงจร AI แก้ → ทดสอบ → แจ้ง → แก้ซ้ำ:
+
+![ภาพที่ 2 วงจรแก้และทดสอบซ้ำ](public/guide/2-loop.webp)
+
+ข้างในการรันสคริปต์ 1 รอบ:
+
+![ภาพที่ 3 การรันสคริปต์ 1 รอบ](public/guide/3-run.webp)
+
+1. กด ▶ ที่บอท/สคริปต์ หรือ "รันทุกสคริปต์" → เข้าคิว (`src/lib/uat-runs.ts`) รันพร้อมกันตาม "รันพร้อมกันสูงสุด"
+2. แต่ละรอบเรียก `node runner/run.mjs --script <ไฟล์> --out runs/<id> --base <เว็บ ERP>` ซึ่งใช้ Playwright เปิดเว็บและใช้ psql ตรวจฐานข้อมูล
+   - ตัวรันพิมพ์ผลทีละบรรทัด (JSON) → หน้าจอแสดงไทม์ไลน์ขั้นตอน ค่าที่คาดหวังเทียบค่าจริง และภาพหลักฐาน
+   - ขั้น `cleanup` รันเสมอแม้ขั้นหลักพัง
+   - หลังทุกขั้นที่เป็นหน้าจอ (`ui.*`) ตัวรันเขียนทับภาพ `runs/<id>/live.jpg` → การ์ดบอทบนหน้าแรกโชว์จอสดว่ากำลังทำอะไร (การ์ดเรียงบอทที่กำลังรันก่อน แล้วตามเวลาทำงานล่าสุด, `src/components/BotCard.tsx`)
+3. ผลถาวรเก็บที่ `runs/<id>/run.json` พร้อมไฟล์หลักฐาน `NNN-*.png|json`
+4. ถ้ารอบนั้น **ไม่ผ่าน** และเปิด "ส่งเข้า IssueMate อัตโนมัติ" ไว้ (`src/lib/issuemate.ts`):
+   1. สมอง AI อ่านขั้นที่พังพร้อมภาพหน้าจอ แล้วเขียนบทวิเคราะห์ (เป็นการคาดเดา ต้องตรวจโค้ดจริง)
+   2. ระบบเรียก `create_issue` ผ่าน MCP ของ IssueMate โดยตั้งระดับความสำคัญตามระดับปัญหา: S1→critical, S2→high, S3→medium, S4→low
+   3. issue ที่สร้างมีขั้นตอนทำซ้ำ บทวิเคราะห์ ภาพหน้าจอ และ run.json แนบไปด้วย
+   4. กันส่งซ้ำด้วย `runs/issuemate-sent.json` (ใช้สคริปต์+ขั้นที่พังเป็นตัวระบุ) — เมื่อสคริปต์นั้นกลับมาผ่าน ระบบล้างรายการของสคริปต์นั้นเองและคอมเมนต์ใน issue เดิมว่าตรวจซ้ำผ่านแล้ว
+   5. รอบที่ผิดพลาด (error) ไม่ส่งอัตโนมัติ ต้องกดส่งเองในแผง "รอบการรัน"
+5. "สั่งงานตรวจ" (ปุ่มบนแถบบน, ✨ ที่บอท, MCP tool `command`) — `src/lib/command.ts`
+   1. ผู้ดูแลพิมพ์ว่าจะให้ตรวจอะไร ไม่เลือกบอท = สมอง AI เลือกบอทที่เกี่ยวเอง (ไม่เกิน 6 ตัว)
+   2. แต่ละบอทเขียนสคริปต์ `ask-<โมดูล>-<มุมตรวจ>` จากคอลัมน์จริงใน PostgreSQL แล้วบันทึกผ่านตัวตรวจเดียวกับ `save_script`
+   3. สคริปต์จากคำสั่งอ่านอย่างเดียว: ห้าม `db.exec`, ห้าม `ui.adminLogin`, `api.request` ใช้ GET เท่านั้น
+   4. เข้าคิวรันจริงทันที · รอบของ `ask-*` ไม่ส่งเข้า IssueMate อัตโนมัติ (ผลจาก AI ต้องให้คนยืนยันก่อน)
+
+6. คำสั่งผ่าน MCP (`src/app/api/mcp/route.ts`, `src/lib/mcp.ts`)
+   - ปลายทาง `POST /api/mcp` (JSON-RPC) รองรับ MCP 2026-07-28 และ 2025-11-25 / 2025-06-18 / 2025-03-26
+   - ยืนยันตัวด้วย `Authorization: Bearer <UAT_MCP_TOKEN>`
+   - tools 8 ตัว (คำอธิบายเป็นอังกฤษสั้น ผลลัพธ์เป็นบรรทัดสั้น เพื่อประหยัด token):
+
+     | tool | ใช้ทำอะไร |
+     |---|---|
+     | `status` | สุขภาพระบบ ค่าตั้ง จำนวนสคริปต์ รอบที่กำลังรัน (`bots:true` = ดูรายบอท) |
+     | `scripts` | รายการสคริปต์ หรืออ่านไฟล์สคริปต์ตาม `id` |
+     | `save_script` | เพิ่ม/แก้สคริปต์ (ตรวจรูปแบบก่อนบันทึก) |
+     | `run` | สั่งรันตาม `scriptIds` / `botIds` / `modules` / `all` หรือ `issue` (ตรวจซ้ำสคริปต์ที่เคยเปิด issue นั้น) แล้วรอผลได้ถึง `wait` วินาที (ค่าเริ่มต้น 90) |
+     | `runs` | ดูรอบการรัน / ผลละเอียด / หยุด (`action:"stop"`) / ส่งเข้า IssueMate (`action:"issue"`) |
+     | `events` | ฟีดเหตุการณ์แบบรอได้ (long-poll) ส่ง `after` = cursor ครั้งก่อน |
+     | `notify` | ส่งข้อความขึ้นหน้าเว็บ |
+     | `command` | สั่งงานตรวจเป็นภาษาไทย (`text`, เลือก `botIds` ได้) → AI กระจายงาน เขียนสคริปต์ แล้วรันจริง |
+
+   - ฝั่ง IssueMate ระบบแค่คอมเมนต์ (`converse_on_issue`) ไม่เปลี่ยนสถานะ issue
+7. แอนิเมชันบนหน้าเว็บ (`src/components/ActivityFx.tsx` อ่านฟีดจาก `/api/activity`)
+   - คำสั่งเข้าทาง MCP → ลำแสงพุ่งจากมุมขวาบน คลื่นวง และการ์ด "คำสั่งเข้าจาก …"
+   - รอบจบ → ขอบจอเรืองเขียว (ผ่าน) หรือกะพริบแดง (ไม่ผ่าน) พร้อมการ์ดผล
+   - จบชุดหลายสคริปต์ หรือ issue แก้สำเร็จ → ป้ายกลางจอพร้อมพลุกระดาษ
+   - มุมล่างซ้ายบอกว่า AI ตัวไหนเชื่อมอยู่และสั่งอะไรล่าสุด
+   - ถ้าเครื่องตั้งลดการเคลื่อนไหว (prefers-reduced-motion) แอนิเมชันจะหยุด
+
+8. ใครทำอะไรได้ (`src/middleware.ts`, `src/app/api/auth/route.ts`, `src/components/AdminLogin.tsx`)
+   - ทุกคนเปิดดูหน้าเว็บ ผลรัน ภาพหลักฐาน และแอนิเมชันได้โดยไม่ต้องล็อกอิน
+   - คำสั่งที่เปลี่ยนสถานะ (POST: รัน, ตั้งค่า, ถาม AI, ส่ง issue) ต้องเข้าสู่ระบบด้วยปุ่ม Google มุมขวาบนด้วยบัญชีผู้ดูแลเท่านั้น คนอื่นได้ข้อความ "ดูได้อย่างเดียว"
+   - ระบบให้ Google ตรวจ ID token (`tokeninfo`: aud, iss, email_verified, อีเมล) แล้วออกคุกกี้ `uat_admin` (HttpOnly, Secure, 7 วัน) ลงชื่อด้วย HMAC
+   - ปุ่ม "รันทุกสคริปต์", "สั่งบอท AI", ตั้งค่า จะแสดงเมื่อเป็นผู้ดูแลเท่านั้น
+   - `/api/mcp` ไม่ใช้ Google login แต่ใช้ Bearer `UAT_MCP_TOKEN` เหมือนเดิม
+
+9. ทดสอบแบบผู้ดูแลระบบ (System Admin Mode) — ขั้น `ui.adminLogin` ใน `runner/run.mjs`
+   - เปิด `/login` → กด `toggle-admin-login-btn` → กรอก Provider / รหัสผู้ดูแล / รหัสผ่านจาก env ฝั่งเซิร์ฟเวอร์ → กด `admin-login-submit` → รอจนเข้า `/admin/providers` (หรือ `/home` ตาม `targetPath`)
+   - ตรวจว่าช่องรหัสผ่านเป็น `type="password"` ก่อนพิมพ์ ไม่ใช่ = ไม่พิมพ์และไม่ผ่าน · ไม่ถ่ายภาพระหว่างกรอก
+   - log แสดงแค่ `เข้าสู่ระบบ Admin สำเร็จ (provider: uatadmin)`
+   - ค่าลับทุกตัวใน env (ชื่อมี PASS/TOKEN/SECRET/KEY) ถูกแทนเป็น `***REDACTED***` ทั้งในผลที่ตัวรันพิมพ์ `run.json` และข้อความผิดพลาด
+   - สคริปต์อ่าน `{{env.*PASS*}}` ไม่ได้ และ `save_script` ปฏิเสธสคริปต์ที่มีค่าลับ
+   - ขั้น `db.*` ใส่ `database` ได้เฉพาะ `smldemo` (ค่าเริ่มต้น), `smluatadmin`, `smlerpmainuatadmin` — ตัวรันล็อกรายชื่อนี้ในโค้ด และถาม `current_database()` ก่อนทุกครั้ง
+
+10. สรุปผลล่าสุด · ส่งมอบได้หรือไม่ (`src/lib/delivery.ts`, `GET /api/delivery`, `src/components/DeliveryReport.tsx`)
+    - ใช้รอบล่าสุดที่จบแล้วของแต่ละสคริปต์ แยก 3 แท็บ: เมนู, รายงาน (ชื่อมีคำว่า "รายงาน" หรือรหัสมี `report`), อื่นๆ (รายสคริปต์ตรวจ ข้อมูล/API/ขั้นตอน)
+    - ผลรายเมนูมาจากขั้น `ui.openMenu` ถึงก่อน `ui.openMenu` ถัดไป: มีขั้นไม่ผ่าน = เมนูนั้นไม่ผ่าน พร้อมเหตุผล (ขั้น/ข้อความ/คาดหวังเทียบค่าจริง)
+    - เทียบกับทะเบียนเมนูทั้งหมด `src/lib/erp-menus.json` (คัดจาก `smlaiaccount/frontend/src/config/smlMenu.json` เฉพาะเมนูปลายทางของ SMLAccount) → เมนูที่ไม่มีขั้นไหนเปิด = "ยังไม่ทดสอบ"
+    - คำตัดสิน: มีไม่ผ่าน S1/S2 = ยังส่งมอบไม่ได้ → มีรายการยังไม่ทดสอบ = ยังรับรองไม่ได้ → มีแค่ S3/S4 = ส่งมอบได้แบบมีเงื่อนไข → ผ่านหมด = พร้อมส่งมอบ
+    - เปิดหน้ามาจะเลือกแท็บแรกที่มีรายการไม่ผ่านให้เอง · กดเลขรอบเพื่อเปิดผลละเอียดในแผง "รอบการรัน"
+
+    รายการไม่ผ่านพร้อมเหตุผล (คาดหวังเทียบค่าจริง):
+
+    ![สรุปส่งมอบ: รายการไม่ผ่านและเหตุผล](docs/screens/02-delivery-failed.webp)
+
+    รายเมนูที่ผ่าน แยกตามหมวดเมนูของ ERP:
+
+    ![สรุปส่งมอบ: เมนูที่ผ่าน แยกหมวด](docs/screens/03-delivery-menus.webp)
+
+## Config
+คัดลอก `.env.example` เป็น `.env.local` แล้วใส่ค่าจริง (`.env*.local` อยู่ใน `.gitignore` ห้าม commit)
+
+| ตัวแปร | ใช้ทำอะไร |
+|---|---|
+| `ERP_TARGET_URL` | เว็บที่ทดสอบ ค่าเริ่มต้น `https://www.smlwork.com` (แก้ในหน้าตั้งค่าได้) |
+| `UAT_PG_HOST/PORT/USER/PASSWORD/DATABASE` | ฐาน Demo สำหรับขั้น `db.*` |
+| `UAT_PG_ALLOW_DB` | รายชื่อฐานที่อนุญาต คั่นด้วย `,` (ค่าเริ่มต้น `smldemo`) — ใส่ได้เฉพาะ `smldemo`, `smluatadmin`, `smlerpmainuatadmin` ชื่ออื่นถูกตัดทิ้ง |
+| `UAT_ADMIN_PROVIDER`, `UAT_ADMIN_USER`, `UAT_ADMIN_PASSWORD` | บัญชีผู้ดูแลระบบสำหรับ `ui.adminLogin` (ตั้งในไฟล์ env ของเซิร์ฟเวอร์เท่านั้น ห้ามใส่ในสคริปต์/หน้าเว็บ/issue) |
+| `UAT_PSQL`, `UAT_PLAYWRIGHT` | ตำแหน่ง psql.exe และ Playwright ที่มีในเครื่อง |
+| `UAT_HEADED` | `1` = เปิดหน้าต่าง Chrome ให้เห็น |
+| `OLLAMA_API_URL`, `OLLAMA_API_KEY` | สมองของบอท (Ollama Cloud) |
+| `OLLAMA_MODEL` | ว่างไว้ = `deepseek-v4.1-flash` |
+| `UAT_STAGEHAND` | ตำแหน่ง `@browserbasehq/stagehand/dist/index.mjs` (v4.3.0) สำหรับขั้น AI |
+| `UAT_EYES_MODEL` | ตา AI ที่ดูภาพแล้วบอกพิกัดคลิก ว่างไว้ = `kimi-k3` (ทดสอบ 2026-10-29 รุ่นอื่นชี้พิกัดไม่ได้) |
+| `ISSUEMATE_MCP_URL`, `ISSUEMATE_PROJECT`, `ISSUEMATE_TOKEN` | ปลายทาง issue (MCP ของ IssueMate) |
+| `ISSUEMATE_AUTO` | `0` = ไม่ส่งอัตโนมัติ |
+| `UAT_MCP_TOKEN` | รหัสให้ AI เรียก `/api/mcp` (ไม่ตั้ง = MCP ปิด ตอบ 503) |
+| `UAT_SESSION_SECRET` | ลงชื่อคุกกี้ผู้ดูแล (สุ่ม ≥32 ตัว) ไม่ตั้ง = ไม่มีใครสั่งงานผ่านหน้าเว็บได้ |
+| `UAT_ADMIN_EMAIL` | อีเมล Google ของผู้ดูแล (จำเป็น — ไม่ตั้ง = ไม่มีใครสั่งงานผ่านหน้าเว็บได้) |
+| `GOOGLE_CLIENT_ID` | ว่างไว้ = Client ID ของ UAT Tester (`501250317679-5kud8…`, origin `https://uat.smlwork.com`) |
+
+หน้าตั้งค่า (ไอคอนเฟือง) แก้ได้ 5 ค่า:
+- เว็บ ERP
+- โมเดลสมอง AI
+- จำนวนรันพร้อมกัน
+- ส่งเข้า IssueMate อัตโนมัติ
+- เปิดหน้าต่าง Chrome ให้เห็น
+
+ค่าที่แก้อยู่ในหน่วยความจำ รีสตาร์ทแล้วกลับเป็นค่าจาก env
+
+## Dependency
+- Node 22+ (เครื่องลุงจืด Node 24, เซิร์ฟเวอร์ Node 22), pnpm, Next.js 15, React 19, Tailwind 3, lucide-react
+- Playwright + Chromium และ psql
+- บริการภายนอก:
+  - Ollama Cloud (`https://ollama.com/api/chat`)
+  - IssueMate MCP (`https://issue.dedezoom.com/mcp`)
+
+## Usage example
+รันแบบ production ที่พอร์ต 3050:
+```bash
+pnpm build
+pnpm start -p 3050
+```
+
+![หน้าคู่มือ /guide](docs/screens/05-guide.webp)
+
+คู่มือสำหรับเพื่อนๆ อยู่ที่ `/guide` (`src/app/guide/page.tsx`) ใช้ภาพ Workflow 3 ภาพใน `public/guide/` — แก้ภาพที่ `docs/workflow/*.html` แล้วสร้างใหม่ (PNG + WebP, ต้องมี ffmpeg):
+```bash
+node docs/workflow/render.mjs
+```
+
+สร้างทะเบียนเมนู `src/lib/erp-menus.json` ใหม่เมื่อเมนูใน ERP เปลี่ยน (รูปแบบ `[รหัส, ชื่อ, หมวด]`):
+```bash
+node -e "const m=require('D:/smlaiaccount/frontend/src/config/smlMenu.json'),o=[];const w=(n,g)=>{for(const x of n){const t=g||x.text;if(x.children?.length)w(x.children,t);else if((x.projects||[]).includes('SMLAccount'))o.push([x.name,x.text,t])}};w(m,'');require('fs').writeFileSync('src/lib/erp-menus.json',JSON.stringify(o));console.log(o.length)"
+```
+
+ดูสรุปส่งมอบแบบ JSON:
+```bash
+curl -s https://uat.smlwork.com/api/delivery
+```
+
+รันสคริปต์เดียวจากบรรทัดคำสั่ง (ไม่ผ่านหน้าเว็บ):
+```bash
+node runner/run.mjs --script uat-scripts/security-api-session.json --out runs/manual-1 --base https://www.smlwork.com
+```
+
+ต่อ Claude Code เข้ากับ Tester (ใส่ token จริงแทน `<UAT_MCP_TOKEN>`):
+```bash
+claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header "Authorization: Bearer <UAT_MCP_TOKEN>"
+```
+
+ต่อ Antigravity: ใส่ใน `mcp_config.json` (ที่หน้า MCP settings → View raw config)
+```json
+{ "mcpServers": { "sml-uat": {
+  "serverUrl": "https://uat.smlwork.com/api/mcp",
+  "headers": { "Authorization": "Bearer <UAT_MCP_TOKEN>" } } } }
+```
+
+ติดตั้งบนเซิร์ฟเวอร์ที่ใช้อยู่:
+- โค้ดอยู่ `/opt/uat-tester`, ค่าลับอยู่ `/opt/uat-tester/.env.local` (สิทธิ์ 600)
+- service `uat-tester` (systemd) ฟังที่ `127.0.0.1:3750` → `systemctl restart uat-tester`, `journalctl -u uat-tester -n 50`
+- Caddy site `uat.smlwork.com` เปิดสาธารณะ (reverse proxy อย่างเดียว) — การกั้นคำสั่งอยู่ในแอป ดูข้อ 8 ใน Workflow
+- เครื่องไม่มี psql: `bin/psql` เรียก psql ในคอนเทนเนอร์ `sml_postgresql`
+- Playwright + Chromium อยู่ `/opt/uat-tester/pw` (`UAT_PLAYWRIGHT`, `PLAYWRIGHT_BROWSERS_PATH`)
+- อัปเดตโค้ด: ส่งไฟล์ขึ้น `/opt/uat-tester` (ไม่ทับ `.env.local` และ `./runs/` ที่ราก — ถ้าใช้ tar ต้องเขียน `--exclude=./runs` ไม่งั้นจะตัด `src/app/api/runs` ทิ้งด้วย) แล้ว `corepack pnpm@10.33.0 install --frozen-lockfile && corepack pnpm@10.33.0 build && systemctl restart uat-tester` (ต้องระบุ pnpm 10.33.0 เพราะ pnpm ที่ corepack ให้มาบนเซิร์ฟเวอร์เป็นรุ่น 12 ซึ่งปฏิเสธ lockfile)
+
+ตัวอย่างคำสั่งที่ AI ส่ง (ตรวจซ้ำหลังแก้ issue):
+```json
+{ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+  "params": { "name": "run", "arguments": { "issue": "SMLAIACC-12", "wait": 90 } } }
+```
+
+รูปแบบสคริปต์ (`uat-scripts/<id>.json`):
+```json
+{
+  "id": "security-api-session",
+  "title": "API session ตอบ 200 หลังเข้าสู่ระบบ Demo",
+  "module": "security",
+  "lens": "api",
+  "severityOnFail": "S2",
+  "description": "หลังล็อกอิน Demo เรียก GET /api/auth/session ต้องได้ 200",
+  "steps": [
+    { "title": "เข้าสู่ระบบแบบ Demo", "do": "ui.demoLogin" },
+    { "title": "GET /api/auth/session", "do": "api.request", "method": "GET", "path": "/api/auth/session", "expectStatus": 200 }
+  ],
+  "cleanup": []
+}
+```
+
+ขั้นที่ใช้ได้:
+- หน้าจอ: `ui.goto`, `ui.demoLogin`, `ui.adminLogin` `{targetPath: "/admin/providers" | "/home"}`, `ui.openMenu`, `ui.click`, `ui.fill`, `ui.select`, `ui.press`, `ui.readText`, `ui.expectText`, `ui.expectVisible`, `ui.expectValue`, `ui.expectUrl`, `ui.expectClean`, `ui.screenshot`
+- AI กดเล่นหน้าจอ: `ui.act` `{instruction}` (Stagehand ทำ 1 อย่างตามคำสั่งภาษาไทย), `ui.see` `{expect}` (AI ดูภาพแล้วตัดสินผ่าน/ไม่ผ่าน), `ui.play` `{goal, maxSteps}` (Computer Use: AI ดูจอ คลิก พิมพ์ จนครบเป้าหมาย สิ่งผิดปกติที่ AI เห็น = ขั้นไม่ผ่าน บันทึกเอกสารทดสอบได้โดยใส่ `{{run.tag}}`) · ผลจาก AI ต้องให้คนยืนยันก่อนแก้
+- API: `api.request`
+- ฐานข้อมูล: `db.query` (อ่านอย่างเดียว), `db.exec` (เขียน — ใช้กับข้อมูลที่ขึ้นต้นด้วย UAT) · ใส่ `database` ได้ 3 ฐานทดสอบ (ดูข้อ 9 ใน Workflow)
+- อื่น ๆ: `wait`, `set`
+
+ตัวเทียบค่าที่ใช้ได้: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `contains`, `matches`, `exists`, `empty`, `same`
+
+ถ้าไม่ใส่ `lens` ระบบเลือกให้เอง: มีขั้น `db.*` = data, ไม่มี = screen
+
+## Limitation
+- ปุ่ม Google ใช้ได้เมื่อเพิ่ม `https://uat.smlwork.com` ใน Authorized JavaScript origins ของ Client ID นั้นใน Google Cloud Console แล้ว
+- ใครก็เปิดดูได้ รวมถึง SQL ในสคริปต์ ผลคิวรีของฐาน Demo และภาพหน้าจอ Demo (ไม่มีรหัสผ่าน/token: ตัวรันปิดค่าลับจาก env เป็น `***`)
+- สถานะบอทอยู่ในหน่วยความจำ รีสตาร์ทแล้วสถิติเริ่มใหม่ แต่ผลรอบที่จบแล้วยังอ่านจาก `runs/` ได้
+- สคริปต์ที่ AI เขียนจากคำสั่ง (`ask-*`) อาจเขียน SQL ผิดนิยามของระบบ (เช่น 2026-10-29 จับคู่ด้วย `account_year` ที่ฝั่งรายการเป็น NULL ได้ 53 แทน 8) ต้องให้คนยืนยันก่อนสรุปว่าเป็นบั๊ก · สั่งซ้ำบอทเดิม = เขียนทับสคริปต์ `ask-*` เดิม
+- สรุปผลรายเมนูนับจากขั้น `ui.openMenu` เท่านั้น — การกดเล่นด้วย AI (`ui.play`) ไม่ถูกนับเป็นเมนู · เมนูใน ERP เปลี่ยน ให้สร้าง `src/lib/erp-menus.json` ใหม่ (Usage example)
+- `ui.adminLogin` ใช้ได้เมื่อมี provider/ฐาน/ผู้ใช้ผู้ดูแลจริงบน ERP แล้ว และตั้ง `UAT_ADMIN_*` ที่เซิร์ฟเวอร์ · สคริปต์ที่ล็อกอินผู้ดูแลระดับ 9 แล้วกดปุ่มต่อมีผลจริงกับระบบ ผู้ดูแลต้องตรวจสคริปต์ก่อนรัน
+- การแก้โปรแกรมอัตโนมัติขึ้นกับ IssueMate:
+  - ต้องเปิด AI auto approval ของโปรเจกต์ SMLAIACC ในหน้า IssueMate
+  - ถ้ายังไม่เปิด issue จะรอคนอนุมัติ
+- กันส่งซ้ำใช้ไฟล์ในเครื่อง: ถ้าสคริปต์ยังพังที่ขั้นเดิมตลอด จะไม่เปิด issue ซ้ำ (รายการถูกล้างเองเมื่อสคริปต์กลับมาผ่าน)
+- ฟีดเหตุการณ์ของแอนิเมชันและ tool `events` อยู่ในหน่วยความจำ (เก็บ 200 รายการล่าสุด) รีสตาร์ทแล้วเริ่มนับใหม่
+- สั่งงานหลายบอทพร้อมกันระบบจะทยอยทีละ 5 ตัว กันโดน rate limit ของ Ollama Cloud
+- สคริปต์ในเครื่องมี 41 ชุด ครบทุกบอททั้ง 30 ตัว (สคริปต์ `ask-*` จากคำสั่งอยู่บนเซิร์ฟเวอร์เท่านั้น) (`uat-scripts/`) — สคริปต์ตรวจตามเมนู/ตาราง/API ที่มีจริงในขณะเขียน ถ้าระบบ ERP เปลี่ยนต้องแก้สคริปต์ตาม

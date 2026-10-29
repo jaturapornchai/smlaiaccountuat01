@@ -1,0 +1,44 @@
+{
+  "id": "master-ai-play",
+  "title": "ทะเบียน: AI กดเล่นหน้าจอ ทะเบียนลูกค้า",
+  "module": "master",
+  "lens": "screen",
+  "severityOnFail": "S3",
+  "timeoutMs": 600000,
+  "description": "AI (Stagehand + Computer Use บนสมอง Ollama) เปิด ทะเบียนลูกค้า แล้วกดใช้งานจริงเหมือนผู้ใช้ รายงานสิ่งผิดปกติที่เห็นบนจอ · ผลจาก AI ต้องให้คนยืนยันก่อนแก้",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ทะเบียนลูกค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ar_customer_connected"
+    },
+    {
+      "title": "AI กดเล่น ทะเบียนลูกค้า",
+      "do": "ui.play",
+      "goal": "ใช้หน้าทะเบียนลูกค้าแบบพนักงานขาย: พิมพ์ค้นหาคำว่า บริษัท ในช่องค้นหา เปิดดูลูกค้า 1 ราย แล้วกดดูทุกแท็บของข้อมูลลูกค้า ตรวจว่าชื่อ ที่อยู่ เลขผู้เสียภาษีแสดงครบและภาษาไทยอ่านได้ ห้ามแก้ไขหรือกดบันทึกใดๆ จบเมื่อดูครบทุกแท็บ",
+      "maxSteps": 15,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงระหว่างที่ AI ใช้งาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้าจอสุดท้าย",
+      "do": "ui.screenshot",
+      "name": "master-ai-play"
+    }
+  ]
+}

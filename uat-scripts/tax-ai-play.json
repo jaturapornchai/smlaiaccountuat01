@@ -1,0 +1,44 @@
+{
+  "id": "tax-ai-play",
+  "title": "ภาษี: AI กดเล่นหน้าจอ รายงานภาษีขาย",
+  "module": "tax",
+  "lens": "screen",
+  "severityOnFail": "S3",
+  "timeoutMs": 600000,
+  "description": "AI (Stagehand + Computer Use บนสมอง Ollama) เปิด รายงานภาษีขาย แล้วกดใช้งานจริงเหมือนผู้ใช้ รายงานสิ่งผิดปกติที่เห็นบนจอ · ผลจาก AI ต้องให้คนยืนยันก่อนแก้",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู รายงานภาษีขาย",
+      "do": "ui.openMenu",
+      "key": "menu_report_vat_sale"
+    },
+    {
+      "title": "AI กดเล่น รายงานภาษีขาย",
+      "do": "ui.play",
+      "goal": "ใช้รายงานภาษีขายแบบนักบัญชี: เลือกเดือนที่มีข้อมูล กดแสดงรายงาน ตรวจว่าแต่ละบรรทัด มูลค่าสินค้า + ภาษี 7% = ยอดรวม และยอดรวมท้ายรายงานถูก ห้ามแก้ไขหรือกดบันทึกใดๆ จบเมื่อตรวจเสร็จ",
+      "maxSteps": 15,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงระหว่างที่ AI ใช้งาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้าจอสุดท้าย",
+      "do": "ui.screenshot",
+      "name": "tax-ai-play"
+    }
+  ]
+}

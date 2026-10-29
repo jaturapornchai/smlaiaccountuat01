@@ -1,0 +1,52 @@
+{
+  "id": "sales-menu-smoke",
+  "title": "ขาย: เปิดใบเสนอราคา/ใบสั่งขายแล้วไม่มีข้อผิดพลาดแฝง",
+  "module": "sales",
+  "severityOnFail": "S2",
+  "description": "เปิดเมนู menu_so_quotation_order และ menu_so_sale_order ตรวจ HTTP 4xx/5xx, JS error, DB error บนหน้าจอ",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ใบเสนอราคาขาย",
+      "do": "ui.openMenu",
+      "key": "menu_so_quotation_order"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ใบเสนอราคาขาย",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า ใบเสนอราคาขาย",
+      "do": "ui.screenshot",
+      "name": "menu_so_quotation_order"
+    },
+    {
+      "title": "เปิดเมนู ใบสั่งขายสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_so_sale_order"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ใบสั่งขายสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า ใบสั่งขายสินค้า",
+      "do": "ui.screenshot",
+      "name": "menu_so_sale_order"
+    }
+  ]
+}

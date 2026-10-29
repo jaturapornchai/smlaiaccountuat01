@@ -1,0 +1,113 @@
+{
+  "id": "tax-api-vat-reports",
+  "title": "ภาษี: API รายงานภาษีขาย ภาษีซื้อ และสรุปภาษี รันได้",
+  "module": "tax",
+  "lens": "api",
+  "severityOnFail": "S2",
+  "description": "รัน menu_report_vat_sale, menu_report_vat_buy, menu_gl_vat_report_sum ผ่าน POST /api/process/report/run",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "API: รันรายงาน ภาษีขาย",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_report_vat_sale",
+        "mode": "summary",
+        "dateFrom": "2000-01-01",
+        "dateTo": "2099-12-31",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "",
+        "viewDetail": false
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.menuKey",
+          "op": "eq",
+          "value": "menu_report_vat_sale"
+        }
+      ]
+    },
+    {
+      "title": "API: รันรายงาน ภาษีซื้อ",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_report_vat_buy",
+        "mode": "summary",
+        "dateFrom": "2000-01-01",
+        "dateTo": "2099-12-31",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "",
+        "viewDetail": false
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.menuKey",
+          "op": "eq",
+          "value": "menu_report_vat_buy"
+        }
+      ]
+    },
+    {
+      "title": "API: รันรายงาน สรุปภาษี",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_gl_vat_report_sum",
+        "mode": "summary",
+        "dateFrom": "2000-01-01",
+        "dateTo": "2099-12-31",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "",
+        "viewDetail": false
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.menuKey",
+          "op": "eq",
+          "value": "menu_gl_vat_report_sum"
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

@@ -1,0 +1,113 @@
+{
+  "id": "reports-api-run",
+  "title": "รายงาน: API รายงานซื้อตามประเภทภาษี สถานะลูกหนี้ และสถานะเจ้าหนี้ รันได้",
+  "module": "reports",
+  "lens": "api",
+  "severityOnFail": "S2",
+  "description": "รัน menu_report_sum_purchase_by_vat, menu_ar_report_status_ar, menu_ap_report_payable_status ผ่าน POST /api/process/report/run",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "API: รันรายงาน การซื้อสรุปตามประเภทภาษี",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_report_sum_purchase_by_vat",
+        "mode": "summary",
+        "dateFrom": "2000-01-01",
+        "dateTo": "2099-12-31",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "",
+        "viewDetail": false
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.menuKey",
+          "op": "eq",
+          "value": "menu_report_sum_purchase_by_vat"
+        }
+      ]
+    },
+    {
+      "title": "API: รันรายงาน สถานะลูกหนี้",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_ar_report_status_ar",
+        "mode": "summary",
+        "dateFrom": "2000-01-01",
+        "dateTo": "2099-12-31",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "",
+        "viewDetail": false
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.menuKey",
+          "op": "eq",
+          "value": "menu_ar_report_status_ar"
+        }
+      ]
+    },
+    {
+      "title": "API: รันรายงาน สถานะเจ้าหนี้",
+      "do": "api.request",
+      "method": "POST",
+      "path": "/api/process/report/run",
+      "timeout": 120000,
+      "body": {
+        "menuKey": "menu_ap_report_payable_status",
+        "mode": "summary",
+        "dateFrom": "2000-01-01",
+        "dateTo": "2099-12-31",
+        "fromCode": "",
+        "toCode": "",
+        "orderBy": "",
+        "keyword": "",
+        "viewDetail": false
+      },
+      "expectStatus": 200,
+      "expect": [
+        {
+          "path": "ok",
+          "op": "eq",
+          "value": true
+        },
+        {
+          "path": "data.menuKey",
+          "op": "eq",
+          "value": "menu_ap_report_payable_status"
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

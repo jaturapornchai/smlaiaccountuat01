@@ -1,0 +1,50 @@
+{
+  "id": "sales-doc-integrity",
+  "title": "ขาย: เอกสารขายอ้างลูกหนี้จริง ยอดภาษีถูก และลงภาษีขายครบ",
+  "module": "sales",
+  "lens": "data",
+  "severityOnFail": "S1",
+  "description": "ตรวจ ic_trans ฝั่งลูกหนี้ (trans_flag ตาม partySide ar ใน trans_validate.go): รหัสลูกค้ามีใน ar_customer, ยอดหลังภาษี = ก่อนภาษี + ภาษี, ใบขาย/เพิ่มหนี้/รับคืนที่มีภาษีต้องมีแถวใน gl_journal_vat_sale",
+  "steps": [
+    {
+      "title": "PG: เอกสารลูกหนี้ที่อ้างรหัสลูกค้าที่ไม่มีใน ar_customer = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from ic_trans t where t.trans_flag in (30,32,34,36,38,44,46,48) and coalesce(t.cust_code, '') <> '' and not exists (select 1 from ar_customer c where c.code = t.cust_code)",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: เอกสารขายที่ยอดหลังภาษี ≠ ยอดก่อนภาษี + ภาษี = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from ic_trans where trans_flag in (34,36,44,46,48) and total_after_vat <> total_before_vat + total_vat_value",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: ใบขาย/เพิ่มหนี้/รับคืนที่มีภาษีแต่ไม่มีในภาษีขาย = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from ic_trans t where t.trans_flag in (44,46,48) and t.is_cancel = 0 and t.total_vat_value <> 0 and not exists (select 1 from gl_journal_vat_sale v where v.doc_no = t.doc_no and v.trans_flag = t.trans_flag)",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    }
+  ],
+  "cleanup": []
+}

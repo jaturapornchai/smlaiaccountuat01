@@ -1,0 +1,72 @@
+import { BotConfig, BotEvent, BotStatus, SwarmSettings } from "@/types/bot";
+import { DEFAULT_BRAIN } from "./brain";
+import { INITIAL_BOTS } from "./swarm-data";
+
+// สถานะอยู่ในหน่วยความจำของ Node (รีสตาร์ทเซิร์ฟเวอร์แล้วเริ่มใหม่) — ผลการรันจริงเก็บถาวรที่ runs/<id>/run.json
+declare global {
+  // eslint-disable-next-line no-var
+  var __openhands_swarm_bots: BotConfig[] | undefined;
+  // eslint-disable-next-line no-var
+  var __openhands_swarm_settings: SwarmSettings | undefined;
+}
+
+const freshBots = (): BotConfig[] => JSON.parse(JSON.stringify(INITIAL_BOTS));
+
+global.__openhands_swarm_bots ??= freshBots();
+global.__openhands_swarm_settings ??= {
+  erpTargetUrl: process.env.ERP_TARGET_URL || "https://www.smlwork.com",
+  brainModel: DEFAULT_BRAIN,
+  autoIssueMate: process.env.ISSUEMATE_AUTO !== "0",
+  maxParallelBots: 3,
+  headed: process.env.UAT_HEADED === "1",
+};
+
+export const getBots = (): BotConfig[] => global.__openhands_swarm_bots!;
+export const getBotById = (id: string) => getBots().find((b) => b.id === id);
+export const getSettings = (): SwarmSettings => global.__openhands_swarm_settings!;
+
+export function resetAllBots(): BotConfig[] {
+  global.__openhands_swarm_bots = freshBots();
+  return getBots();
+}
+
+export function setBotStatus(id: string, status: BotStatus): BotConfig | null {
+  const bot = getBotById(id);
+  if (bot) bot.status = status;
+  return bot ?? null;
+}
+
+const rid = () => Math.random().toString(36).slice(2, 9);
+
+export function addEvent(bot: BotConfig, type: BotEvent["type"], content: string) {
+  bot.events.push({ id: rid(), timestamp: new Date().toISOString(), type, content });
+  if (bot.events.length > 300) bot.events.splice(0, bot.events.length - 300);
+}
+
+// รับเฉพาะฟิลด์ที่รู้จัก และตรวจชนิด/ช่วงค่า (กันค่าแปลกจาก body)
+export function updateSettings(input: Record<string, unknown>): SwarmSettings {
+  const cur = getSettings();
+  const next = { ...cur };
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : undefined);
+
+  const erp = str(input.erpTargetUrl);
+  if (erp) {
+    const u = new URL(erp); // โยน error ถ้าไม่ใช่ URL
+    if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("ที่อยู่ ERP ต้องขึ้นต้นด้วย http:// หรือ https://");
+    next.erpTargetUrl = u.origin;
+  }
+  const model = str(input.brainModel);
+  if (model) {
+    if (!/^[\w.:/-]{1,80}$/.test(model)) throw new Error("ชื่อโมเดลไม่ถูกต้อง");
+    next.brainModel = model;
+  }
+  if (typeof input.autoIssueMate === "boolean") next.autoIssueMate = input.autoIssueMate;
+  if (typeof input.headed === "boolean") next.headed = input.headed;
+  if (input.maxParallelBots !== undefined) {
+    const n = Number(input.maxParallelBots);
+    if (!Number.isInteger(n) || n < 1 || n > 10) throw new Error("จำนวนบอทรันพร้อมกันต้องเป็นเลข 1–10");
+    next.maxParallelBots = n;
+  }
+  global.__openhands_swarm_settings = next;
+  return next;
+}

@@ -1,0 +1,17 @@
+# UAT Tester · SML AI Account
+
+> ฝูงบอท 30 ตัว (10 โมดูล × 3 มุมตรวจ: หน้าจอ ฐานข้อมูล API) ทดสอบโปรแกรมบัญชี SML AI Account ที่ www.smlwork.com ตามสคริปต์ JSON ทีละขั้น กับระบบจริงและฐาน Demo `smldemo` เท่านั้น รอบที่ไม่ผ่านให้สมอง AI วิเคราะห์ (เป็นการคาดเดา) แล้วเปิด issue ใน IssueMate อัตโนมัติ AI นักพัฒนาสั่งทดสอบซ้ำผ่าน MCP ได้จนกว่าจะผ่าน
+
+ทุกคนเปิดดูผลได้โดยไม่ต้องล็อกอิน การสั่งรันและตั้งค่าทำได้เฉพาะผู้ดูแลที่เข้าระบบด้วย Google
+
+## คู่มือ
+
+- [คู่มือใช้งาน UAT Tester](https://uat.smlwork.com/guide): วิธีทำงานของระบบ วิธีดูหน้าเว็บ การเชื่อม MCP และคำถามที่พบบ่อย
+- [ภาพที่ 1 · ภาพรวมระบบ](https://uat.smlwork.com/guide/1-overview.png): ผู้ใช้ ช่องสั่งงาน คิว ตัวรัน และระบบปลายทาง
+- [ภาพที่ 2 · วงจร AI แก้ → ทดสอบ → แจ้ง → แก้ซ้ำ](https://uat.smlwork.com/guide/2-loop.png): วงจร 6 ขั้นจนผ่าน
+- [ภาพที่ 3 · ข้างในการรันสคริปต์ 1 รอบ](https://uat.smlwork.com/guide/3-run.png): ชนิดขั้นตอน ui.* / ui.expectClean / api.request / db.query / cleanup
+
+## MCP
+
+- ปลายทาง `https://uat.smlwork.com/api/mcp` (HTTP, JSON-RPC) ยืนยันตัวด้วย `Authorization: Bearer <token>` ที่ได้จากผู้ดูแล
+- คำสั่ง: status, scripts, save_script, run, runs, events, notify

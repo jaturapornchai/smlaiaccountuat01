@@ -1,0 +1,44 @@
+{
+  "id": "reports-ai-play",
+  "title": "รายงาน: AI กดเล่นหน้าจอ รายงานสรุปซื้อตามภาษี",
+  "module": "reports",
+  "lens": "screen",
+  "severityOnFail": "S3",
+  "timeoutMs": 600000,
+  "description": "AI (Stagehand + Computer Use บนสมอง Ollama) เปิด รายงานสรุปซื้อตามภาษี แล้วกดใช้งานจริงเหมือนผู้ใช้ รายงานสิ่งผิดปกติที่เห็นบนจอ · ผลจาก AI ต้องให้คนยืนยันก่อนแก้",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู รายงานสรุปซื้อตามภาษี",
+      "do": "ui.openMenu",
+      "key": "menu_report_sum_purchase_by_vat"
+    },
+    {
+      "title": "AI กดเล่น รายงานสรุปซื้อตามภาษี",
+      "do": "ui.play",
+      "goal": "ใช้รายงานสรุปการซื้อแบบนักบัญชี: กำหนดช่วงวันที่ที่มีข้อมูล กดแสดงรายงาน ตรวจว่าตัวเลขรวมแต่ละกลุ่มรวมกันได้ยอดรวมท้ายรายงาน ห้ามแก้ไขหรือกดบันทึกใดๆ จบเมื่อตรวจเสร็จ",
+      "maxSteps": 15,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงระหว่างที่ AI ใช้งาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้าจอสุดท้าย",
+      "do": "ui.screenshot",
+      "name": "reports-ai-play"
+    }
+  ]
+}

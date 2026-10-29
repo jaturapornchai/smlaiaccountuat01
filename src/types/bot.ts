@@ -1,0 +1,159 @@
+// หมวดโมดูลของ ERP ที่บอทแต่ละตัวรับผิดชอบ — ตรงกับฟิลด์ "module" ในไฟล์ uat-scripts/*.json
+export type BotRole =
+  | "master"
+  | "sales"
+  | "purchase"
+  | "inventory"
+  | "gl"
+  | "tax"
+  | "reports"
+  | "security"
+  | "admin"
+  | "recon";
+
+// มุมตรวจของบอทในแต่ละโมดูล: หน้าจอจริง / ฐานข้อมูล PostgreSQL / API
+export type Lens = "screen" | "data" | "api";
+
+export type BotStatus = "idle" | "running" | "completed" | "error" | "paused";
+
+// S1 เงิน/ภาษี/สต็อก/GL ผิด · S2 ฟีเจอร์หลักพัง · S3 ผิดบางกรณี · S4 เล็กน้อย
+export type Severity = "S1" | "S2" | "S3" | "S4";
+
+export interface BotEvent {
+  id: string;
+  timestamp: string; // ISO
+  type: "info" | "pass" | "fail" | "skip" | "error";
+  content: string;
+}
+
+export interface BotTask {
+  id: string;
+  title: string;
+  kind: "script" | "agent";
+  status: BotStatus;
+  startedAt: string; // ISO
+  finishedAt?: string; // ISO
+  result?: string;
+  runId?: string;
+  scriptId?: string;
+  prompt?: string;
+}
+
+export interface BotStats {
+  runs: number;
+  passed: number;
+  failed: number;
+  stepsChecked: number;
+  lastActive: string | null; // ISO
+}
+
+export interface BotConfig {
+  id: string;
+  number: number;
+  name: string;
+  role: BotRole;
+  lens: Lens;
+  roleTitle: string;
+  roleDescription: string;
+  avatarIcon: string;
+  accent: string; // สีประจำบอท (hex) ใช้ในหน้าจอ
+  status: BotStatus;
+  systemPrompt: string;
+  focus: string; // จุดที่บอท AI ต้องสำรวจเพิ่มจากสคริปต์
+  currentTask?: BotTask;
+  taskHistory: BotTask[];
+  events: BotEvent[];
+  stats: BotStats;
+}
+
+export interface SwarmSettings {
+  erpTargetUrl: string;
+  brainModel: string; // โมเดลบน Ollama Cloud
+  autoIssueMate: boolean; // ส่งรอบที่ไม่ผ่านเข้า IssueMate อัตโนมัติ
+  maxParallelBots: number;
+  headed: boolean;
+}
+
+export interface BroadcastRequest {
+  targetBotIds: string[];
+  prompt: string;
+  taskTitle: string;
+}
+
+// ---------- สคริปต์ UAT และผลการรัน ----------
+export interface UatScript {
+  id: string;
+  title: string;
+  module: BotRole;
+  lens: Lens;
+  severityOnFail: Severity;
+  description: string;
+  stepCount: number;
+  cleanupCount: number;
+  usesDb: boolean;
+}
+
+export type StepStatus = "pending" | "running" | "passed" | "failed" | "skipped";
+
+export interface StepResult {
+  i: number;
+  title: string;
+  kind: string;
+  cleanup: boolean;
+  status: StepStatus;
+  durationMs?: number;
+  detail?: string;
+  expected?: string;
+  actual?: string;
+  evidence?: string; // ชื่อไฟล์ใน runs/<id>/
+}
+
+export type RunStatus = "queued" | "running" | "passed" | "failed" | "error" | "stopped";
+
+export interface ScriptRun {
+  id: string;
+  scriptId: string;
+  scriptTitle: string;
+  module: BotRole;
+  lens: Lens;
+  severityOnFail: Severity;
+  botId: string;
+  target: string;
+  headed: boolean;
+  status: RunStatus;
+  queuedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  steps: StepResult[];
+  passed: number;
+  failed: number;
+  skipped: number;
+  issues: number; // จำนวน HTTP>=400 / JS error / ข้อความ DB error ที่ตัวตรวจจับได้
+  message?: string;
+  pid?: number;
+  issue?: IssueLink;
+  retestOf?: string; // เลข issue ที่สั่งตรวจซ้ำ
+  liveAt?: string; // เวลาภาพหน้าจอสดล่าสุด (runs/<id>/live.jpg)
+}
+
+export interface IssueLink {
+  status: "sending" | "sent" | "duplicate" | "error";
+  code?: string; // เช่น SMLAIACC-17
+  message?: string;
+  analysis?: string; // บทวิเคราะห์จากสมอง AI
+  at: string;
+}
+
+export interface HealthCheck {
+  ok: boolean;
+  message: string;
+  url?: string;
+}
+
+export interface HealthReport {
+  erp: HealthCheck;
+  db: HealthCheck;
+  brain: HealthCheck;
+  issuemate: HealthCheck;
+  timestamp: string;
+}

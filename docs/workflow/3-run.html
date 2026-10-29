@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="wf.css" />
+<style>
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); column-gap: 100px; row-gap: 70px; margin-top: 40px; }
+  .grid > .node { align-self: stretch; }
+  .lanes { grid-column: 1 / 5; position: relative; z-index: 2; border-radius: 30px; border: 2px dashed rgba(52, 211, 153, 0.45); background: rgba(16, 185, 129, 0.06); padding: 18px 24px 22px; }
+  .lanes > h2 { font-size: 24px; font-weight: 700; color: #6ee7b7; margin-bottom: 14px; }
+  .lanes .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; }
+  .lanes .node { box-shadow: none; }
+  .clean { margin-top: 16px; font-size: 21px; color: #fde68a; }
+  .pass { grid-column: 1 / 3; }
+  .fail { grid-column: 3 / 5; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ภาพที่ 3 · ข้างในการรันสคริปต์ 1 รอบ</h1>
+  <p>จากไฟล์สคริปต์ → เข้าคิว → ตัวรันทำทีละขั้นกับของจริง → เก็บหลักฐาน → ผ่านหรือเปิด issue</p>
+</header>
+
+<div class="grid">
+  <div class="node" id="s" style="--c:#a78bfa">
+    <h3><span class="ic">📄</span>สคริปต์ทดสอบ</h3>
+    <p><code>uat-scripts/*.json</code> 31 ชุด บอกโมดูล มุมตรวจ และขั้นตอน · AI เพิ่มเองได้ด้วย <code>save_script</code></p>
+  </div>
+  <div class="node" id="q" style="--c:#fbbf24">
+    <h3><span class="ic">⏳</span>คิวรัน</h3>
+    <p>รันพร้อมกันสูงสุด 3 รอบ (ตั้งได้ 1–10) รอบอื่นรอคิว</p>
+  </div>
+  <div class="node" id="r" style="--c:#34d399">
+    <h3><span class="ic">🦾</span>ตัวรัน</h3>
+    <p><code>runner/run.mjs</code> ทำตามสคริปต์ทีละขั้น เก็บผลไว้ที่ <code>runs/&lt;id&gt;/</code></p>
+  </div>
+  <div class="node" id="w" style="--c:#22d3ee">
+    <h3><span class="ic">🖥️</span>หน้าเว็บ</h3>
+    <p>รับผลทีละบรรทัด → ไทม์ไลน์ คาดหวังเทียบจริง จอสด ภาพหลักฐาน</p>
+  </div>
+
+  <div class="lanes" id="lanes">
+    <h2>ชนิดของขั้นตอน (ทำกับระบบจริงทั้งหมด)</h2>
+    <div class="row">
+      <div class="node" style="--c:#22d3ee">
+        <h3><span class="ic">🖱️</span>หน้าจอ <code>ui.*</code></h3>
+        <p>Chrome ผ่าน Playwright เปิดเมนู กรอก กด เลือก แล้วตรวจข้อความ/ค่า · ถ่ายจอสดทุกขั้น</p>
+      </div>
+      <div class="node" style="--c:#a78bfa">
+        <h3><span class="ic">🧹</span>จอต้องสะอาด</h3>
+        <p><code>ui.expectClean</code> ไม่มี HTTP 4xx/5xx ไม่มี error ใน JS/console และไม่มีข้อความ error ฐานข้อมูลบนจอ</p>
+      </div>
+      <div class="node" style="--c:#fbbf24">
+        <h3><span class="ic">🔗</span>API <code>api.request</code></h3>
+        <p>เรียก API จริง ตรวจสถานะ HTTP และค่าใน JSON แล้วเก็บคำขอ-คำตอบเป็นหลักฐาน</p>
+      </div>
+      <div class="node" style="--c:#34d399">
+        <h3><span class="ic">🐘</span>ฐานข้อมูล</h3>
+        <p><code>db.query</code> / <code>db.exec</code> ผ่าน psql ตรวจค่าทีละแถว · ยอมให้แตะฐาน <code>smldemo</code> เท่านั้น</p>
+      </div>
+    </div>
+    <p class="clean">🧽 ขั้น <code>cleanup</code> รันเสมอแม้ขั้นหลักพัง เพื่อเก็บกวาดข้อมูลทดสอบ</p>
+  </div>
+
+  <div class="node pass" id="pass" style="--c:#34d399">
+    <h3><span class="ic">✅</span>ผ่านทุกขั้น</h3>
+    <p>บันทึก <code>run.json</code> + หลักฐาน <code>NNN-*.png / json</code> · ถ้าเคยเปิด issue ไว้ ระบบคอมเมนต์ว่าตรวจซ้ำผ่านแล้ว</p>
+  </div>
+  <div class="node fail" id="fail" style="--c:#fb7185">
+    <h3><span class="ic">❌</span>ไม่ผ่าน</h3>
+    <p>ถ่ายภาพตอนพัง ขั้นที่เหลือข้าม · สมอง AI วิเคราะห์ → เปิด issue ใน IssueMate (เมื่อเปิดส่งอัตโนมัติไว้)</p>
+  </div>
+</div>
+
+<footer><span>อ้างอิงโค้ด: uat-scripts/ · src/lib/uat-runs.ts · runner/run.mjs · src/lib/issuemate.ts</span><span>UAT Tester · SML AI Account</span></footer>
+
+<script>
+  window.ARROWS = [
+    ["s", "q", "", { color: "#a78bfa", from: "r", to: "l" }],
+    ["q", "r", "", { color: "#fbbf24", from: "r", to: "l" }],
+    ["r", "w", "", { from: "r", to: "l" }],
+    ["r", "lanes", "ทำทีละขั้น", { color: "#34d399", from: "b", to: "t" }],
+    ["lanes", "pass", "", { color: "#34d399", from: "b", to: "t", x1: -473 }],
+    ["lanes", "fail", "", { color: "#fb7185", from: "b", to: "t", x1: 473 }],
+  ];
+</script>
+<script src="wf.js"></script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+{
+  "id": "admin-user-group-crud",
+  "title": "กลุ่มผู้ใช้: เพิ่ม → ตรวจ PG → ลบ → ตรวจ PG",
+  "module": "admin",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "เมนู menu_setup_user_group (ตาราง erp_user_group): เพิ่มกลุ่มรหัส UAT… ผ่านหน้าจอ ตรวจว่าแถวลง PG ถูกต้อง แล้วลบผ่านหน้าจอและตรวจว่าแถวหายจาก PG (ลบเฉพาะรหัสของตัวเอง)",
+  "steps": [
+    {
+      "title": "กำหนดรหัสทดสอบ",
+      "do": "set",
+      "name": "code",
+      "value": "UAT{{run.short}}"
+    },
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างแถวเก่าของรหัสนี้ (ถ้ามี)",
+      "do": "db.exec",
+      "sql": "delete from erp_user_group where code = :'code'"
+    },
+    {
+      "title": "เปิดเมนูกลุ่มผู้ใช้",
+      "do": "ui.openMenu",
+      "key": "menu_setup_user_group"
+    },
+    {
+      "title": "กดเพิ่มใหม่",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_user_group\"] button:has-text('เพิ่มใหม่')",
+      "wait": 800
+    },
+    {
+      "title": "กรอกรหัส",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_user_group\"] input[type='text']:not([placeholder*='ค้นหา'])",
+      "nth": 0,
+      "value": "{{code}}"
+    },
+    {
+      "title": "กรอกชื่อ",
+      "do": "ui.fill",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_user_group\"] input[type='text']:not([placeholder*='ค้นหา'])",
+      "nth": 1,
+      "value": "กลุ่ม {{run.tag}}"
+    },
+    {
+      "title": "กดบันทึก",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_user_group\"] button:has-text('บันทึก')",
+      "wait": 1500
+    },
+    {
+      "title": "ปิดกล่องข้อความ (ถ้ามี)",
+      "do": "ui.click",
+      "selector": "button:has-text('ตกลง')",
+      "optional": true
+    },
+    {
+      "title": "PG: มีแถวใหม่ 1 แถว ชื่อถูกต้อง",
+      "do": "db.query",
+      "sql": "select code, name_1 from erp_user_group where code = :'code'",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "name_1",
+          "op": "contains",
+          "value": "{{run.tag}}"
+        }
+      ]
+    },
+    {
+      "title": "ก่อนลบ: ช่องรหัสบนหน้าจอต้องเป็นรหัสของเรา",
+      "do": "ui.expectValue",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_user_group\"] input[type='text']:not([placeholder*='ค้นหา'])",
+      "nth": 0,
+      "value": "{{code}}"
+    },
+    {
+      "title": "กดลบ",
+      "do": "ui.click",
+      "selector": "[data-workspace-tab-panel=\"menu_setup_user_group\"] button:has-text('ลบ')",
+      "wait": 800
+    },
+    {
+      "title": "ยืนยันการลบ",
+      "do": "ui.click",
+      "selector": "button:has-text('ลบข้อมูล'), button:has-text('ยืนยัน'), button:has-text('ตกลง')",
+      "nth": -1,
+      "wait": 1500
+    },
+    {
+      "title": "ปิดกล่องข้อความ (ถ้ามี)",
+      "do": "ui.click",
+      "selector": "button:has-text('ตกลง')",
+      "optional": true
+    },
+    {
+      "title": "PG: แถวต้องหายไป",
+      "do": "db.query",
+      "sql": "select code from erp_user_group where code = :'code'",
+      "rows": 0
+    }
+  ],
+  "cleanup": [
+    {
+      "title": "ลบแถวทดสอบที่อาจค้าง",
+      "do": "db.exec",
+      "sql": "delete from erp_user_group where code = :'code'"
+    }
+  ]
+}

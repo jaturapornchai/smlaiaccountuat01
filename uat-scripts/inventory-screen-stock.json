@@ -1,0 +1,54 @@
+{
+  "id": "inventory-screen-stock",
+  "title": "สต็อก: เปิดยอดคงเหลือตามคลังและตรวจนับสินค้า ไม่มีข้อผิดพลาดแฝง",
+  "module": "inventory",
+  "lens": "screen",
+  "severityOnFail": "S2",
+  "description": "เปิด menu_ic_info_stk_balance_warehouse และ menu_ic_stk_count แล้วตรวจ HTTP 4xx/5xx, JS error, DB error บนหน้าจอ",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ยอดคงเหลือสินค้าตามคลัง",
+      "do": "ui.openMenu",
+      "key": "menu_ic_info_stk_balance_warehouse"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ยอดคงเหลือสินค้าตามคลัง",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า ยอดคงเหลือสินค้าตามคลัง",
+      "do": "ui.screenshot",
+      "name": "menu_ic_info_stk_balance_warehouse"
+    },
+    {
+      "title": "เปิดเมนู ตรวจนับสินค้า",
+      "do": "ui.openMenu",
+      "key": "menu_ic_stk_count"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ตรวจนับสินค้า",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า ตรวจนับสินค้า",
+      "do": "ui.screenshot",
+      "name": "menu_ic_stk_count"
+    }
+  ],
+  "cleanup": []
+}

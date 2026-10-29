@@ -1,0 +1,61 @@
+{
+  "id": "gl-journal-balanced",
+  "title": "GL: เปิดสมุดรายวัน และทุกเอกสารต้องเดบิต = เครดิต",
+  "module": "gl",
+  "severityOnFail": "S1",
+  "description": "เปิดเมนูข้อมูลรายวัน แล้วตรวจ PG: ทุกเลขเอกสารใน gl_journal_detail มี sum(debit) = sum(credit) และไม่มีรายการกำพร้า",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู ข้อมูลรายวัน",
+      "do": "ui.openMenu",
+      "key": "menu_gl_journal"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า ข้อมูลรายวัน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า ข้อมูลรายวัน",
+      "do": "ui.screenshot",
+      "name": "menu_gl_journal"
+    },
+    {
+      "title": "PG: เอกสารที่เดบิต<>เครดิต = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from (select book_code, doc_no from gl_journal_detail group by 1, 2 having sum(debit) <> sum(credit)) t",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "title": "PG: รายการแยกประเภทไม่มีหัวรายวัน = 0",
+      "do": "db.query",
+      "sql": "select count(*) as n from gl_journal_detail d where not exists (select 1 from gl_journal h where h.book_code = d.book_code and h.doc_no = d.doc_no)",
+      "rows": 1,
+      "expect": [
+        {
+          "col": "n",
+          "op": "eq",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

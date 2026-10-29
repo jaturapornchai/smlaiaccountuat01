@@ -1,0 +1,44 @@
+{
+  "id": "security-ai-play",
+  "title": "ความปลอดภัย: AI กดเล่นหน้าจอ เปลี่ยนรหัสผ่าน",
+  "module": "security",
+  "lens": "screen",
+  "severityOnFail": "S3",
+  "timeoutMs": 600000,
+  "description": "AI (Stagehand + Computer Use บนสมอง Ollama) เปิด เปลี่ยนรหัสผ่าน แล้วกดใช้งานจริงเหมือนผู้ใช้ รายงานสิ่งผิดปกติที่เห็นบนจอ · ผลจาก AI ต้องให้คนยืนยันก่อนแก้",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู เปลี่ยนรหัสผ่าน",
+      "do": "ui.openMenu",
+      "key": "menu_change_password"
+    },
+    {
+      "title": "AI กดเล่น เปลี่ยนรหัสผ่าน",
+      "do": "ui.play",
+      "goal": "ดูหน้าเปลี่ยนรหัสผ่าน: ตรวจว่ามีช่องรหัสเดิม รหัสใหม่ ยืนยันรหัสใหม่ และช่องรหัสแสดงเป็นจุดซ่อนตัวอักษร ห้ามกรอกช่องใดๆ ห้ามกดบันทึก ห้ามเปลี่ยนรหัสผ่านจริง จบเมื่อตรวจเสร็จ",
+      "maxSteps": 8,
+      "continueOnFail": true
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงระหว่างที่ AI ใช้งาน",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้าจอสุดท้าย",
+      "do": "ui.screenshot",
+      "name": "security-ai-play"
+    }
+  ]
+}

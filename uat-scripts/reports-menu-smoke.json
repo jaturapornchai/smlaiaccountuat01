@@ -1,0 +1,35 @@
+{
+  "id": "reports-menu-smoke",
+  "title": "รายงาน: เปิดรายงานซื้อสรุปตามประเภทภาษีแล้วไม่มีข้อผิดพลาดแฝง",
+  "module": "reports",
+  "severityOnFail": "S3",
+  "description": "เปิดเมนู menu_report_sum_purchase_by_vat ตรวจ HTTP 4xx/5xx, JS error, DB error บนหน้าจอ",
+  "steps": [
+    {
+      "title": "เข้าสู่ระบบแบบ Demo",
+      "do": "ui.demoLogin"
+    },
+    {
+      "title": "ล้างตัวนับข้อผิดพลาดหลังเข้าสู่ระบบ",
+      "do": "ui.expectClean",
+      "reset": true
+    },
+    {
+      "title": "เปิดเมนู รายงานการซื้อสรุปตามประเภทภาษี",
+      "do": "ui.openMenu",
+      "key": "menu_report_sum_purchase_by_vat"
+    },
+    {
+      "title": "ไม่มีข้อผิดพลาดแฝงในหน้า รายงานการซื้อสรุปตามประเภทภาษี",
+      "do": "ui.expectClean",
+      "ignore": [
+        "^HTTP 401 GET /api/auth/"
+      ]
+    },
+    {
+      "title": "ถ่ายภาพหน้า รายงานการซื้อสรุปตามประเภทภาษี",
+      "do": "ui.screenshot",
+      "name": "menu_report_sum_purchase_by_vat"
+    }
+  ]
+}
