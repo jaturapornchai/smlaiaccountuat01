@@ -156,6 +156,18 @@ body {
   to { opacity: 1; transform: none; }
 }
 
+/* ซูมจอบอท: ขยายออกจากการ์ด (--zx/--zy = กลางการ์ดบนจอ, --zs = สัดส่วนการ์ดต่อจอ) · ชื่อ keyframes ขาออกต้องต่างจากขาเข้า ไม่งั้นไม่เล่นใหม่ */
+.zoom-fade { animation: zoom-fade-in 0.35s ease-out both; }
+.zoom-pop { transform-origin: var(--zx) var(--zy); animation: zoom-grow 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.zoom-out .zoom-fade { animation: fx-fade 0.25s ease-in both; }
+.zoom-out .zoom-pop { animation: zoom-shrink 0.25s ease-in both; }
+@keyframes zoom-fade-in { from { opacity: 0; } }
+@keyframes zoom-grow {
+  from { opacity: 0; transform: scale(var(--zs)); filter: blur(6px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@keyframes zoom-shrink { to { opacity: 0; transform: scale(var(--zs)); filter: blur(4px); } }
+
 /* จุดสถานะเต้น + แถบวิ่งของงานที่กำลังรัน */
 .pulse-dot { position: relative; }
 .pulse-dot::after {

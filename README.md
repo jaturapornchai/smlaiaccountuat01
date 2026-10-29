@@ -13,7 +13,7 @@
 - ตัว Tester อยู่ที่ https://uat.smlwork.com และทดสอบเว็บ https://www.smlwork.com (เข้าแบบ Demo / ฐาน `smldemo`)
 - AI ที่เขียนโปรแกรม (Claude, Antigravity บนเครื่องลุงจืด) สั่งงานผ่าน MCP วงจรคือ
   1. AI สั่งตรวจ → Tester รันกับของจริง
-  2. ไม่ผ่าน → เปิด issue ใน IssueMate
+  2. ไม่ผ่าน → เปิด issue ใน IssueMate · ยกเว้นทุกขั้นที่พัง (ไม่นับเก็บกวาด) พังเพราะตัวสคริปต์เอง: `psql ผิดพลาด`, `ไม่มีตัวแปร {{…}}`, `AI ทำไม่จบใน N ตา` → ไม่เปิด issue แต่บันทึกเหตุการณ์ในบอทให้แก้สคริปต์ (`scriptFault` ใน `src/lib/uat-runs.ts`, รอบตรวจซ้ำของ issue ยังส่งผลเสมอ) · สั่งส่งเองได้ด้วย MCP `runs {id, action:"issue"}`
   3. AI แก้โค้ด แล้วสั่งตรวจซ้ำด้วยเลข issue
   4. ผ่าน → Tester เขียนคอมเมนต์ปิดวงจรใน issue นั้น (ไม่ผ่าน → คอมเมนต์ว่ายังพังขั้นไหน)
 - บทบาทของ AI (ทั้งสมองบอทและคำแนะนำใน MCP): คนไทย เป็นผู้ใช้ทั่วไปของ SML AI Account ที่ทำงานแบบผู้ใช้จริง และเก่ง query กับ data model ตรวจฐานข้อมูลและ flow งานได้ (เช่น ใบเสนอราคา → ใบสั่งขาย → ใบขาย → ภาษีขาย → GL → สต็อก)
@@ -45,7 +45,9 @@
    - ตัวรันพิมพ์ผลทีละบรรทัด (JSON) → หน้าจอแสดงไทม์ไลน์ขั้นตอน ค่าที่คาดหวังเทียบค่าจริง และภาพหลักฐาน
    - ขั้น `cleanup` รันเสมอแม้ขั้นหลักพัง
    - หลังทุกขั้นที่เป็นหน้าจอ (`ui.*`) ตัวรันเขียนทับภาพ `runs/<id>/live.jpg` → การ์ดบอทบนหน้าแรกโชว์จอสดว่ากำลังทำอะไร (การ์ดเรียงบอทที่กำลังรันก่อน แล้วตามเวลาทำงานล่าสุด, `src/components/BotCard.tsx`)
-   - ขั้นที่ไม่มีหน้าจอ (`db.*`, `api.request`, `report.pdf`) ตัวรันส่งคำสั่งจริงที่เติมตัวแปรแล้ว (`query`, ตัดที่ 600 ตัว ปิดค่าลับ) → การ์ดโชว์ SQL/คำขอ API แทนภาพ: ขณะรัน = ขั้นที่กำลังทำ, จบแล้ว = ขั้นที่ไม่ผ่าน หรือขั้นสุดท้ายที่มีคำสั่ง · issue ที่เปิดก็แนบคำสั่งนี้ไปด้วย
+   - ขั้นที่ไม่มีหน้าจอ (`db.*`, `api.request`, `report.pdf`) ตัวรันส่งคำสั่งจริงที่เติมตัวแปรแล้ว (`query`, ตัดที่ 600 ตัว ปิดค่าลับ) · issue ที่เปิดก็แนบคำสั่งนี้ไปด้วย
+   - การ์ดเล่ารอบล่าสุดของบอทรอบเดียว (ภาพ คำสั่ง ข้อความบนจอ และการกดดูขั้นตอนมาจากรอบเดียวกัน ไม่หยิบภาพรอบเก่า): เลือกขั้นที่จะเล่า = ขณะรันคือขั้นที่กำลังทำ, จบแล้วคือขั้นที่ไม่ผ่าน หรือขั้นสุดท้ายที่รันจริง (ไม่นับเก็บกวาด) → ขั้นนั้นมีคำสั่ง SQL/API ก็โชว์คำสั่ง ไม่งั้นโชว์ `live.jpg` ของรอบนั้น · ข้อความล่างจอ เช่น "ไม่ผ่านขั้น 8/12 · …" นับเป็นขั้น ส่วนแถวล่างการ์ด "ผ่าน 4 รอบ · ไม่ผ่าน 1 รอบ" นับเป็นรอบ
+   - ปุ่มขยายจอ (มุมขวาบนของจอการ์ด ข้างเวลา) → จอเดียวกันขยายเต็มหน้าแบบแอนิเมชันซูมออกจากตำแหน่งการ์ด เห็นภาพทั้งจอไม่ครอป/เลื่อนอ่านคำสั่ง SQL ยาวได้ และยังอัปเดตสดขณะรัน · ปิดด้วย Esc, ปุ่ม X หรือคลิกพื้นหลัง (หดกลับเข้าการ์ด)
 3. ผลถาวรเก็บที่ `runs/<id>/run.json` พร้อมไฟล์หลักฐาน `NNN-*.png|json|pdf`
 4. ถ้ารอบนั้น **ไม่ผ่าน** และเปิด "ส่งเข้า IssueMate อัตโนมัติ" ไว้ (`src/lib/issuemate.ts`):
    1. สมอง AI อ่านขั้นที่พังพร้อมภาพหน้าจอ แล้วเขียนบทวิเคราะห์ (เป็นการคาดเดา ต้องตรวจโค้ดจริง)
@@ -58,6 +60,7 @@
    2. แต่ละบอทเขียนสคริปต์ `ask-<โมดูล>-<มุมตรวจ>` จากคอลัมน์จริงใน PostgreSQL แล้วบันทึกผ่านตัวตรวจเดียวกับ `save_script`
    3. สคริปต์จากคำสั่งอ่านอย่างเดียว: ห้าม `db.exec`, ห้าม `ui.adminLogin`, `api.request` ใช้ GET เท่านั้น · SQL ทุกขั้น `db.query` ถูกลอง `EXPLAIN` กับฐาน Demo ก่อนบันทึก (ไม่รันจริง) ถ้าอ้างตาราง/คอลัมน์ที่ไม่มีจริงให้ AI แก้ใหม่ ไม่ปล่อยไปรันพังแล้วเปิด issue ผิดตัว · รอบที่ไม่ผ่านยังเปิด IssueMate ตาม `autoIssueMate` พร้อมหมายเหตุให้ตรวจสคริปต์ก่อน
    4. เข้าคิวรันจริงทันที · รอบที่ไม่ผ่านเปิด issue ใน IssueMate อัตโนมัติเหมือนสคริปต์อื่น (issue ของ `ask-*` มีหมายเหตุให้ตรวจสคริปต์ก่อน)
+   5. AI คิดเรื่องทดสอบเพิ่มเอง (on the fly, `proposeScripts`): จบแต่ละชุดทดสอบ สมอง AI ดูผลชุดนั้นกับรายชื่อสคริปต์ที่มี แล้วเสนอไม่เกิน 2 เรื่อง (ขุดต่อจากขั้นที่พัง หรือเรื่องที่ยังไม่มีสคริปต์ตรวจ) → บอทที่ตรงเขียนสคริปต์ `auto-<โมดูล>-<เวลา>` ผ่านตัวตรวจเดียวกับข้อ 3 แล้วเข้าคิวรัน · ชุดที่มีแต่ `auto-*` ไม่เสนอต่อ (ไม่วน) · มี `auto-*` ครบ 30 ไฟล์แล้วหยุดเสนอจนกว่าจะลบ/คัดเข้าคลัง · ปิดได้ที่หน้าตั้งค่า หรือ `UAT_AUTO_SCRIPTS=0`
 
 6. คำสั่งผ่าน MCP (`src/app/api/mcp/route.ts`, `src/lib/mcp.ts`)
    - ปลายทาง `POST /api/mcp` (JSON-RPC) รองรับ MCP 2026-07-28 และ 2025-11-25 / 2025-06-18 / 2025-03-26
@@ -136,6 +139,7 @@
 | `UAT_EYES_MODEL` | ตา AI ของ `ui.see`/`ui.play` ดูภาพแล้วบอกพิกัดคลิก ว่างไว้ = `kimi-k3` |
 | `ISSUEMATE_MCP_URL`, `ISSUEMATE_PROJECT`, `ISSUEMATE_TOKEN` | ปลายทาง issue (MCP ของ IssueMate) |
 | `ISSUEMATE_AUTO` | `0` = ไม่ส่งอัตโนมัติ |
+| `UAT_AUTO_SCRIPTS` | `0` = จบชุดทดสอบแล้วไม่ให้ AI คิดสคริปต์ `auto-*` เพิ่มเอง |
 | `UAT_MCP_TOKEN` | รหัสให้ AI เรียก `/api/mcp` (ไม่ตั้ง = MCP ปิด ตอบ 503) |
 | `UAT_SESSION_SECRET` | ลงชื่อคุกกี้ผู้ดูแล (สุ่ม ≥32 ตัว) ไม่ตั้ง = ไม่มีใครสั่งงานผ่านหน้าเว็บได้ |
 | `UAT_ADMIN_EMAIL` | อีเมล Google ของผู้ดูแล หลายคนคั่นด้วยจุลภาค (จำเป็น — ไม่ตั้ง = ไม่มีใครสั่งงานผ่านหน้าเว็บได้) |
@@ -164,7 +168,7 @@
 ## Dependency
 - Node 22+ (เครื่องลุงจืด Node 24, เซิร์ฟเวอร์ Node 22), pnpm, Next.js 15, React 19, Tailwind 3, lucide-react
 - Playwright + Chromium และ psql
-- poppler-utils (`pdftotext`, `pdftoppm`) สำหรับขั้น `report.pdf` — บน Ubuntu `apt-get install -y poppler-utils`
+- poppler-utils (`pdftotext`, `pdftoppm`) สำหรับขั้น `report.pdf` / `ui.pdf` — บน Ubuntu `apt-get install -y poppler-utils`
 - บริการภายนอก:
   - Ollama Cloud (`https://ollama.com/api/chat`)
   - IssueMate MCP (`https://issue.dedezoom.com/mcp`)
@@ -227,6 +231,7 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 - เครื่องไม่มี psql: `bin/psql` เรียก psql ในคอนเทนเนอร์ `sml_postgresql`
 - Playwright + Chromium อยู่ `/opt/uat-tester/pw` (`UAT_PLAYWRIGHT`, `PLAYWRIGHT_BROWSERS_PATH`)
 - อัปเดตโค้ด: ส่งไฟล์ขึ้น `/opt/uat-tester` (ไม่ทับ `.env.local` และ `./runs/` ที่ราก — ถ้าใช้ tar ต้องเขียน `--exclude=./runs` ไม่งั้นจะตัด `src/app/api/runs` ทิ้งด้วย) แล้ว `corepack pnpm@10.33.0 install --frozen-lockfile && corepack pnpm@10.33.0 build && systemctl restart uat-tester` (ต้องระบุ pnpm 10.33.0 เพราะ pnpm ที่ corepack ให้มาบนเซิร์ฟเวอร์เป็นรุ่น 12 ซึ่งปฏิเสธ lockfile)
+- รีสตาร์ทตอนไม่มีรอบค้างเท่านั้น: เช็ก `GET /api/runs` ว่าไม่มี `running`/`queued` — service ใช้ `KillMode=control-group` รีสตาร์ทแล้วตัวรันที่ค้างถูกฆ่ากลางรอบ (เอกสาร `UAT-*` อาจค้างใน smldemo) · ค่าตั้งหน้าเว็บ/MCP `status settings` อยู่ในหน่วยความจำ รีสตาร์ทแล้วกลับเป็นค่าจาก env (`ISSUEMATE_AUTO`, `UAT_AUTO_SCRIPTS` …) ถ้าปิดส่ง IssueMate อัตโนมัติไว้ชั่วคราวต้องสั่งปิดซ้ำ
 
 ตัวอย่างคำสั่งที่ AI ส่ง (ตรวจซ้ำหลังแก้ issue):
 ```json
@@ -252,7 +257,7 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 ```
 
 ขั้นที่ใช้ได้:
-- หน้าจอ: `ui.goto`, `ui.demoLogin`, `ui.adminLogin` `{targetPath: "/admin/providers" | "/home"}`, `ui.openMenu`, `ui.click`, `ui.fill`, `ui.select`, `ui.press`, `ui.readText`, `ui.expectText`, `ui.expectVisible`, `ui.expectValue`, `ui.expectUrl`, `ui.expectClean`, `ui.screenshot`
+- หน้าจอ: `ui.goto`, `ui.demoLogin`, `ui.adminLogin` `{targetPath: "/admin/providers" | "/home"}`, `ui.openMenu`, `ui.click`, `ui.fill`, `ui.select`, `ui.press`, `ui.readText`, `ui.expectText`, `ui.expectVisible`, `ui.expectValue`, `ui.expectUrl`, `ui.expectClean`, `ui.screenshot`, `ui.pdf` `{selector, contains[]}` (กดปุ่มบนจอที่ดาวน์โหลด PDF เช่นปุ่มดาวน์โหลดในหน้าพิมพ์ แล้วตรวจข้อความในไฟล์แบบเดียวกับ `report.pdf`)
 - AI กดเล่นหน้าจอ: `ui.act` `{instruction}` (Stagehand ทำ 1 อย่างตามคำสั่งภาษาไทย), `ui.see` `{expect}` (AI ดูภาพแล้วตัดสินผ่าน/ไม่ผ่าน), `ui.play` `{goal, maxSteps}` (Computer Use: AI ดูจอ คลิก พิมพ์ จนครบเป้าหมาย สิ่งผิดปกติที่ AI เห็น = ขั้นไม่ผ่าน บันทึกเอกสารทดสอบได้โดยใส่ `{{run.tag}}`) · ผลจาก AI ต้องให้คนยืนยันก่อนแก้
 - API: `api.request`
 - รายงาน PDF: `report.pdf` `{body, contains[]}` — ขอ PDF แบบที่ผู้ใช้กดพิมพ์รายงาน (`POST /api/process/report/pdf` ใช้ body เดียวกับ `/api/process/report/run`) แล้วหาทุกค่าใน `contains` จากข้อความในไฟล์ · หลักฐาน = ภาพหน้าแรก + ไฟล์ PDF (ปุ่ม "เปิด PDF รายงาน" ในไทม์ไลน์)
