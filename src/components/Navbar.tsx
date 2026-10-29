@@ -36,7 +36,7 @@ export const Navbar: React.FC<NavbarProps> = ({ target, health, activeRuns, busy
         </span>
         <span className="leading-tight">
           <span className="block text-lg font-extrabold tracking-tight">UAT Tester</span>
-          <span className="block text-[0.72rem] text-slate-400">SML AI Account · ฝูงบอท 30 ตัว</span>
+          <span className="block text-[0.72rem] text-slate-400">SML AI Account · ฝูงบอท 32 ตัว</span>
         </span>
       </div>
 

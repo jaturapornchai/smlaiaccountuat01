@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Lens, UatScript } from "@/types/bot";
-import { LENSES, ROLES } from "./swarm-data";
+import { INITIAL_BOTS, LENSES, ROLES } from "./swarm-data";
 
 export const SCRIPT_DIR = join(process.cwd(), "uat-scripts");
 // ask-* = AI เขียนตามคำสั่งผู้ใช้ · auto-* = AI คิดเองหลังจบชุดทดสอบ — ทั้งคู่ต้องตรวจสคริปต์ก่อนเชื่อผล
@@ -27,6 +27,7 @@ export function loadScripts(): { scripts: LoadedScript[]; errors: { file: string
       const usesDb = steps.some((s) => s.do?.startsWith("db."));
       const lens: Lens = j.lens ?? (usesDb ? "data" : "screen"); // ไม่ระบุ: มี db.* = บอทฐานข้อมูล, ไม่มี = บอทหน้าจอ
       if (!LENSES.some((l) => l.key === lens)) throw new Error(`lens "${lens}" ต้องเป็น screen / data / api`);
+      if (!INITIAL_BOTS.some((b) => b.role === j.module && b.lens === lens)) throw new Error(`โมดูล "${j.module}" ไม่มีบอทมุม ${lens}`);
       scripts.push({
         id: j.id,
         title: j.title,

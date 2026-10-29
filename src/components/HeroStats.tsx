@@ -75,7 +75,7 @@ export const HeroStats: React.FC<HeroProps> = ({ bots, scripts, runs }) => {
           หน้าจอ · API · PostgreSQL
         </h1>
         <p className="rise mt-4 max-w-[46rem] text-[0.95rem] leading-relaxed text-slate-400" style={{ "--i": 2 } as React.CSSProperties}>
-          บอท 30 ตัวแบ่ง 10 โมดูล × 3 มุมตรวจ รันสคริปต์กับเว็บ UAT จริง ตรวจแถวในฐาน Demo หลังทุกการบันทึก ขั้นไหนพังจะเห็นค่าที่คาดหวังเทียบค่าจริงพร้อมภาพหลักฐานทันที
+          บอท 32 ตัวแบ่ง 10 โมดูล × 3 มุมตรวจ + เงินสด/ธนาคาร 2 มุม รันสคริปต์กับเว็บ UAT จริง ตรวจแถวในฐาน Demo หลังทุกการบันทึก ขั้นไหนพังจะเห็นค่าที่คาดหวังเทียบค่าจริงพร้อมภาพหลักฐานทันที
         </p>
         <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
           <Kpi i={3} icon={<Bot className="h-4 w-4" />} label="บอททั้งหมด" value={bots.length} sub={`มีสคริปต์แล้ว ${coveredBots} ตัว`} tone="text-cyan-300" />

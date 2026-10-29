@@ -62,7 +62,7 @@ async function pickBots(command: string): Promise<BotConfig[]> {
   const text = await askBrain(
     "pick",
     getSettings().brainModel,
-    `คุณคือหัวหน้าทีม UAT ของ SML AI Account มีบอท 30 ตัว (10 โมดูล × 3 มุมตรวจ: หน้าจอ ฐานข้อมูล API) เลือกบอทที่ต้องลงมือตามคำสั่ง 1-${MAX_PICK} ตัว เฉพาะที่เกี่ยวจริง ตอบ JSON เท่านั้น`,
+    `คุณคือหัวหน้าทีม UAT ของ SML AI Account มีบอท 32 ตัว (10 โมดูล × 3 มุมตรวจ: หน้าจอ ฐานข้อมูล API + เงินสด/ธนาคาร มุมหน้าจอ ฐานข้อมูล) เลือกบอทที่ต้องลงมือตามคำสั่ง 1-${MAX_PICK} ตัว เฉพาะที่เกี่ยวจริง ตอบ JSON เท่านั้น`,
     `คำสั่ง: ${command}\n\nบอท (id | ชื่อ | หน้าที่):\n${list}`,
     [],
     PICK_SCHEMA,

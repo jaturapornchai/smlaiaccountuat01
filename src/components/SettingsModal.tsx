@@ -146,7 +146,7 @@ export const SettingsModal: React.FC<Props> = ({ open, settings, health, onClose
 
         <div className="flex flex-wrap items-center gap-3 border-t border-white/10 pt-4">
           <button
-            onClick={() => window.confirm("ล้างสถิติ ประวัติงาน และเหตุการณ์ของบอททั้ง 30 ตัว? (ผลการรันใน runs/ ยังอยู่)") && onReset()}
+            onClick={() => window.confirm("ล้างสถิติ ประวัติงาน และเหตุการณ์ของบอททั้ง 32 ตัว? (ผลการรันใน runs/ ยังอยู่)") && onReset()}
             className="baseline-center gap-1.5 rounded-xl border border-rose-400/30 px-3 py-2 text-[0.78rem] font-semibold text-rose-200 hover:bg-rose-500/10"
           >
             <RotateCcw className="h-3.5 w-3.5" />

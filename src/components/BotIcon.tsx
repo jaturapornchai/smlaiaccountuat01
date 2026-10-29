@@ -10,6 +10,7 @@ import {
   Receipt,
   Scale,
   Settings,
+  Landmark,
   ShieldCheck,
   ShoppingCart,
   Truck,
@@ -18,7 +19,7 @@ import {
 
 // ชื่อไอคอนใน swarm-data.ts (avatarIcon) และไอคอนของมุมตรวจ
 const ICONS: Record<string, LucideIcon> = {
-  Database, ShoppingCart, Truck, Package, Scale, Receipt, BarChart3, ShieldCheck, Settings, GitCompare,
+  Database, ShoppingCart, Truck, Package, Scale, Receipt, BarChart3, ShieldCheck, Settings, GitCompare, Landmark,
   screen: Monitor, data: Database, api: Globe,
 };
 

@@ -29,6 +29,7 @@ interface Seed {
   avatarIcon: string;
   accent: string;
   focus: string;
+  lenses?: Lens[]; // ไม่ระบุ = ครบ 3 มุม
 }
 
 // ข้อมูลโมดูลใช้ทั้งฝั่งเซิร์ฟเวอร์และหน้าจอ (ไม่มี import ของ node)
@@ -123,16 +124,28 @@ export const MODULES: Seed[] = [
     accent: "#f472b6",
     focus: "กระทบยอด: gl_journal (หัว) เทียบ sum(gl_journal_detail) ทั้งเดบิตและเครดิต, ยอดเอกสารซื้อขายเทียบยอด GL ที่ลงบัญชี",
   },
+  // ต่อท้ายเสมอ: เลขบอทมาจากลำดับ (bot-31, bot-32) — แทรกกลางจะทำให้ id บอทเดิมเลื่อน
+  // ponytail: ยังไม่มีมุม API — เพิ่มใน lenses เมื่อมีสคริปต์ API ของเงินสด/ธนาคาร
+  {
+    role: "cash",
+    name: "ผู้ตรวจ เงินสด/ธนาคาร",
+    roleTitle: "UAT เงินสด/ธนาคาร",
+    roleDescription: "เงินสดย่อย รายได้/ค่าใช้จ่ายอื่นๆ ฝาก ถอน โอน เช็ครับ เช็คจ่าย บัตรเครดิต — ยอดเงินและสถานะเช็คถูกต้อง ลง GL ครบ",
+    avatarIcon: "Landmark",
+    accent: "#a3e635",
+    focus: "เงินสด/ธนาคาร: ตาราง cb_trans, cb_trans_detail, cb_chq_list — ฝาก/ถอน/โอนระหว่างธนาคาร, เช็ครับ-จ่าย (นำฝาก ผ่าน คืน เปลี่ยน ขาดสิทธิ์) และการยกเลิก, เงินสดย่อย, ยอดลง gl_journal_detail ตรงกับเอกสาร",
+    lenses: ["screen", "data"],
+  },
 ];
 
-// 3 มุมตรวจต่อโมดูล → 10 โมดูล × 3 = 30 บอท
+// 3 มุมตรวจต่อโมดูล (เงินสด/ธนาคาร 2 มุม) → 10 × 3 + 2 = 32 บอท
 export const LENSES: { key: Lens; label: string; how: string }[] = [
   { key: "screen", label: "หน้าจอ", how: "ทำผ่านหน้าจอจริงบน Chrome: คลิก กรอก บันทึก แก้ไข ลบ แล้วดูผลบนหน้าจอ ข้อความแจ้งเตือน และ console" },
   { key: "data", label: "ฐานข้อมูล", how: "ตรวจใน PostgreSQL (ฐาน Demo): แถวต้องตรงกับที่เห็นบนหน้าจอ ผลรวม รายการกำพร้า รหัสซ้ำ ทศนิยมและการปัดเศษ" },
   { key: "api", label: "API", how: "ตรวจที่ API: รหัสสถานะ โครงสร้างข้อมูล สิทธิ์ (401/403) ค่าขอบเขตและค่าแปลก ข้อความผิดพลาดต้องไม่เปิดเผยข้อมูลภายใน" },
 ];
 
-export const INITIAL_BOTS: BotConfig[] = MODULES.flatMap((s) => LENSES.map((l) => ({ s, l }))).map(({ s, l }, k) => ({
+export const INITIAL_BOTS: BotConfig[] = MODULES.flatMap((s) => LENSES.filter((l) => !s.lenses || s.lenses.includes(l.key)).map((l) => ({ s, l }))).map(({ s, l }, k) => ({
   id: `bot-${String(k + 1).padStart(2, "0")}`,
   number: k + 1,
   name: `${s.name} · ${l.label}`,

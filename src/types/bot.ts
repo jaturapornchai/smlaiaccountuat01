@@ -9,7 +9,8 @@ export type BotRole =
   | "reports"
   | "security"
   | "admin"
-  | "recon";
+  | "recon"
+  | "cash";
 
 // มุมตรวจของบอทในแต่ละโมดูล: หน้าจอจริง / ฐานข้อมูล PostgreSQL / API
 export type Lens = "screen" | "data" | "api";

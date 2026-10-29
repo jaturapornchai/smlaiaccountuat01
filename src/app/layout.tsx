@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "UAT Tester · SML AI Account — ฝูงบอททดสอบ 30 ตัว",
-  description: "ทดสอบระบบ ERP SML AI Account ตามสคริปต์ทีละขั้นตอน ทั้งหน้าจอ API และฐานข้อมูล PostgreSQL (Demo) ด้วยบอท 30 ตัว",
+  title: "UAT Tester · SML AI Account — ฝูงบอททดสอบ 32 ตัว",
+  description: "ทดสอบระบบ ERP SML AI Account ตามสคริปต์ทีละขั้นตอน ทั้งหน้าจอ API และฐานข้อมูล PostgreSQL (Demo) ด้วยบอท 32 ตัว",
   robots: { index: false, follow: false }, // เครื่องมือภายใน ไม่เปิดให้ค้นหา
 };
 
