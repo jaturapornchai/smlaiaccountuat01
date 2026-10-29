@@ -5,6 +5,7 @@ import { BotConfig, BotTask, IssueLink, ScriptRun, StepResult } from "@/types/bo
 import { pushActivity } from "./activity";
 import { redact } from "./log";
 import { clearSent, commentIssue, reportRun } from "./issuemate";
+import { scriptFault } from "./script-fault";
 import { addEvent, getBotById, getBots, getSettings } from "./swarm-store";
 import { loadScripts } from "./uat-scripts";
 
@@ -241,14 +242,6 @@ const ISSUE_TEXT: Record<IssueLink["status"], (i: IssueLink) => string> = {
 };
 
 // สมอง AI วิเคราะห์รอบที่พัง แล้วเปิด issue ใน IssueMate (โปรเจกต์ SMLAIACC) ให้ทีม/AI ฝั่ง IssueMate แก้ต่อ
-// ความผิดของตัวสคริปต์ (SQL ฝั่งทดสอบพัง, ตัวแปรที่ไม่เคย save, AI กดไม่จบ) ไม่บอกอะไรเรื่อง ERP
-// → คืนขั้นแรกที่พัง เมื่อทุกขั้นที่พัง (ไม่นับเก็บกวาด) เป็นแบบนี้ทั้งหมด
-const SCRIPT_FAULT = /^(psql ผิดพลาด|ไม่มีตัวแปร \{\{)|^AI ทำไม่จบใน \d+ ตา/;
-export function scriptFault(run: ScriptRun) {
-  const failed = run.steps.filter((s) => s.status === "failed" && !s.cleanup);
-  return failed.length > 0 && failed.every((s) => SCRIPT_FAULT.test(s.detail ?? "")) ? failed[0] : undefined;
-}
-
 export async function sendToIssueMate(run: ScriptRun): Promise<ScriptRun> {
   if (run.issue?.status === "sending") return run;
   run.issue = { status: "sending", at: new Date().toISOString() };
