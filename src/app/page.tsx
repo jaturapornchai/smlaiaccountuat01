@@ -173,6 +173,7 @@ export default function Home() {
                       i={i}
                       bot={b}
                       run={mine.find((r) => r.status === "running") ?? mine.find((r) => r.startedAt)}
+                      queued={mine.filter((r) => r.status === "queued").length}
                       scriptCount={scripts.filter((s) => s.module === b.role && s.lens === b.lens).length}
                       onRun={(id) => start({ botIds: [id] })}
                       onOpen={setConsoleBotId}

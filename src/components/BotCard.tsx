@@ -12,14 +12,40 @@ interface BotCardProps {
   i: number;
   bot: BotConfig;
   run?: ScriptRun; // รอบที่กำลังรัน หรือรอบล่าสุดของบอทนี้ — ภาพ คำสั่ง และข้อความบนจอมาจากรอบนี้รอบเดียว
+  queued: number; // สคริปต์ของบอทนี้ที่ยังรอคิว
   scriptCount: number;
   onRun: (botId: string) => void;
   onOpen: (botId: string) => void;
   onOpenRun: (runId: string) => void;
 }
 
+type Summary = { done: boolean; ok?: boolean; why: string };
+
+// สรุปให้คนอ่านรู้ทันที: "จบงาน" = บอทไม่มีอะไรต้องทำต่อในรอบนี้ · "รอขั้นตอนต่อไป" = ยังมีขั้น/คิวค้าง หรือรอคนตัดสินใจ
+function summarize(run: ScriptRun | undefined, live: boolean, queued: number): Summary | undefined {
+  if (live && run) {
+    const left = run.steps.filter((s) => s.status === "pending").length;
+    return { done: false, why: `กำลังทดสอบ · เหลืออีก ${left} ขั้น${queued ? ` · จบแล้วต่อด้วยสคริปต์ในคิวอีก ${queued} ชุด` : ""}` };
+  }
+  const wait = `สคริปต์รอคิวอีก ${queued} ชุด · รอช่องรันว่าง`;
+  if (!run) return queued ? { done: false, why: wait } : undefined;
+  const s = finished(run);
+  return queued ? { done: false, ok: s.ok, why: `รอบล่าสุด: ${s.why} · ${wait}` } : s;
+}
+
+function finished(run: ScriptRun): Summary {
+  const i = run.issue;
+  if (run.status === "passed") return { done: true, ok: true, why: `ผ่านครบ ${run.passed} ขั้น · ไม่มีงานค้าง` };
+  if (run.status === "stopped") return { done: true, why: "ถูกสั่งหยุดกลางทาง · กด ▶ ถ้าจะรันใหม่" };
+  if (run.status === "error") return { done: false, ok: false, why: `ตัวรันขัดข้อง${run.message ? `: ${run.message}` : ""} · ตรวจสาเหตุแล้วกด ▶ รันใหม่` };
+  if (i?.code && (i.status === "sent" || i.status === "duplicate")) return { done: true, ok: false, why: `ไม่ผ่าน · ${i.status === "sent" ? "เปิด" : "ต่อท้ายใน"} ${i.code} แล้ว · ต่อที่ IssueMate: ทีมพัฒนาแก้แล้วสั่งตรวจซ้ำ หรือปิดถ้าสคริปต์ผิดเอง` };
+  if (i?.status === "sending") return { done: false, ok: false, why: "ไม่ผ่าน · กำลังส่งเรื่องเข้า IssueMate" };
+  if (i?.status === "error") return { done: false, ok: false, why: "ไม่ผ่าน · ส่ง IssueMate ไม่สำเร็จ · กดส่งใหม่ที่หน้ารอบนี้" };
+  return { done: false, ok: false, why: "ไม่ผ่าน · ระบบไม่เปิด ticket เอง (สคริปต์ที่ AI เสนอ หรือสคริปต์พังเอง) · รอคนตรวจผล ถ้าเป็นบั๊กจริงกด \"ส่งเข้า IssueMate\" ที่หน้ารอบนี้" };
+}
+
 // การ์ดบอท 1 ตัว: จอสดว่ากำลังทำอะไร + เวลาทำงานล่าสุด
-export const BotCard: React.FC<BotCardProps> = ({ i, bot, run, scriptCount, onRun, onOpen, onOpenRun }) => {
+export const BotCard: React.FC<BotCardProps> = ({ i, bot, run, queued, scriptCount, onRun, onOpen, onOpenRun }) => {
   const live = bot.status === "running";
   const step = live ? run?.steps.find((s) => s.status === "running") : undefined;
   const failed = live ? undefined : run?.steps.find((s) => s.status === "failed");
@@ -37,6 +63,8 @@ export const BotCard: React.FC<BotCardProps> = ({ i, bot, run, scriptCount, onRu
   const focus = step ?? failed ?? run?.steps.findLast((s) => s.status === "passed" && !s.cleanup);
   const q = focus?.query ? focus : undefined;
   const hasScreen = Boolean(q || run?.liveAt);
+  const sum = summarize(run, live, queued);
+  const tone = !sum?.done ? "border-amber-300/25 bg-amber-400/10 text-amber-200" : sum.ok ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-200" : sum.ok === false ? "border-rose-400/25 bg-rose-500/10 text-rose-200" : "border-slate-400/20 bg-slate-500/10 text-slate-200";
 
   // ซูมจอ: ขยายออกจากตำแหน่งการ์ด (x,y = กลางการ์ดบนจอ, s = สัดส่วนการ์ดต่อความกว้างจอ) · out = กำลังหดกลับก่อนปิด
   const [zoom, setZoom] = useState<{ x: number; y: number; s: number; out?: boolean } | null>(null);
@@ -109,6 +137,13 @@ export const BotCard: React.FC<BotCardProps> = ({ i, bot, run, scriptCount, onRu
         </button>
         <StatusBadge status={bot.status} />
       </div>
+
+      {sum && (
+        <p className={`mx-3.5 mt-2.5 flex items-baseline gap-2 rounded-xl border px-2.5 py-1.5 text-[0.7rem] leading-snug ${tone}`}>
+          <span className="shrink-0 font-bold">{sum.done ? "จบงาน" : "รอขั้นตอนต่อไป"}</span>
+          <span className="line-clamp-2 text-slate-300" title={sum.why}>{sum.why}</span>
+        </p>
+      )}
 
       <div className="flex items-center gap-2 px-3.5 pb-3.5 pt-2 text-[0.7rem]">
         <BotIcon name={bot.lens} className="h-3.5 w-3.5 text-slate-500" />
