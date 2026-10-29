@@ -15,6 +15,7 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { ActivityFx } from "@/components/ActivityFx";
 import { McpCard } from "@/components/McpCard";
 import { DeliveryReport } from "@/components/DeliveryReport";
+import { NightlyCard } from "@/components/NightlyCard";
 
 type ScriptErr = { file: string; error: string };
 
@@ -155,6 +156,7 @@ export default function Home() {
       <main onPointerMove={onPointerMove} className="mx-auto w-full max-w-[170rem] space-y-[clamp(1.5rem,2.6vw,3.5rem)] px-[clamp(1rem,2.2vw,3.5rem)] py-[clamp(1.25rem,2.6vw,3.5rem)]">
         <HeroStats bots={bots} scripts={scripts} runs={runs} />
         <DeliveryReport runs={runs} onOpenRun={setSelectedRunId} />
+        <NightlyCard runs={runs} onOpenRun={setSelectedRunId} />
         <McpCard admin={admin} say={say} />
 
         <div className={`grid items-start ${gap} 2xl:grid-cols-[minmax(0,1fr)_minmax(26rem,0.42fr)]`}>

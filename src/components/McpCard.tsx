@@ -5,7 +5,7 @@ import Link from "next/link";
 import { BookOpen, Check, Copy, KeyRound, RadioTower } from "lucide-react";
 import { McpTokensModal } from "./McpTokensModal";
 
-const TOOLS = ["status", "scripts", "save_script", "run", "runs", "events", "notify"];
+const TOOLS = ["status", "scripts", "save_script", "run", "runs", "events", "nightly", "notify"];
 
 // การ์ดบอกวิธีเชื่อม AI ผ่าน MCP (src/app/api/mcp/route.ts) · ไม่แสดงค่า token จริง ใช้ <UAT_MCP_TOKEN> แทน
 export const McpCard: React.FC<{ admin: boolean; say: (ok: boolean, text: string) => void }> = ({ admin, say }) => {

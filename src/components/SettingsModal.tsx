@@ -96,6 +96,23 @@ export const SettingsModal: React.FC<Props> = ({ open, settings, health, onClose
           </label>
         </section>
 
+        <section className="rounded-xl border border-white/10 p-3">
+          <h3 className="font-bold">รอบ regression กลางคืน</h3>
+          <p className="mt-1 text-[0.72rem] leading-relaxed text-slate-400">
+            ถึงเวลาแล้วรันสคริปต์ในคลังทั้งหมด (ไม่รวม ask-* / auto-* ที่ AI เขียน) หนึ่งรอบต่อคืน แล้วสรุปผลเทียบคืนก่อนไว้ที่หน้าหลัก · ถ้ายังมีรอบค้างอยู่จะรอให้จบก่อน (รอได้ไม่เกิน 3 ชั่วโมง) · ค่าเริ่มต้นปิด
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-x-6 gap-y-2">
+            <label className="baseline-center gap-2.5">
+              <input type="checkbox" checked={form.nightlyEnabled} onChange={(e) => set("nightlyEnabled", e.target.checked)} className="h-4 w-4 accent-indigo-400" />
+              เปิดรอบกลางคืน
+            </label>
+            <label className="baseline-center gap-2.5">
+              เวลาเริ่ม (เวลาไทย)
+              <input type="time" value={form.nightlyTime} onChange={(e) => set("nightlyTime", e.target.value)} className="rounded-xl border border-white/10 bg-black/30 px-3 py-1.5 outline-none focus:border-cyan-300/50" />
+            </label>
+          </div>
+        </section>
+
         <p className="rounded-xl border border-amber-300/20 bg-amber-400/5 px-3 py-2 text-[0.75rem] leading-relaxed text-amber-100">
           คีย์ Ollama, token IssueMate และรหัสฐานข้อมูล Demo ตั้งใน <code>.env.local</code> เท่านั้น (ไม่แสดงในหน้านี้) — แก้แล้วต้องรีสตาร์ทเซิร์ฟเวอร์
         </p>

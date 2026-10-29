@@ -55,8 +55,8 @@ const save = (r: ScriptRun) => {
   writeFileSync(join(RUN_DIR, r.id, "run.json"), JSON.stringify(r, null, 1));
 };
 
-// retestOf = เลข issue ที่สั่งตรวจซ้ำหลังแก้ (ผลจะถูกแจ้งกลับใน issue นั้น)
-export function startRuns(scriptIds: string[], retestOf?: string): { runs: ScriptRun[]; unknown: string[] } {
+// retestOf = เลข issue ที่สั่งตรวจซ้ำหลังแก้ (ผลจะถูกแจ้งกลับใน issue นั้น) · nightly = วันที่ไทยของรอบกลางคืนที่สั่ง (nightly.ts)
+export function startRuns(scriptIds: string[], retestOf?: string, nightly?: string): { runs: ScriptRun[]; unknown: string[] } {
   const { scripts } = loadScripts();
   if (!activeRunCount()) Object.assign(batch, { p: 0, f: 0, e: 0, ids: [] });
   const s = getSettings();
@@ -70,7 +70,7 @@ export function startRuns(scriptIds: string[], retestOf?: string): { runs: Scrip
     const run: ScriptRun = {
       id, scriptId: sc.id, scriptTitle: sc.title, module: sc.module, lens: sc.lens, severityOnFail: sc.severityOnFail, botId: bot.id,
       target: s.erpTargetUrl, headed: s.headed, status: "queued", queuedAt: new Date().toISOString(),
-      steps: [], passed: 0, failed: 0, skipped: 0, issues: 0, retestOf,
+      steps: [], passed: 0, failed: 0, skipped: 0, issues: 0, retestOf, nightly,
     };
     runs.set(id, run);
     queue.push(id);

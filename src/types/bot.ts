@@ -76,6 +76,8 @@ export interface SwarmSettings {
   autoScripts: boolean; // จบชุดทดสอบแล้วให้ AI เสนอ+เขียนสคริปต์ใหม่เอง (on the fly)
   maxParallelBots: number;
   headed: boolean;
+  nightlyEnabled: boolean; // รอบ regression เต็มตอนกลางคืน (ค่าเริ่มต้นปิด) — จดลง runs/nightly.json เพราะ settings อื่นหายตอนรีสตาร์ท
+  nightlyTime: string; // HH:MM เวลาไทย (Asia/Bangkok)
 }
 
 export interface BroadcastRequest {
@@ -139,6 +141,7 @@ export interface ScriptRun {
   issue?: IssueLink;
   noIssue?: string; // เหตุผลที่ไม่เปิด issue อัตโนมัติ (สคริปต์พังเอง / สคริปต์ auto-*) ให้คนเห็นบนการ์ดและหน้ารอบ
   retestOf?: string; // เลข issue ที่สั่งตรวจซ้ำ
+  nightly?: string; // รอบกลางคืนของวันที่ไทย YYYY-MM-DD ที่สั่งรอบนี้ (ไว้สรุปเช้า)
   liveAt?: string; // เวลาภาพหน้าจอสดล่าสุด (runs/<id>/live.jpg)
 }
 
