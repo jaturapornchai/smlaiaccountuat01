@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { bad, guard, ok } from "@/lib/api";
-import { ADMIN_EMAIL, COOKIE, MAX_AGE, sessionEmail, signSession } from "@/lib/admin-session";
+import { ADMIN_EMAILS, COOKIE, MAX_AGE, sessionEmail, signSession } from "@/lib/admin-session";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,7 @@ export const POST = (req: Request) =>
     const t = (await r.json().catch(() => ({}))) as { aud?: string; iss?: string; email?: string; email_verified?: string | boolean };
     if (!r.ok || t.aud !== CLIENT_ID || !ISSUERS.includes(t.iss ?? "") || String(t.email_verified) !== "true") return bad("Google ยืนยันตัวตนไม่ผ่าน", 401);
     const email = (t.email ?? "").toLowerCase();
-    if (email !== ADMIN_EMAIL) return bad(`บัญชี ${email} ดูได้อย่างเดียว — สั่งงานได้เฉพาะผู้ดูแล`, 403);
+    if (!ADMIN_EMAILS.includes(email)) return bad(`บัญชี ${email} ดูได้อย่างเดียว — สั่งงานได้เฉพาะผู้ดูแล`, 403);
     const res = ok({ email });
     res.cookies.set(COOKIE, await signSession(email), { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: MAX_AGE });
     return res;

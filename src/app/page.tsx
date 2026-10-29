@@ -205,7 +205,7 @@ export default function Home() {
         }}
         onAsked={refresh}
       />
-      <BroadcastModal open={broadcastOpen} bots={bots} onClose={() => setBroadcastOpen(false)} onDone={refresh} />
+      <BroadcastModal open={broadcastOpen} bots={bots} onClose={() => setBroadcastOpen(false)} onSent={(ok, text) => (say(ok, text), refresh())} />
       <SettingsModal
         open={settingsOpen}
         settings={settings}

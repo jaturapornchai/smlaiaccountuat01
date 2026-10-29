@@ -57,7 +57,7 @@ const Confetti = React.memo(function Confetti() {
 
 function look(e: Activity): { icon: React.ReactNode; tone: string; color: string; head: string } {
   if (e.kind === "mcp") return { icon: <RadioTower className="h-5 w-5" />, tone: "text-cyan-100", color: "#22d3ee", head: `คำสั่งเข้าจาก ${e.client ?? "AI"}` };
-  if (e.kind === "note") return { icon: <MessageSquareText className="h-5 w-5" />, tone: "text-sky-100", color: "#38bdf8", head: `${e.client ?? "AI"} แจ้งว่า` };
+  if (e.kind === "note") return e.status === "error" ? { icon: <Siren className="h-5 w-5" />, tone: "text-rose-100", color: "#fb7185", head: `${e.client ?? "AI"} แจ้งปัญหา` } : { icon: <MessageSquareText className="h-5 w-5" />, tone: "text-sky-100", color: "#38bdf8", head: `${e.client ?? "AI"} แจ้งว่า` };
   if (e.kind === "issue")
     return e.status === "sent"
       ? { icon: <Ticket className="h-5 w-5" />, tone: "text-violet-100", color: "#a78bfa", head: `เปิด issue ${e.code} ส่งให้ทีมแก้แล้ว` }

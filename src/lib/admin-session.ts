@@ -1,6 +1,7 @@
 // ผู้ดูแลที่สั่งงานผ่านหน้าเว็บได้ (คนอื่นดูได้อย่างเดียว) · คุกกี้ = "email|หมดอายุ|HMAC" ลงชื่อด้วย UAT_SESSION_SECRET
 // ใช้ Web Crypto ล้วน เพื่อให้ทั้ง middleware และ route เรียกได้
-export const ADMIN_EMAIL = (process.env.UAT_ADMIN_EMAIL || "").trim().toLowerCase(); // ไม่ตั้ง = ไม่มีใครเป็นผู้ดูแล (ไม่ฝังอีเมลในโค้ด);
+// ใส่ได้หลายคน คั่นด้วยจุลภาค · ไม่ตั้ง = ไม่มีใครเป็นผู้ดูแล (ไม่ฝังอีเมลในโค้ด)
+export const ADMIN_EMAILS = (process.env.UAT_ADMIN_EMAIL || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
 export const COOKIE = "uat_admin";
 export const MAX_AGE = 7 * 24 * 3600;
 
@@ -26,7 +27,7 @@ export async function sessionEmail(cookie?: string): Promise<string | null> {
   if (!k || !cookie || i < 0) return null;
   const body = cookie.slice(0, i);
   const [email, exp] = body.split("|");
-  if (email !== ADMIN_EMAIL || !(Number(exp) * 1000 > Date.now())) return null;
+  if (!ADMIN_EMAILS.includes(email) || !(Number(exp) * 1000 > Date.now())) return null;
   try {
     return (await crypto.subtle.verify("HMAC", k, unb64url(cookie.slice(i + 1)), enc.encode(body))) ? email : null;
   } catch {

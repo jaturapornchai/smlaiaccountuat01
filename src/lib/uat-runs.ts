@@ -112,8 +112,11 @@ function launch(run: ScriptRun) {
 
   let buf = "";
   let err = "";
-  child.stdout!.on("data", (d: Buffer) => {
-    buf += d.toString("utf8");
+  // setEncoding ต่ออักษรไทยที่ถูกตัดคร่อมก้อนข้อมูลให้ — toString ทีละก้อนทำให้ตัวอักษรเพี้ยนเป็น �
+  child.stdout!.setEncoding("utf8");
+  child.stderr!.setEncoding("utf8");
+  child.stdout!.on("data", (d: string) => {
+    buf += d;
     let nl: number;
     while ((nl = buf.indexOf("\n")) >= 0) {
       const line = buf.slice(0, nl).trim();
@@ -121,7 +124,7 @@ function launch(run: ScriptRun) {
       if (line) onLine(run, redact(line));
     }
   });
-  child.stderr!.on("data", (d: Buffer) => { err = redact(err + d.toString("utf8")).slice(-2000); });
+  child.stderr!.on("data", (d: string) => { err = redact(err + d).slice(-2000); });
   child.on("error", (e) => { err = e.message; });
   child.on("close", (code) => {
     procs.delete(run.id);
