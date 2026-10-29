@@ -50,6 +50,17 @@ if (runs.size === 0 && existsSync(RUN_DIR)) {
 
 export const listRuns = (limit = KEEP_RUNS) => [...runs.values()].sort((a, b) => b.queuedAt.localeCompare(a.queuedAt)).slice(0, limit);
 export const getRun = (id: string) => runs.get(id);
+
+// zero-touch (ลุงจืด 2026-10-29): รอบล่าสุดของสคริปต์ที่ไม่ผ่าน/ตัวรันขัดข้อง แต่ไม่มี ticket และไม่มีเหตุผลจากกฎหรือ AI
+// (รีสตาร์ตกลางด่าน AI หรือระหว่างส่ง, ส่ง IssueMate ไม่สำเร็จ, รันตอนกฎเก่าที่ให้คนกดส่ง) → รันใหม่เองตอนเซิร์ฟเวอร์เริ่ม ผลใหม่เข้าด่านเปิด ticket ตามปกติ
+// ponytail: เก็บเฉพาะตอนสตาร์ต — ส่งไม่สำเร็จระหว่างวันรอรีสตาร์ตครั้งหน้า; ทำเป็นรอบเวลาเมื่อเจอค้างบ่อย
+export function rerunStranded(): string[] {
+  if (!getSettings().autoIssueMate) return [];
+  const latest = new Map<string, ScriptRun>();
+  for (const r of runs.values()) if ((latest.get(r.scriptId)?.queuedAt ?? "") < r.queuedAt) latest.set(r.scriptId, r);
+  const ids = [...latest.values()].filter((r) => (r.status === "failed" || r.status === "error") && (!r.issue || r.issue.status === "error") && !r.noIssue).map((r) => r.scriptId);
+  return ids.length ? startRuns(ids).runs.map((r) => r.scriptId) : [];
+}
 export const activeRunCount = () => [...runs.values()].filter((r) => r.status === "queued" || r.status === "running").length;
 
 const save = (r: ScriptRun) => {

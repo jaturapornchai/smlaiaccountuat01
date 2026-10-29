@@ -19,9 +19,11 @@ export async function register() {
   });
 
   // ticket ที่ Tester เปิดเป็น deployed → ตรวจซ้ำเอง (สวิตช์ autoRetest) · IssueMate ไม่มี webhook จึงถามทุก 5 นาที
-  const [{ join }, { pollDeployed }, { listDeployed }, { startRuns, RUN_DIR }, { getSettings }, { pushActivity }] = await Promise.all([
+  const [{ join }, { pollDeployed }, { listDeployed }, { startRuns, RUN_DIR, rerunStranded }, { getSettings }, { pushActivity }] = await Promise.all([
     import("node:path"), import("./lib/auto-retest"), import("./lib/issuemate"), import("./lib/uat-runs"), import("./lib/swarm-store"), import("./lib/activity"),
   ]);
+  const again = rerunStranded(); // รอบไม่ผ่านที่ค้างโดยไม่มี ticket → รันใหม่เอง (zero-touch)
+  if (again.length) writeLog("server", { event: "rerun-stranded", scripts: again });
   const deps = {
     list: listDeployed,
     start: startRuns,
