@@ -10,7 +10,7 @@ import { isAiScript, loadScripts } from "./uat-scripts";
 
 // สั่งงานตรวจ: ผู้ใช้พิมพ์ว่าจะตรวจอะไร → สมอง AI เลือกบอท → แต่ละบอทเขียนสคริปต์ → ตัวรันเดิมต่อ PostgreSQL/เว็บ/API จริง
 const MAX_PICK = 6;
-type Step = { title?: string; do?: string; method?: string; sql?: unknown; database?: string };
+type Step = { title?: string; do?: string; method?: string; sql?: unknown; database?: string; save?: Record<string, string>; as?: string; name?: string };
 type Script = { title: string; steps: Step[]; cleanup?: Step[]; severityOnFail?: string };
 
 const PICK_SCHEMA = { type: "object", properties: { botIds: { type: "array", items: { type: "string" } } }, required: ["botIds"] };
@@ -29,11 +29,16 @@ async function realColumns(text: string): Promise<string> {
   const names = [...new Set(text.toLowerCase().match(/\b[a-z][a-z0-9]*_[a-z0-9_]{1,60}\b/g) ?? [])].slice(0, 80);
   if (!names.length) return "(ไม่พบชื่อตาราง)";
   const out = await psqlRead(
-    `select table_name, string_agg(column_name || ' ' || data_type, ', ' order by ordinal_position) from information_schema.columns where table_schema = 'public' and table_name in (${names.map((n) => `'${n}'`).join(",")}) group by 1 order by 1`,
+    `select table_name, string_agg(column_name || ' ' || udt_name, ', ' order by ordinal_position) from information_schema.columns where table_schema = 'public' and table_name in (${names.map((n) => `'${n}'`).join(",")}) group by 1 order by 1`,
     15000,
   );
   const lines = out.trim().split("\n").filter(Boolean).slice(0, 15);
-  return lines.map((l) => l.replace("|", ": ").slice(0, 1500)).join("\n") || "(ไม่พบตารางเหล่านี้ในฐาน Demo)";
+  // ponytail: ic_trans มี 153 คอลัมน์ (~3.2k ตัวอักษรแบบ udt_name) — ตัดที่ 1500 เดิม AI เห็นแค่ 1 ใน 3 แล้วเดาชื่อ (2026-10-29 d.sum_value)
+  const cols = lines.map((l) => l.replace("|", ": ").slice(0, 4000)).join("\n") || "(ไม่พบตารางเหล่านี้ในฐาน Demo)";
+  // AI เดาเลข trans_flag ผิด (2026-10-29 ask-purchase-data ใช้ 4=ใบสั่งซื้อ 6=ใบรับ แต่โค้ดจริง 6=ใบสั่งซื้อ trans_grid.go:111) → ให้ชื่อจากฟังก์ชัน trans_flag() ของ SML เอง (คืนเป็น set ต้องห่อ select แบบ report_menu_cb.go:652)
+  if (!cols.includes("trans_flag")) return cols;
+  const flags = await psqlRead("select string_agg(f || '=' || coalesce((select trans_flag(f) limit 1)::text, '?'), ', ' order by f) from (select distinct trans_flag f from ic_trans) x", 15000).catch(() => "");
+  return flags.trim() ? `${cols}\ntrans_flag ที่มีจริงใน ic_trans (เลข=ประเภทเอกสาร ใช้เลขนี้เท่านั้น ห้ามเดา): ${flags.trim().slice(0, 1500)}` : cols;
 }
 
 // ค้นเว็บครั้งเดียวต่อคำสั่ง (บอทหลายตัวที่รับคำสั่งเดียวกันใช้ผลร่วมกัน): กฎทางการ + วิธีที่โปรแกรมบัญชีอื่นทำ
@@ -67,6 +72,20 @@ async function pickBots(command: string): Promise<BotConfig[]> {
 function readOnlyGuard(sc: Script) {
   const bad = [...sc.steps, ...(sc.cleanup ?? [])].find((s) => s?.do === "db.exec" || s?.do === "ui.adminLogin" || (s?.do === "api.request" && String(s.method ?? "GET").toUpperCase() !== "GET"));
   if (bad) throw new Error(`ขั้น "${bad.title}" ถูกห้าม: สคริปต์จากคำสั่งต้องอ่านอย่างเดียว (ห้าม db.exec, ห้าม ui.adminLogin, api.request ใช้ GET เท่านั้น)`);
+}
+
+// {{x}} ต้องมาจากขั้นก่อนหน้า (save/as/set) ไม่งั้นตัวรันพัง "ไม่มีตัวแปร" — ล้อ fill() ใน runner/run.mjs ที่ข้ามคีย์ sql
+// (2026-10-29 ask-purchase-data ขั้น 10 ใช้ {{total_recv_qty}} ในขั้นเดียวกับที่ select มันออกมา → รันพัง ไม่ได้ตรวจ ERP จึงไม่เปิด ticket)
+function varGuard(sc: Script) {
+  const known = new Set(["run.id", "run.short", "run.tag"]);
+  for (const st of [...sc.steps, ...(sc.cleanup ?? [])]) {
+    const rest = { ...st, sql: undefined };
+    for (const [, k] of JSON.stringify(rest).matchAll(/\{\{\s*([\w.]+)\s*\}\}/g))
+      if (!known.has(k) && !k.startsWith("env.")) throw new Error(`ขั้น "${st.title}": ใช้ตัวแปร {{${k}}} ที่ไม่มีขั้นก่อนหน้า save ไว้ — save จากขั้นก่อน หรือเทียบกันในตัว SQL เลย`);
+    for (const k of Object.keys(st.save ?? {})) known.add(k);
+    if (st.as) known.add(st.as);
+    if (st.do === "set" && st.name) known.add(st.name);
+  }
 }
 
 // AI ยังเดาชื่อตาราง/คอลัมน์ได้ทั้งที่ให้คอลัมน์จริงไปแล้ว (2026-10-29 เดา ar_invoice → รันพัง → เปิด SMLAIACC-165 ทั้งที่ ERP ไม่ผิด)
@@ -119,6 +138,7 @@ ${cols}`;
       const sc = (raw.steps ? raw : (Object.values(raw).find((v) => (v as Script)?.steps) ?? raw)) as Script; // บางครั้งโมเดลห่อไว้ใน {script:{...}}
       if (!Array.isArray(sc.steps) || !sc.steps.length) throw new Error("ไม่มีขั้นตอน (steps ว่าง)");
       readOnlyGuard(sc);
+      varGuard(sc);
       await sqlGuard(sc);
       const severity = /^S[1-4]$/.test(String(sc.severityOnFail)) ? sc.severityOnFail : "S3";
       saveScript({ script: { ...sc, id, module: bot.role, lens: bot.lens, severityOnFail: severity, description: `${id.startsWith("auto-") ? "AI เสนอเอง" : "สั่งงาน"}: ${command}${raw.description ? ` · ${raw.description}` : ""}` } });

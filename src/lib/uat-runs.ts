@@ -198,9 +198,12 @@ function finish(run: ScriptRun) {
   // สคริปต์ auto-* ที่ AI เสนอเองไม่เปิด issue อัตโนมัติ (ลุงจืดสั่ง 2026-10-29: เปิด ticket ไม่จริงบ่อย) — ตรวจแล้วกด "ส่งเข้า IssueMate" เอง
   const fault = run.retestOf ? undefined : scriptFault(run);
   if (run.status === "failed" && getSettings().autoIssueMate) {
-    if (fault) addEvent(bot, "info", `ไม่เปิด issue: "${run.scriptTitle}" พังเพราะตัวสคริปต์เอง (ขั้น ${fault.i + 1}: ${(fault.detail ?? "").slice(0, 120)}) — แก้สคริปต์แล้วรันใหม่`);
-    else if (!run.retestOf && run.scriptId.startsWith("auto-")) addEvent(bot, "info", `ไม่เปิด issue อัตโนมัติ: "${run.scriptTitle}" เป็นสคริปต์ที่ AI เสนอเอง — ตรวจผลก่อน ถ้าเป็นบั๊กจริงกด "ส่งเข้า IssueMate" ที่หน้ารอบนี้`);
-    else void sendToIssueMate(run);
+    if (fault) run.noIssue = `สคริปต์พังเอง ยังไม่ได้ตรวจ ERP (ขั้น ${fault.i + 1}: ${(fault.detail ?? "").slice(0, 120)}) — แก้สคริปต์แล้วรันใหม่`;
+    else if (!run.retestOf && run.scriptId.startsWith("auto-")) run.noIssue = "สคริปต์ที่ AI เสนอเอง — ตรวจผลก่อน ถ้าเป็นบั๊กจริงกด \"ส่งเข้า IssueMate\" ที่หน้ารอบนี้";
+    if (run.noIssue) {
+      addEvent(bot, "info", `ไม่เปิด issue: "${run.scriptTitle}" ${run.noIssue}`);
+      save(run);
+    } else void sendToIssueMate(run);
   }
   if (ok) void closeLoop(run);
 

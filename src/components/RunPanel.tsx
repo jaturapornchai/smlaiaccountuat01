@@ -85,7 +85,7 @@ const IssueBox: React.FC<{ run: ScriptRun; url?: string; onSend: () => void }> =
       <div className="flex flex-wrap items-center gap-2">
         <Bug className="h-4 w-4 text-violet-300" />
         <span className="font-bold text-violet-100">IssueMate</span>
-        {!i && <span className="text-slate-400">ยังไม่ได้ส่ง</span>}
+        {!i && <span className="text-slate-400">{run.noIssue ? `ไม่เปิดอัตโนมัติ: ${run.noIssue}` : "ยังไม่ได้ส่ง"}</span>}
         {i?.status === "sending" && (
           <span className="baseline-center gap-1.5 text-violet-200">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />

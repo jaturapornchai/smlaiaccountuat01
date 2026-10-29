@@ -137,6 +137,7 @@ export interface ScriptRun {
   message?: string;
   pid?: number;
   issue?: IssueLink;
+  noIssue?: string; // เหตุผลที่ไม่เปิด issue อัตโนมัติ (สคริปต์พังเอง / สคริปต์ auto-*) ให้คนเห็นบนการ์ดและหน้ารอบ
   retestOf?: string; // เลข issue ที่สั่งตรวจซ้ำ
   liveAt?: string; // เวลาภาพหน้าจอสดล่าสุด (runs/<id>/live.jpg)
 }

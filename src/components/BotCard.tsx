@@ -41,7 +41,7 @@ function finished(run: ScriptRun): Summary {
   if (i?.code && (i.status === "sent" || i.status === "duplicate")) return { done: true, ok: false, why: `ไม่ผ่าน · ${i.status === "sent" ? "เปิด" : "ต่อท้ายใน"} ${i.code} แล้ว · ต่อที่ IssueMate: ทีมพัฒนาแก้แล้วสั่งตรวจซ้ำ หรือปิดถ้าสคริปต์ผิดเอง` };
   if (i?.status === "sending") return { done: false, ok: false, why: "ไม่ผ่าน · กำลังส่งเรื่องเข้า IssueMate" };
   if (i?.status === "error") return { done: false, ok: false, why: "ไม่ผ่าน · ส่ง IssueMate ไม่สำเร็จ · กดส่งใหม่ที่หน้ารอบนี้" };
-  return { done: false, ok: false, why: "ไม่ผ่าน · ระบบไม่เปิด ticket เอง (สคริปต์ที่ AI เสนอ หรือสคริปต์พังเอง) · รอคนตรวจผล ถ้าเป็นบั๊กจริงกด \"ส่งเข้า IssueMate\" ที่หน้ารอบนี้" };
+  return { done: false, ok: false, why: `ไม่ผ่าน · ไม่เปิด ticket: ${run.noIssue ?? "ยังไม่ได้ส่ง · ตรวจผลก่อน ถ้าเป็นบั๊กจริงกด \"ส่งเข้า IssueMate\" ที่หน้ารอบนี้"}` };
 }
 
 // การ์ดบอท 1 ตัว: จอสดว่ากำลังทำอะไร + เวลาทำงานล่าสุด
