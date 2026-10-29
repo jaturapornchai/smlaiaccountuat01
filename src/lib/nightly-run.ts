@@ -49,7 +49,8 @@ export async function nightReport(night?: string): Promise<NightReport> {
   const n = night ?? nights[0];
   if (!n) return { enabled, time, nights };
   const all = (await import("./uat-runs")).listRuns(Infinity);
-  const of = (d: string) => all.filter((r) => r.nightly === d);
+  const retried = new Set(all.map((r) => r.retryOf));
+  const of = (d: string) => all.filter((r) => r.nightly === d && !retried.has(r.id)); // ตัวรันขัดข้องแล้วลองใหม่เอง → นับเฉพาะรอบที่ลองใหม่
   if (!of(n).length && !st.history[n]) return { enabled, time, nights }; // คืนที่ไม่เคยสั่งรัน
   const prev = nights.find((d) => d < n && of(d).length);
   return { enabled, time, nights, summary: summarize(n, st, of(n), prev ? { night: prev, runs: of(prev) } : undefined) };

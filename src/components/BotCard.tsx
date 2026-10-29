@@ -37,11 +37,12 @@ function finished(run: ScriptRun): Summary {
   const i = run.issue;
   if (run.status === "passed") return { done: true, ok: true, why: `ผ่านครบ ${run.passed} ขั้น · ไม่มีงานค้าง` };
   if (run.status === "stopped") return { done: true, why: "ถูกสั่งหยุดกลางทาง · กด ▶ ถ้าจะรันใหม่" };
-  if (run.status === "error") return { done: false, ok: false, why: `ตัวรันขัดข้อง${run.message ? `: ${run.message}` : ""} · ตรวจสาเหตุแล้วกด ▶ รันใหม่` };
+  if (run.status === "error") return { done: false, ok: false, why: `ตัวรันขัดข้อง${run.message ? `: ${run.message}` : ""} · ${run.retryOf ? "ลองซ้ำแล้วยังขัดข้อง · Tester รันใหม่เองตอนเซิร์ฟเวอร์เริ่มครั้งหน้า" : "Tester ลองรันใหม่เอง 1 ครั้ง"}` };
   if (i?.code && (i.status === "sent" || i.status === "duplicate")) return { done: true, ok: false, why: `ไม่ผ่าน · ${i.status === "sent" ? "เปิด" : "ต่อท้ายใน"} ${i.code} แล้ว · ต่อที่ IssueMate: ทีมพัฒนาแก้แล้วสั่งตรวจซ้ำ หรือปิดถ้าสคริปต์ผิดเอง` };
   if (i?.status === "sending") return { done: false, ok: false, why: "ไม่ผ่าน · กำลังส่งเรื่องเข้า IssueMate" };
   if (i?.status === "error") return { done: false, ok: false, why: "ไม่ผ่าน · ส่ง IssueMate ไม่สำเร็จ · กดส่งใหม่ที่หน้ารอบนี้" };
-  return { done: false, ok: false, why: `ไม่ผ่าน · ไม่เปิด ticket: ${run.noIssue ?? "ยังไม่ได้ส่ง · ตรวจผลก่อน ถ้าเป็นบั๊กจริงกด \"ส่งเข้า IssueMate\" ที่หน้ารอบนี้"}` };
+  if (run.retired) return { done: true, ok: false, why: "ไม่ผ่านเพราะสคริปต์ที่ AI เสนอพังเอง · AI ซ่อมไม่ได้ ปลดสคริปต์ออกจากคลังแล้ว · ไม่มีงานค้าง" };
+  return { done: false, ok: false, why: `ไม่ผ่าน · ไม่เปิด ticket: ${run.noIssue ?? "ยังไม่ได้ส่ง · Tester กำลังตรวจก่อนเปิด ticket (ถ้าปิดส่ง IssueMate อัตโนมัติไว้ กด \"ส่งเข้า IssueMate\" ที่หน้ารอบนี้)"}` };
 }
 
 // การ์ดบอท 1 ตัว: จอสดว่ากำลังทำอะไร + เวลาทำงานล่าสุด

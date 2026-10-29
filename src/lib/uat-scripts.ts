@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { Lens, UatScript } from "@/types/bot";
 import { INITIAL_BOTS, LENSES, ROLES } from "./swarm-data";
@@ -6,6 +6,15 @@ import { INITIAL_BOTS, LENSES, ROLES } from "./swarm-data";
 export const SCRIPT_DIR = join(process.cwd(), "uat-scripts");
 // ask-* = AI เขียนตามคำสั่งผู้ใช้ · auto-* = AI คิดเองหลังจบชุดทดสอบ — ทั้งคู่ต้องตรวจสคริปต์ก่อนเชื่อผล
 export const isAiScript = (id: string) => /^(ask|auto)-/.test(id);
+
+// ย้าย auto-<id>.json ไป uat-scripts/retired/ (loadScripts อ่านเฉพาะไฟล์ชั้นบน) — ย้ายกลับมาก็ใช้ได้อีก · สคริปต์ที่คนหรือ ask-* เขียนไม่แตะ
+export function retireScript(id: string): boolean {
+  const from = join(SCRIPT_DIR, `${id}.json`);
+  if (!id.startsWith("auto-") || !existsSync(from)) return false;
+  mkdirSync(join(SCRIPT_DIR, "retired"), { recursive: true });
+  renameSync(from, join(SCRIPT_DIR, "retired", `${id}.json`));
+  return true;
+}
 
 export interface LoadedScript extends UatScript {
   file: string;

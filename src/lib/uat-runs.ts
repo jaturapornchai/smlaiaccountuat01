@@ -8,7 +8,7 @@ import { clearSent, commentIssue, reportRun } from "./issuemate";
 import { aiTriage, scriptFault } from "./script-fault";
 import { recordRun } from "./run-history";
 import { addEvent, getBotById, getBots, getSettings } from "./swarm-store";
-import { loadScripts } from "./uat-scripts";
+import { loadScripts, retireScript } from "./uat-scripts";
 
 export const RUN_DIR = join(process.cwd(), "runs");
 const RUNNER = join(process.cwd(), "runner", "run.mjs");
@@ -54,12 +54,23 @@ export const getRun = (id: string) => runs.get(id);
 // zero-touch (ลุงจืด 2026-10-29): รอบล่าสุดของสคริปต์ที่ไม่ผ่าน/ตัวรันขัดข้อง แต่ไม่มี ticket และไม่มีเหตุผลจากกฎหรือ AI
 // (รีสตาร์ตกลางด่าน AI หรือระหว่างส่ง, ส่ง IssueMate ไม่สำเร็จ, รันตอนกฎเก่าที่ให้คนกดส่ง) → รันใหม่เองตอนเซิร์ฟเวอร์เริ่ม ผลใหม่เข้าด่านเปิด ticket ตามปกติ
 // ponytail: เก็บเฉพาะตอนสตาร์ต — ส่งไม่สำเร็จระหว่างวันรอรีสตาร์ตครั้งหน้า; ทำเป็นรอบเวลาเมื่อเจอค้างบ่อย
-export function rerunStranded(): string[] {
-  if (!getSettings().autoIssueMate) return [];
+// สคริปต์ auto-* ที่รอบล่าสุดยังพังเอง (AI ซ่อมไม่ได้ ซ่อมแล้วยังพัง หรือรีสตาร์ตกลางการซ่อม) → ปลดออกจากคลังเลย ไม่รอคน
+export function rerunStranded(): { rerun: string[]; retired: string[] } {
+  if (!getSettings().autoIssueMate) return { rerun: [], retired: [] };
   const latest = new Map<string, ScriptRun>();
   for (const r of runs.values()) if ((latest.get(r.scriptId)?.queuedAt ?? "") < r.queuedAt) latest.set(r.scriptId, r);
-  const ids = [...latest.values()].filter((r) => (r.status === "failed" || r.status === "error") && (!r.issue || r.issue.status === "error") && !r.noIssue).map((r) => r.scriptId);
-  return ids.length ? startRuns(ids).runs.map((r) => r.scriptId) : [];
+  const bad = [...latest.values()].filter((r) => r.status === "failed" || r.status === "error");
+  const retired = bad.filter((r) => r.noIssue && retireRun(r)).map((r) => (save(r), r.scriptId));
+  const ids = bad.filter((r) => (!r.issue || r.issue.status === "error") && !r.noIssue).map((r) => r.scriptId);
+  return { rerun: ids.length ? startRuns(ids).runs.map((r) => r.scriptId) : [], retired };
+}
+
+// zero-touch (ลุงจืด 2026-10-29): สคริปต์ auto-* ที่ AI เสนอเองแล้ว AI ซ่อมไม่ได้หรือซ่อมแล้วยังพัง → ปลดออกจากคลังเอง (uat-scripts.ts retireScript)
+export function retireRun(run: ScriptRun): boolean {
+  if (!retireScript(run.scriptId)) return false;
+  run.retired = true;
+  run.noIssue = `${run.noIssue ?? ""} · ปลดสคริปต์ออกจากคลังแล้ว (uat-scripts/retired/)`;
+  return true;
 }
 export const activeRunCount = () => [...runs.values()].filter((r) => r.status === "queued" || r.status === "running").length;
 
@@ -69,8 +80,8 @@ const save = (r: ScriptRun) => {
   recordRun(r); // ประวัติถาวร: รอบที่จบแล้วเท่านั้น, ได้ ticket ทีหลังจึงจดอีกบรรทัด (src/lib/run-history.ts)
 };
 
-// retestOf = เลข issue ที่สั่งตรวจซ้ำหลังแก้ (ผลจะถูกแจ้งกลับใน issue นั้น) · healOf = รอบที่สคริปต์พังเอง (ลองฉบับที่ AI ซ่อม) · nightly = วันที่ไทยของรอบกลางคืนที่สั่ง (nightly.ts)
-export function startRuns(scriptIds: string[], retestOf?: string, healOf?: string, nightly?: string): { runs: ScriptRun[]; unknown: string[] } {
+// retestOf = เลข issue ที่สั่งตรวจซ้ำหลังแก้ (ผลจะถูกแจ้งกลับใน issue นั้น) · healOf = รอบที่สคริปต์พังเอง (ลองฉบับที่ AI ซ่อม) · nightly = วันที่ไทยของรอบกลางคืนที่สั่ง (nightly.ts) · retryOf = รอบที่ตัวรันขัดข้องแล้วลองใหม่
+export function startRuns(scriptIds: string[], retestOf?: string, healOf?: string, nightly?: string, retryOf?: string): { runs: ScriptRun[]; unknown: string[] } {
   const { scripts } = loadScripts();
   if (!activeRunCount()) Object.assign(batch, { p: 0, f: 0, e: 0, ids: [] });
   const s = getSettings();
@@ -84,7 +95,7 @@ export function startRuns(scriptIds: string[], retestOf?: string, healOf?: strin
     const run: ScriptRun = {
       id, scriptId: sc.id, scriptTitle: sc.title, module: sc.module, lens: sc.lens, severityOnFail: sc.severityOnFail, botId: bot.id,
       target: s.erpTargetUrl, headed: s.headed, status: "queued", queuedAt: new Date().toISOString(),
-      steps: [], passed: 0, failed: 0, skipped: 0, issues: 0, retestOf, ai: sc.ai, healOf, nightly,
+      steps: [], passed: 0, failed: 0, skipped: 0, issues: 0, retestOf, ai: sc.ai, healOf, nightly, retryOf,
     };
     runs.set(id, run);
     queue.push(id);
@@ -226,6 +237,8 @@ function finish(run: ScriptRun) {
     const ids = batch.ids;
     void import("./command").then((m) => m.proposeScripts(ids));
   }
+  // ตัวรันขัดข้อง/เกินเวลา → ลองใหม่เอง 1 ครั้ง (zero-touch ลุงจืด 2026-10-29) · ลองแล้วยังขัดข้อง → rerunStranded รันใหม่ตอนเซิร์ฟเวอร์เริ่มครั้งหน้า
+  if (run.status === "error" && !run.retryOf) startRuns([run.scriptId], run.retestOf, run.healOf, run.nightly, run.id);
 }
 
 // สคริปต์ผ่าน: ปลดตัวกันส่งซ้ำ แล้วแจ้งใน issue เดิมว่าตรวจซ้ำผ่าน (ปิดวงจร สร้าง → ตรวจ → แก้ → ตรวจซ้ำ)
@@ -241,8 +254,10 @@ async function autoIssue(run: ScriptRun, bot: BotConfig) {
   }
   if (run.healOf && !own) void import("./command").then((m) => m.promoteHeal(run)); // ไปถึง ERP แล้ว
   if (!run.noIssue) return void (await sendToIssueMate(run));
-  if (run.healOf && own) run.noIssue = `สคริปต์ที่ AI ซ่อมยังพังเอง ไม่บันทึกทับ: ${run.noIssue}`;
-  else if (own && run.ai && !run.healOf) {
+  if (run.healOf && own) {
+    run.noIssue = `สคริปต์ที่ AI ซ่อมยังพังเอง ไม่บันทึกทับ: ${run.noIssue}`;
+    retireRun(run);
+  } else if (own && run.ai && !run.healOf) {
     const trial = await import("./command").then((m) => m.healScript(run, own!));
     if (trial) run.noIssue += ` · AI ซ่อมสคริปต์แล้ว กำลังลองรอบ ${trial} ก่อนบันทึก`;
   }

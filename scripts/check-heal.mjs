@@ -14,7 +14,7 @@ put("mock/activity.mjs", "export const log = []; export const pushActivity = (a)
 put("mock/brain.mjs", "export const calls = []; let reply = () => '{}'; export const setReply = (f) => { reply = f; }; export async function askBrain(job, model, system, prompt) { calls.push({ job, system, prompt }); return reply(); } export async function webResearch() { return ''; }");
 put("mock/store.mjs", "export const getSettings = () => ({ scriptModel: 's', brainModel: 'b' }); export const getBots = () => []; export const getBotById = () => null; export const addEvent = () => {}; export const updateSettings = () => {};");
 put("mock/health.mjs", "export async function psqlRead(sql) { return sql.startsWith('EXPLAIN') ? '' : 'pr_trans|doc_no varchar'; } export const checkAll = () => {};");
-put("mock/runs.mjs", "import { join } from 'node:path'; export const RUN_DIR = join(process.cwd(), 'runs'); export const started = []; export function startRuns(ids, retestOf, healOf) { started.push({ ids, retestOf, healOf }); return { runs: [{ id: 'TRIAL1' }], unknown: [] }; } export const getRun = () => undefined; export const activeRunCount = () => 0; export const listRuns = () => []; export const sendToIssueMate = () => {}; export const stopRun = () => {};");
+put("mock/runs.mjs", "import { join } from 'node:path'; export const RUN_DIR = join(process.cwd(), 'runs'); export const started = []; export function startRuns(ids, retestOf, healOf) { started.push({ ids, retestOf, healOf }); return { runs: [{ id: 'TRIAL1' }], unknown: [] }; } export const getRun = () => undefined; export const retired = []; export const retireRun = (r) => (retired.push(r.scriptId), false); export const activeRunCount = () => 0; export const listRuns = () => []; export const sendToIssueMate = () => {}; export const stopRun = () => {};");
 put("mock/misc.mjs", "export const scriptsForIssue = () => []; export const logDays = () => []; export const readLogs = () => []; export const timed = (n, f) => f; export const testDb = () => ''; export const writeLog = () => {};");
 const script = (id, steps) => JSON.stringify({ id, title: "ตรวจยอดใบสั่งซื้อ", module: "purchase", lens: "data", severityOnFail: "S3", description: "สั่งงาน: ตรวจ", steps, cleanup: [] });
 put("uat-scripts/ask-heal.json", script("ask-heal", [{ title: "นับใบสั่งซื้อ", do: "db.query", sql: "select count(*) as n from pr_trans where doc_kode = 'x'", expect: [{ col: "n", op: "eq", value: 0 }] }]));
@@ -36,6 +36,7 @@ const fixed = { title: "ตรวจยอดใบสั่งซื้อ", st
 brain.setReply(() => "```json\n" + JSON.stringify(fixed) + "\n```");
 assert.equal(await cmd.healScript(run("R1", "ask-heal"), "psql ผิดพลาด"), "TRIAL1");
 assert.deepEqual(runs.started.at(-1), { ids: ["ask-heal"], retestOf: undefined, healOf: "R1" });
+assert.deepEqual(runs.retired, []); // ซ่อมสำเร็จ → ไม่ปลดสคริปต์
 assert.match(JSON.parse(readFileSync("runs/R1/heal.json", "utf8")).steps[0].sql, /doc_no/);
 assert.match(readFileSync("uat-scripts/ask-heal.json", "utf8"), /doc_kode/);
 assert.match(brain.calls.at(-1).system, /การออกแบบของ SML/);
@@ -45,10 +46,12 @@ brain.setReply(() => JSON.stringify({ title: "x", steps: [{ title: "แก้", 
 assert.equal(await cmd.healScript(run("R2", "ask-heal"), "x"), undefined);
 assert.equal(runs.started.length, n);
 assert.ok(!existsSync("runs/R2/heal.json"));
+assert.deepEqual(runs.retired, ["ask-heal"]); // ซ่อมไม่ได้ → ส่งให้ retireRun ตัดสิน (ปลดเฉพาะ auto-*)
 // 3) สคริปต์เดิมมีขั้นเขียนข้อมูล → ไม่ซ่อม ไม่เรียกสมอง
 const c = brain.calls.length;
 assert.equal(await cmd.healScript(run("R3", "ask-writes"), "x"), undefined);
 assert.equal(brain.calls.length, c);
+assert.deepEqual(runs.retired, ["ask-heal", "ask-writes"]);
 // 4) รอบลองผ่าน → บันทึกทับคลัง
 cmd.promoteHeal({ id: "TRIAL1", healOf: "R1", scriptId: "ask-heal", status: "passed" });
 const lib = JSON.parse(readFileSync("uat-scripts/ask-heal.json", "utf8"));

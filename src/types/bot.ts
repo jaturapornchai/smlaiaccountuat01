@@ -152,10 +152,12 @@ export interface ScriptRun {
   message?: string;
   pid?: number;
   issue?: IssueLink;
-  noIssue?: string; // เหตุผลที่ไม่เปิด issue อัตโนมัติ (สคริปต์พังเอง / สคริปต์ auto-*) ให้คนเห็นบนการ์ดและหน้ารอบ
+  noIssue?: string; // เหตุผลที่ไม่เปิด issue อัตโนมัติ (สคริปต์พังเอง / AI ตรวจว่าสคริปต์ผิด) ให้คนเห็นบนการ์ดและหน้ารอบ
   retestOf?: string; // เลข issue ที่สั่งตรวจซ้ำ
   ai?: boolean; // สคริปต์ที่ AI เขียน (ดู UatScript.ai)
   healOf?: string; // รอบลองสคริปต์ที่ AI ซ่อม: รันจาก runs/<healOf>/heal.json แทนไฟล์ในคลัง (command.ts healScript)
+  retryOf?: string; // รอบที่ตัวรันขัดข้อง/เกินเวลา แล้ว Tester ลองรันใหม่เอง 1 ครั้ง (uat-runs.ts finish)
+  retired?: boolean; // สคริปต์ auto-* ของรอบนี้ถูกปลดออกจากคลัง เพราะ AI ซ่อมไม่ได้หรือซ่อมแล้วยังพัง (uat-runs.ts retireRun)
   nightly?: string; // รอบกลางคืนของวันที่ไทย YYYY-MM-DD ที่สั่งรอบนี้ (ไว้สรุปเช้า)
   liveAt?: string; // เวลาภาพหน้าจอสดล่าสุด (runs/<id>/live.jpg)
 }

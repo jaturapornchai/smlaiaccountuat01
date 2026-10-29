@@ -22,8 +22,8 @@ export async function register() {
   const [{ join }, { pollDeployed }, { listDeployed }, { startRuns, RUN_DIR, rerunStranded }, { getSettings }, { pushActivity }] = await Promise.all([
     import("node:path"), import("./lib/auto-retest"), import("./lib/issuemate"), import("./lib/uat-runs"), import("./lib/swarm-store"), import("./lib/activity"),
   ]);
-  const again = rerunStranded(); // รอบไม่ผ่านที่ค้างโดยไม่มี ticket → รันใหม่เอง (zero-touch)
-  if (again.length) writeLog("server", { event: "rerun-stranded", scripts: again });
+  const { rerun, retired } = rerunStranded(); // รอบไม่ผ่านที่ค้างโดยไม่มี ticket → รันใหม่เอง, auto-* ที่ยังพังเอง → ปลดออกจากคลัง (zero-touch)
+  if (rerun.length || retired.length) writeLog("server", { event: "rerun-stranded", scripts: rerun, retired });
   const deps = {
     list: listDeployed,
     start: startRuns,

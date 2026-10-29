@@ -8,7 +8,7 @@ import { SCRIPT_FORMAT, lintScript, saveScript } from "./mcp";
 import { DESIGN } from "./script-fault";
 import { addEvent, getBotById, getBots, getSettings } from "./swarm-store";
 import { psqlRead } from "./uat-health";
-import { RUN_DIR, getRun, startRuns } from "./uat-runs";
+import { RUN_DIR, getRun, retireRun, startRuns } from "./uat-runs";
 import { SCRIPT_DIR, loadScripts } from "./uat-scripts";
 
 // สั่งงานตรวจ: ผู้ใช้พิมพ์ว่าจะตรวจอะไร → สมอง AI เลือกบอท → แต่ละบอทเขียนสคริปต์ → ตัวรันเดิมต่อ PostgreSQL/เว็บ/API จริง
@@ -303,6 +303,7 @@ ${await realColumns(text0)}`;
   } finally {
     healing.delete(run.scriptId);
   }
+  retireRun(run); // ซ่อมไม่ได้ → สคริปต์ auto-* ปลดออกจากคลังเอง (ask-* คงไว้ให้คนดู)
   return undefined;
 }
 
