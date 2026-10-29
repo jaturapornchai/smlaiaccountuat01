@@ -99,12 +99,12 @@ export interface UatScript {
 
 export type StepStatus = "pending" | "running" | "passed" | "failed" | "skipped";
 
-// ข้อค้นพบที่ไม่ทำให้ขั้นล้ม (ไม่เปิด issue อัตโนมัติ): baseline = ชิ้นในแถวเดียวกันกึ่งกลางเหลื่อมเกิน 1px
+// ข้อค้นพบที่ไม่ทำให้ขั้นล้ม (ไม่เปิด issue อัตโนมัติ): baseline = ชิ้นในแถวเดียวกันกึ่งกลางเหลื่อมเกิน 1px, visual = ภาพต่างจากรอบล่าสุดที่ผ่านเกินเกณฑ์
 export interface Finding {
   severity: Severity;
-  kind: "baseline";
+  kind: "baseline" | "visual";
   text: string;
-  evidence?: string; // ภาพมีกรอบชี้จุด ใน runs/<id>/
+  evidence?: string; // ภาพมีกรอบชี้จุด / ภาพ diff ใน runs/<id>/
 }
 
 export interface StepResult {

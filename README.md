@@ -136,6 +136,8 @@
 | `UAT_PSQL`, `UAT_PLAYWRIGHT` | ตำแหน่ง psql.exe และ Playwright ที่มีในเครื่อง |
 | `UAT_PG_DUMP` | ตำแหน่ง pg_dump สำหรับ `runner/make-test-template.sh` (สร้างแม่แบบ `uat_template` ของ `test_db`) |
 | `UAT_HEADED` | `1` = เปิดหน้าต่าง Chrome ให้เห็น |
+| `UAT_BASELINE_DIR` | ที่เก็บภาพอ้างอิงเทียบหน้าจอ/PDF ว่างไว้ = `baselines/` ที่รากโปรเจกต์ (`baselines/<สคริปต์>/<ชื่อภาพ>.png` + `.json` ตำแหน่งที่ไม่นับ) |
+| `UAT_VISUAL_DIFF_PCT` | เกณฑ์ภาพต่าง (% ของพิกเซลที่นับ) ว่างไว้ = `0.3` |
 | `OLLAMA_API_URL`, `OLLAMA_API_KEY` | สมองของบอท (Ollama Cloud) |
 | `OLLAMA_MAX_CONCURRENT` | คำขอไป Ollama Cloud พร้อมกันสูงสุด ตามแพ็กเกจ (Pro/จ่ายตามใช้ 3, Max 10 — [ollama.com/pricing](https://ollama.com/pricing)) ว่างไว้ = 3 · ที่เกินจะรอคิวในตัวทดสอบเอง |
 | `OLLAMA_MODEL` | รุ่นงานเร็ว (เลือกบอท + `ui.act`) ว่างไว้ = `deepseek-v4.1-flash` |
@@ -193,7 +195,7 @@ pnpm start -p 3050
 node docs/workflow/render.mjs
 ```
 
-ตรวจตัวรันในเครื่องหลังแก้ `runner/run.mjs` (เปิดหน้า HTML ที่จงใจเหลื่อมบน 127.0.0.1 ไม่แตะ uat.smlwork.com/SML ต้องมี Playwright ตาม `UAT_PLAYWRIGHT`) — ผ่านจะพิมพ์ "ผ่านทั้งหมด":
+ตรวจตัวรันในเครื่องหลังแก้ `runner/run.mjs` (เปิดหน้า HTML ที่จงใจเหลื่อม/เปลี่ยนหน้าตาบน 127.0.0.1 ตรวจระนาบและเทียบภาพ 5 รอบ ไม่แตะ uat.smlwork.com/SML ต้องมี Playwright ตาม `UAT_PLAYWRIGHT`) — ผ่านจะพิมพ์ "ผ่านทั้งหมด":
 ```bash
 node runner/selfcheck.mjs
 ```
@@ -241,7 +243,7 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 - Caddy site `uat.smlwork.com` เปิดสาธารณะ (reverse proxy อย่างเดียว) — การกั้นคำสั่งอยู่ในแอป ดูข้อ 8 ใน Workflow
 - เครื่องไม่มี psql: `bin/psql` เรียก psql ในคอนเทนเนอร์ `sml_postgresql`
 - Playwright + Chromium อยู่ `/opt/uat-tester/pw` (`UAT_PLAYWRIGHT`, `PLAYWRIGHT_BROWSERS_PATH`)
-- อัปเดตโค้ด: ส่งไฟล์ขึ้น `/opt/uat-tester` (ไม่ทับ `.env.local` และ `./runs/` ที่ราก — ถ้าใช้ tar ต้องเขียน `--exclude=./runs` ไม่งั้นจะตัด `src/app/api/runs` ทิ้งด้วย) แล้ว `corepack pnpm@10.33.0 install --frozen-lockfile && corepack pnpm@10.33.0 build && systemctl restart uat-tester` (ต้องระบุ pnpm 10.33.0 เพราะ pnpm ที่ corepack ให้มาบนเซิร์ฟเวอร์เป็นรุ่น 12 ซึ่งปฏิเสธ lockfile)
+- อัปเดตโค้ด: ส่งไฟล์ขึ้น `/opt/uat-tester` (ไม่ทับ `.env.local`, `./runs/` และ `./baselines/` ที่ราก — ถ้าใช้ tar ต้องเขียน `--exclude=./runs --exclude=./baselines` ไม่งั้นจะตัด `src/app/api/runs` ทิ้งด้วย และภาพอ้างอิงถูกทับ) แล้ว `corepack pnpm@10.33.0 install --frozen-lockfile && corepack pnpm@10.33.0 build && systemctl restart uat-tester` (ต้องระบุ pnpm 10.33.0 เพราะ pnpm ที่ corepack ให้มาบนเซิร์ฟเวอร์เป็นรุ่น 12 ซึ่งปฏิเสธ lockfile)
 - รีสตาร์ทตอนไม่มีรอบค้างเท่านั้น: เช็ก `GET /api/runs` ว่าไม่มี `running`/`queued` — service ใช้ `KillMode=control-group` รีสตาร์ทแล้วตัวรันที่ค้างถูกฆ่ากลางรอบ (เอกสาร `UAT-*` อาจค้างใน smldemo) · ค่าตั้งหน้าเว็บ/MCP `status settings` อยู่ในหน่วยความจำ รีสตาร์ทแล้วกลับเป็นค่าจาก env (`ISSUEMATE_AUTO`, `UAT_AUTO_SCRIPTS` …) ถ้าปิดส่ง IssueMate อัตโนมัติไว้ชั่วคราวต้องสั่งปิดซ้ำ
 
 ตัวอย่างคำสั่งที่ AI ส่ง (ตรวจซ้ำหลังแก้ issue):
@@ -268,10 +270,10 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 ```
 
 ขั้นที่ใช้ได้:
-- หน้าจอ: `ui.goto`, `ui.demoLogin`, `ui.adminLogin` `{targetPath: "/admin/providers" | "/home"}`, `ui.openMenu`, `ui.click`, `ui.fill`, `ui.select`, `ui.press`, `ui.readText`, `ui.expectText`, `ui.expectVisible`, `ui.expectValue`, `ui.expectUrl`, `ui.expectClean` (ไม่มี HTTP/JS/console/DB error แฝง แล้ววัดระนาบ: ชิ้นในแถวเดียวกัน เช่น label/ช่องกรอก/ปุ่ม/ไอคอน/Badge กึ่งกลางแนวตั้งห่างกันเกิน 1px → ข้อค้นพบ S4 พร้อมภาพมีกรอบชี้จุด ไม่ทำให้ขั้นล้มและไม่เปิด issue อัตโนมัติ ดูใต้ขั้นนั้นในหน้ารอบ/tool `runs`), `ui.screenshot`, `ui.pdf` `{selector, contains[]}` (กดปุ่มบนจอที่ดาวน์โหลด PDF เช่นปุ่มดาวน์โหลดในหน้าพิมพ์ แล้วตรวจข้อความในไฟล์แบบเดียวกับ `report.pdf`)
+- หน้าจอ: `ui.goto`, `ui.demoLogin`, `ui.adminLogin` `{targetPath: "/admin/providers" | "/home"}`, `ui.openMenu`, `ui.click`, `ui.fill`, `ui.select`, `ui.press`, `ui.readText`, `ui.expectText`, `ui.expectVisible`, `ui.expectValue`, `ui.expectUrl`, `ui.expectClean` (ไม่มี HTTP/JS/console/DB error แฝง แล้ววัดระนาบ: ชิ้นในแถวเดียวกัน เช่น label/ช่องกรอก/ปุ่ม/ไอคอน/Badge กึ่งกลางแนวตั้งห่างกันเกิน 1px → ข้อค้นพบ S4 พร้อมภาพมีกรอบชี้จุด ไม่ทำให้ขั้นล้มและไม่เปิด issue อัตโนมัติ ดูรายละเอียดใต้ขั้นนั้นในหน้ารอบ · tool `runs` เห็นแค่จำนวนข้อค้นพบใน detail ของขั้น), `ui.screenshot` (เทียบกับภาพของรอบล่าสุดที่ผ่านของสคริปต์เดียวกัน: ไม่นับข้อความ/ค่าในช่องที่มีตัวเลข เช่นเลขเอกสาร วันที่ ยอด ทั้งของภาพนี้และภาพอ้างอิง · พิกเซลต่าง = สีห่างเกิน 40 จาก 255 · ต่างเกิน `UAT_VISUAL_DIFF_PCT` → ข้อค้นพบ S4 แนบภาพ diff: แดง = ต่าง, ฟ้า = ส่วนที่ไม่นับ · ขนาดภาพไม่เท่ากันก็แจ้ง · ไม่ทำให้ขั้นล้ม), `ui.pdf` `{selector, contains[]}` (กดปุ่มบนจอที่ดาวน์โหลด PDF เช่นปุ่มดาวน์โหลดในหน้าพิมพ์ แล้วตรวจข้อความในไฟล์แบบเดียวกับ `report.pdf`)
 - AI กดเล่นหน้าจอ: `ui.act` `{instruction}` (Stagehand ทำ 1 อย่างตามคำสั่งภาษาไทย), `ui.see` `{expect}` (AI ดูภาพแล้วตัดสินผ่าน/ไม่ผ่าน), `ui.play` `{goal, maxSteps}` (Computer Use: AI ดูจอ คลิก พิมพ์ จนครบเป้าหมาย สิ่งผิดปกติที่ AI เห็น = ขั้นไม่ผ่าน บันทึกเอกสารทดสอบได้โดยใส่ `{{run.tag}}`) · ผลจาก AI ต้องให้คนยืนยันก่อนแก้
 - API: `api.request`
-- รายงาน PDF: `report.pdf` `{body, contains[]}` — ขอ PDF แบบที่ผู้ใช้กดพิมพ์รายงาน (`POST /api/process/report/pdf` ใช้ body เดียวกับ `/api/process/report/run`) แล้วหาทุกค่าใน `contains` จากข้อความในไฟล์ · หลักฐาน = ภาพหน้าแรก + ไฟล์ PDF (ปุ่ม "เปิด PDF รายงาน" ในไทม์ไลน์)
+- รายงาน PDF: `report.pdf` `{body, contains[]}` — ขอ PDF แบบที่ผู้ใช้กดพิมพ์รายงาน (`POST /api/process/report/pdf` ใช้ body เดียวกับ `/api/process/report/run`) แล้วหาทุกค่าใน `contains` จากข้อความในไฟล์ · หลักฐาน = ภาพหน้าแรก + ไฟล์ PDF (ปุ่ม "เปิด PDF รายงาน" ในไทม์ไลน์) · ภาพหน้าแรกเทียบกับรอบล่าสุดที่ผ่านแบบเดียวกับ `ui.screenshot` แต่ใช้เกณฑ์ % อย่างเดียว (ผูกกับชื่อขั้น)
 - ฐานข้อมูล: `db.query` (อ่านอย่างเดียว), `db.exec` (เขียน — ใช้กับข้อมูลที่ขึ้นต้นด้วย UAT) · ใส่ `database` ได้ 3 ฐานทดสอบ (ดูข้อ 9 ใน Workflow)
 - อื่น ๆ: `wait`, `set`
 
@@ -280,6 +282,7 @@ claude mcp add --transport http sml-uat https://uat.smlwork.com/api/mcp --header
 ถ้าไม่ใส่ `lens` ระบบเลือกให้เอง: มีขั้น `db.*` = data, ไม่มี = screen
 
 ## Limitation
+- เทียบภาพ (`ui.screenshot`/PDF): ภาพอ้างอิงเขียนทับทุกรอบที่ผ่าน จึงแจ้งหน้าตาเปลี่ยนแค่รอบแรกที่เห็น (รอบไม่ผ่านไม่เขียนทับ) · PDF ไม่มี DOM จึงไม่ปิดตัวเลข เลขเอกสาร/ยอดที่เปลี่ยนทุกรอบอาศัยเกณฑ์ % · ส่วนที่เปลี่ยนเองแต่ไม่มีตัวเลข (กราฟ canvas, toast, ภาพสุ่ม) ไม่ถูกปิด อาจแจ้งเกิน · ขั้นที่เปลี่ยนชื่อภาพ/ชื่อขั้นเริ่มภาพอ้างอิงใหม่ ภาพเก่าไม่ถูกลบ · ยังไม่ได้ทดสอบเส้นทาง PDF ในเครื่อง Windows (ไม่มี `pdftoppm`)
 - ตรวจระนาบ (`ui.expectClean`) ดูเฉพาะแถวที่สูงไม่เกิน 64px และข้ามกลุ่มที่วางซ้อนบน-ล่าง · ข้อความที่จัดตรงแล้วยังห่างกึ่งกลางช่องกรอก ~0.5px ตามเมตริกฟอนต์ จึงเลื่อน 1px วัดได้ ~1.5px และถูกแจ้ง · ฟอนต์ต่างขนาดในแถวเดียวกันวัดด้วยกึ่งกลาง ไม่ใช่เส้นฐานตัวอักษร · แถวเดิมแจ้งครั้งเดียวต่อรอบ (สูงสุด 8 แถวต่อครั้ง)
 - `report.pdf` ตรวจว่ามีข้อความ ไม่ตรวจตำแหน่งคอลัมน์ · วรรณยุกต์ไทยบางตัวใน PDF ของ ERP เป็นอักษร private-use (U+F70A–F70F) คำไทยจึงหาไม่เจอ ให้ใส่เลขเอกสาร/ตัวเลขใน `contains`
 - `test_db` คัดลอกจากแม่แบบ `uat_template` ไม่ใช่ smldemo สด (smldemo มีคนต่ออยู่ตลอดจึงเป็นแม่แบบตรงๆ ไม่ได้) — อยากได้ข้อมูลล่าสุดให้รัน `sh runner/make-test-template.sh` บนเซิร์ฟเวอร์ (ใช้เวลาหลายนาที) · ฐานละ ~600 MB จึงจำกัด 5 ฐาน · ฐานใหม่จะโผล่ให้เลือกในจอ ERP ได้เมื่อมี provider `uatadmin` (ฐาน `smlerpmainuatadmin`) แล้วเท่านั้น ถ้ายังไม่มีใช้ได้จากขั้น `db.*` อย่างเดียว
